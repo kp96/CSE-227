@@ -1,0 +1,23 @@
+Index: mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp,v
+retrieving revision 1.105
+diff -u -r1.105 nsNSSIOLayer.cpp
+--- mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp	4 Apr 2006 13:14:40 -0000	1.105
++++ mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp	12 Apr 2006 09:30:59 -0000
+@@ -1132,8 +1132,13 @@
+ {
+   nsNSSShutDownPreventionLock locker;
+ 
+-  if (out_flags)
+-    *out_flags = 0;
++  if (!out_flags)
++  {
++    NS_WARNING("nsSSLIOLayerPoll called with null out_flags");
++    return 0;
++  }
++
++  *out_flags = 0;
+ 
+   if (!fd)
+   {

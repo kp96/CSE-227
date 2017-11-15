@@ -1,0 +1,112 @@
+Index: suite/common/utilityOverlay.js
+===================================================================
+RCS file: /cvsroot/mozilla/suite/common/utilityOverlay.js,v
+retrieving revision 1.97
+diff -u -p -8 -r1.97 utilityOverlay.js
+--- suite/common/utilityOverlay.js	6 Nov 2006 16:19:11 -0000	1.97
++++ suite/common/utilityOverlay.js	18 Feb 2007 06:33:07 -0000
+@@ -451,37 +451,42 @@ function gatherTextUnder ( root ) 
+   var node = root.firstChild;
+   var depth = 1;
+   while ( node && depth > 0 ) {
+     // See if this node is text.
+     if ( node.nodeType == Node.TEXT_NODE ) {
+       // Add this text to our collection.
+       text += " " + node.data;
+     } else if ( node instanceof HTMLImageElement ) {
+-      // If it has an alt= attribute, use that.
++      // If it has an alt= attribute, add that.
+       var altText = node.getAttribute( "alt" );
+       if ( altText && altText != "" ) {
+-        text = altText;
+-        break;
++        text += " " + altText;
+       }
+     }
+     // Find next node to test.
+     // First, see if this node has children.
+     if ( node.hasChildNodes() ) {
+       // Go to first child.
+       node = node.firstChild;
+       depth++;
+     } else {
+       // No children, try next sibling.
+       if ( node.nextSibling ) {
+         node = node.nextSibling;
+       } else {
+-        // Last resort is our next oldest uncle/aunt.
+-        node = node.parentNode.nextSibling;
+-        depth--;
++        // Last resort is a sibling of an ancestor.
++        while ( node && depth > 0 ) {
++          node = node.parentNode;
++          depth--;
++          if ( node.nextSibling ) {
++            node = node.nextSibling;
++            break;
++          }
++        }
+       }
+     }
+   }
+   // Strip leading whitespace.
+   text = text.replace( /^\s+/, "" );
+   // Strip trailing whitespace.
+   text = text.replace( /\s+$/, "" );
+   // Compress remaining whitespace.
+Index: xpfe/communicator/resources/content/utilityOverlay.js
+===================================================================
+RCS file: /cvsroot/mozilla/xpfe/communicator/resources/content/utilityOverlay.js,v
+retrieving revision 1.94
+diff -u -p -8 -r1.94 utilityOverlay.js
+--- xpfe/communicator/resources/content/utilityOverlay.js	22 May 2006 14:52:00 -0000	1.94
++++ xpfe/communicator/resources/content/utilityOverlay.js	18 Feb 2007 06:33:19 -0000
+@@ -446,37 +446,42 @@ function gatherTextUnder ( root ) 
+   var node = root.firstChild;
+   var depth = 1;
+   while ( node && depth > 0 ) {
+     // See if this node is text.
+     if ( node.nodeType == Node.TEXT_NODE ) {
+       // Add this text to our collection.
+       text += " " + node.data;
+     } else if ( node instanceof HTMLImageElement ) {
+-      // If it has an alt= attribute, use that.
++      // If it has an alt= attribute, add that.
+       var altText = node.getAttribute( "alt" );
+       if ( altText && altText != "" ) {
+-        text = altText;
+-        break;
++        text += " " + altText;
+       }
+     }
+     // Find next node to test.
+     // First, see if this node has children.
+     if ( node.hasChildNodes() ) {
+       // Go to first child.
+       node = node.firstChild;
+       depth++;
+     } else {
+       // No children, try next sibling.
+       if ( node.nextSibling ) {
+         node = node.nextSibling;
+       } else {
+-        // Last resort is our next oldest uncle/aunt.
+-        node = node.parentNode.nextSibling;
+-        depth--;
++        // Last resort is a sibling of an ancestor
++        while ( node && depth > 0 ) {
++          node = node.parentNode;
++          depth--;
++          if ( node.nextSibling ) {
++            node = node.nextSibling;
++            break;
++          }
++        }
+       }
+     }
+   }
+   // Strip leading whitespace.
+   text = text.replace( /^\s+/, "" );
+   // Strip trailing whitespace.
+   text = text.replace( /\s+$/, "" );
+   // Compress remaining whitespace.

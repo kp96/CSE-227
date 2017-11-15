@@ -1,0 +1,72 @@
+# HG changeset patch
+# Parent 34f56d27f2b97ab3fe31c8b141a59a50960709f6
+# User Harsh Pathak <hpathak@mozilla.com>
+bug 550052 - add length check when decoding key usage bit strings. r=dkeeler
+
+diff -r 34f56d27f2b9 security/manager/ssl/src/nsNSSCertHelper.cpp
+--- a/security/manager/ssl/src/nsNSSCertHelper.cpp	Tue Jun 10 10:40:47 2014 -0700
++++ b/security/manager/ssl/src/nsNSSCertHelper.cpp	Tue Jun 10 11:50:56 2014 -0700
+@@ -648,17 +648,20 @@ ProcessKeyUsageExtension(SECItem *extDat
+   decoded.data = nullptr;
+   decoded.len  = 0;
+   if (SECSuccess != SEC_ASN1DecodeItem(nullptr, &decoded, 
+ 				SEC_ASN1_GET(SEC_BitStringTemplate), extData)) {
+     nssComponent->GetPIPNSSBundleString("CertDumpExtensionFailure", local);
+     text.Append(local.get());
+     return NS_OK;
+   }
+-  unsigned char keyUsage = decoded.data[0];
++  unsigned char keyUsage = 0;
++  if (decoded.len) {
++    keyUsage = decoded.data[0];
++  }
+   nsMemory::Free(decoded.data);  
+   if (keyUsage & KU_DIGITAL_SIGNATURE) {
+     nssComponent->GetPIPNSSBundleString("CertDumpKUSign", local);
+     text.Append(local.get());
+     text.AppendLiteral(SEPARATOR);
+   }
+   if (keyUsage & KU_NON_REPUDIATION) {
+     nssComponent->GetPIPNSSBundleString("CertDumpKUNonRep", local);
+diff -r 34f56d27f2b9 security/manager/ssl/src/nsNSSCertificate.cpp
+--- a/security/manager/ssl/src/nsNSSCertificate.cpp	Tue Jun 10 10:40:47 2014 -0700
++++ b/security/manager/ssl/src/nsNSSCertificate.cpp	Tue Jun 10 11:50:56 2014 -0700
+@@ -253,33 +253,37 @@ nsNSSCertificate::MarkForPermDeletion()
+ nsresult
+ GetKeyUsagesString(CERTCertificate* cert, nsINSSComponent* nssComponent,
+                    nsString& text)
+ {
+   text.Truncate();
+ 
+   SECItem keyUsageItem;
+   keyUsageItem.data = nullptr;
++  keyUsageItem.len = 0;
+ 
+   SECStatus srv;
+ 
+   // There is no extension, v1 or v2 certificate
+   if (!cert->extensions)
+     return NS_OK;
+ 
+ 
+   srv = CERT_FindKeyUsageExtension(cert, &keyUsageItem);
+   if (srv == SECFailure) {
+     if (PORT_GetError () == SEC_ERROR_EXTENSION_NOT_FOUND)
+       return NS_OK;
+     else
+       return NS_ERROR_FAILURE;
+   }
++  unsigned char keyUsage = 0;
++  if (keyUsageItem.len) {
++    keyUsage = keyUsageItem.data[0];
++  }
+ 
+-  unsigned char keyUsage = keyUsageItem.data[0];
+   nsAutoString local;
+   nsresult rv;
+   const char16_t comma = ',';
+ 
+   if (keyUsage & KU_DIGITAL_SIGNATURE) {
+     rv = nssComponent->GetPIPNSSBundleString("CertDumpKUSign", local);
+     if (NS_SUCCEEDED(rv)) {
+       if (!text.IsEmpty()) text.Append(comma);

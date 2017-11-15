@@ -1,0 +1,179 @@
+Index: caps/include/nsPrincipal.h
+===================================================================
+RCS file: /cvsroot/mozilla/caps/include/nsPrincipal.h,v
+retrieving revision 1.19
+diff -u -p -d -8 -r1.19 nsPrincipal.h
+--- caps/include/nsPrincipal.h	23 Apr 2007 14:21:53 -0000	1.19
++++ caps/include/nsPrincipal.h	12 May 2007 04:53:05 -0000
+@@ -136,16 +136,18 @@ protected:
+ 
+   DomainPolicy* mSecurityPolicy;
+ 
+   nsCOMPtr<nsIURI> mCodebase;
+   nsCOMPtr<nsIURI> mDomain;
+   nsCOMPtr<nsIURI> mOrigin;
+   PRPackedBool mTrusted;
+   PRPackedBool mInitialized;
++  PRPackedBool mCodebaseImmutable;
++  PRPackedBool mDomainImmutable;
+ };
+ 
+ 
+ #define NS_PRINCIPAL_CLASSNAME  "principal"
+ #define NS_PRINCIPAL_CONTRACTID "@mozilla.org/principal;1"
+ #define NS_PRINCIPAL_CID \
+   { 0x36102b6b, 0x7b62, 0x451a, \
+     { 0xa1, 0xc8, 0xa0, 0xd4, 0x56, 0xc9, 0x2d, 0xc5 }}
+Index: caps/src/nsPrincipal.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/caps/src/nsPrincipal.cpp,v
+retrieving revision 1.45
+diff -u -p -d -8 -r1.45 nsPrincipal.cpp
+--- caps/src/nsPrincipal.cpp	9 Feb 2007 04:52:44 -0000	1.45
++++ caps/src/nsPrincipal.cpp	12 May 2007 05:09:38 -0000
+@@ -52,16 +52,25 @@
+ #include "nsIObjectInputStream.h"
+ #include "nsIObjectOutputStream.h"
+ #include "nsIPrefBranch.h"
+ #include "nsIPrefService.h"
+ #include "nsIClassInfoImpl.h"
+ 
+ #include "nsPrincipal.h"
+ 
++static PRBool URIIsImmutable(nsIURI* aURI)
++{
++  nsCOMPtr<nsIMutable> mutableObj(do_QueryInterface(aURI));
++  PRBool isMutable;
++  return
++    mutableObj &&
++    NS_SUCCEEDED(mutableObj->GetMutable(&isMutable)) &&
++    !isMutable;                               
++}
+ 
+ // Static member variables
+ PRInt32 nsPrincipal::sCapabilitiesOrdinal = 0;
+ const char nsPrincipal::sInvalid[] = "Invalid";
+ 
+ 
+ NS_IMPL_QUERY_INTERFACE2_CI(nsPrincipal,
+                             nsIPrincipal,
+@@ -92,33 +101,36 @@ nsPrincipal::Release()
+ 
+   return count;
+ }
+ 
+ nsPrincipal::nsPrincipal()
+   : mCapabilities(7),
+     mSecurityPolicy(nsnull),
+     mTrusted(PR_FALSE),
+-    mInitialized(PR_FALSE)
++    mInitialized(PR_FALSE),
++    mCodebaseImmutable(PR_FALSE),
++    mDomainImmutable(PR_FALSE)
+ {
+ }
+ 
+ nsresult
+ nsPrincipal::Init(const nsACString& aCertFingerprint,
+                   const nsACString& aSubjectName,
+                   const nsACString& aPrettyName,
+                   nsISupports* aCert,
+                   nsIURI *aCodebase)
+ {
+   NS_ENSURE_STATE(!mInitialized);
+   NS_ENSURE_ARG(!aCertFingerprint.IsEmpty() || aCodebase); // better have one of these.
+ 
+   mInitialized = PR_TRUE;
+ 
+-  mCodebase = aCodebase;
++  mCodebase = NS_TryToMakeImmutable(aCodebase);
++  mCodebaseImmutable = URIIsImmutable(mCodebase);
+ 
+   // Invalidate our cached origin
+   mOrigin = nsnull;
+ 
+   nsresult rv;
+   if (!aCertFingerprint.IsEmpty()) {
+     rv = SetCertificate(aCertFingerprint, aSubjectName, aPrettyName, aCert);
+     if (NS_SUCCEEDED(rv)) {
+@@ -496,23 +508,29 @@ nsPrincipal::GetHasCertificate(PRBool* a
+ NS_IMETHODIMP
+ nsPrincipal::GetURI(nsIURI** aURI)
+ {
+   if (!mCodebase) {
+     *aURI = nsnull;
+     return NS_OK;
+   }
+ 
++  if (mCodebaseImmutable) {
++    NS_ADDREF(*aURI = mCodebase);
++    return NS_OK;
++  }
++
+   return NS_EnsureSafeToReturn(mCodebase, aURI);
+ }
+ 
+ void
+ nsPrincipal::SetURI(nsIURI* aURI)
+ {
+   mCodebase = NS_TryToMakeImmutable(aURI);
++  mCodebaseImmutable = URIIsImmutable(mCodebase);
+ 
+   // Invalidate our cached origin
+   mOrigin = nsnull;
+ }
+ 
+ 
+ nsresult
+ nsPrincipal::SetCertificate(const nsACString& aFingerprint,
+@@ -597,23 +615,30 @@ nsPrincipal::GetHashValue(PRUint32* aVal
+ NS_IMETHODIMP
+ nsPrincipal::GetDomain(nsIURI** aDomain)
+ {
+   if (!mDomain) {
+     *aDomain = nsnull;
+     return NS_OK;
+   }
+ 
++  if (mDomainImmutable) {
++    NS_ADDREF(*aDomain = mDomain);
++    return NS_OK;
++  }
++
+   return NS_EnsureSafeToReturn(mDomain, aDomain);
+ }
+ 
+ NS_IMETHODIMP
+ nsPrincipal::SetDomain(nsIURI* aDomain)
+ {
+   mDomain = NS_TryToMakeImmutable(aDomain);
++  mDomainImmutable = URIIsImmutable(mDomain);
++  
+   // Domain has changed, forget cached security policy
+   SetSecurityPolicy(nsnull);
+ 
+   // Invalidate our cached origin
+   mOrigin = nsnull;
+ 
+   return NS_OK;
+ }
+@@ -647,16 +672,19 @@ nsPrincipal::InitFromPersistent(const ch
+   }
+   else {
+     rv = NS_NewURI(getter_AddRefs(mCodebase), aToken, nsnull);
+     if (NS_FAILED(rv)) {
+       NS_ERROR("Malformed URI in capability.principal preference.");
+       return rv;
+     }
+ 
++    NS_TryToSetImmutable(mCodebase);
++    mCodebaseImmutable = URIIsImmutable(mCodebase);
++
+     mTrusted = aTrusted;
+ 
+     // Invalidate our cached origin
+     mOrigin = nsnull;
+   }
+ 
+   rv = mJSPrincipals.Init(this, aToken.get());
+   NS_ENSURE_SUCCESS(rv, rv);

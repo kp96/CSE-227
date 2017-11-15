@@ -1,0 +1,67 @@
+Index: nsNSSComponent.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSComponent.cpp,v
+retrieving revision 1.165
+diff -p -u -8 -u -r1.165 nsNSSComponent.cpp
+--- nsNSSComponent.cpp	12 Apr 2008 04:47:24 -0000	1.165
++++ nsNSSComponent.cpp	20 Jun 2008 17:13:42 -0000
+@@ -1946,17 +1946,16 @@ nsNSSComponent::RandomUpdate(void *entro
+ 
+ #define PROFILE_CHANGE_NET_TEARDOWN_TOPIC "profile-change-net-teardown"
+ #define PROFILE_CHANGE_NET_RESTORE_TOPIC "profile-change-net-restore"
+ #define PROFILE_APPROVE_CHANGE_TOPIC "profile-approve-change"
+ #define PROFILE_CHANGE_TEARDOWN_TOPIC "profile-change-teardown"
+ #define PROFILE_CHANGE_TEARDOWN_VETO_TOPIC "profile-change-teardown-veto"
+ #define PROFILE_BEFORE_CHANGE_TOPIC "profile-before-change"
+ #define PROFILE_AFTER_CHANGE_TOPIC "profile-after-change"
+-#define SESSION_LOGOUT_TOPIC "session-logout"
+ 
+ NS_IMETHODIMP
+ nsNSSComponent::Observe(nsISupports *aSubject, const char *aTopic, 
+                         const PRUnichar *someData)
+ {
+   if (nsCRT::strcmp(aTopic, PROFILE_APPROVE_CHANGE_TOPIC) == 0) {
+     DoProfileApproveChange(aSubject);
+   }
+@@ -2033,22 +2032,16 @@ nsNSSComponent::Observe(nsISupports *aSu
+     if (ec) {
+       nsCOMPtr<nsIBufEntropyCollector> bec
+         = do_QueryInterface(ec);
+       if (bec) {
+         bec->DontForward();
+       }
+     }
+   }
+-  else if ((nsCRT::strcmp(aTopic, SESSION_LOGOUT_TOPIC) == 0) && mNSSInitialized) {
+-    nsNSSShutDownPreventionLock locker;
+-    PK11_LogoutAll();
+-    SSL_ClearSessionCache();
+-    LogoutAuthenticatedPK11();
+-  }
+   else if (nsCRT::strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID) == 0) { 
+     nsNSSShutDownPreventionLock locker;
+     PRBool clearSessionCache = PR_FALSE;
+     PRBool enabled;
+     NS_ConvertUTF16toUTF8  prefName(someData);
+ 
+     if (prefName.Equals("security.enable_ssl2")) {
+       mPrefBranch->GetBoolPref("security.enable_ssl2", &enabled);
+@@ -2171,17 +2164,16 @@ nsNSSComponent::RegisterObservers()
+ 
+     observerService->AddObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID, PR_FALSE);
+ 
+     observerService->AddObserver(this, PROFILE_APPROVE_CHANGE_TOPIC, PR_FALSE);
+     observerService->AddObserver(this, PROFILE_CHANGE_TEARDOWN_TOPIC, PR_FALSE);
+     observerService->AddObserver(this, PROFILE_CHANGE_TEARDOWN_VETO_TOPIC, PR_FALSE);
+     observerService->AddObserver(this, PROFILE_BEFORE_CHANGE_TOPIC, PR_FALSE);
+     observerService->AddObserver(this, PROFILE_AFTER_CHANGE_TOPIC, PR_FALSE);
+-    observerService->AddObserver(this, SESSION_LOGOUT_TOPIC, PR_FALSE);
+     observerService->AddObserver(this, PROFILE_CHANGE_NET_TEARDOWN_TOPIC, PR_FALSE);
+     observerService->AddObserver(this, PROFILE_CHANGE_NET_RESTORE_TOPIC, PR_FALSE);
+   }
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsNSSComponent::RememberCert(CERTCertificate *cert)
+

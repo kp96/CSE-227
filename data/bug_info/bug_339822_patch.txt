@@ -1,0 +1,106 @@
+Index: caps/src/nsPrincipal.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/caps/src/nsPrincipal.cpp,v
+retrieving revision 1.42
+diff -u -p -d -8 -r1.42 nsPrincipal.cpp
+--- caps/src/nsPrincipal.cpp	12 May 2006 00:05:40 -0000	1.42
++++ caps/src/nsPrincipal.cpp	31 May 2006 17:13:59 -0000
+@@ -522,25 +522,28 @@ nsPrincipal::GetHasCertificate(PRBool* a
+   *aResult = (mCert != nsnull);
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsPrincipal::GetURI(nsIURI** aURI)
+ {
+-  NS_IF_ADDREF(*aURI = mCodebase);
++  if (!mCodebase) {
++    *aURI = nsnull;
++    return NS_OK;
++  }
+ 
+-  return NS_OK;
++  return NS_EnsureSafeToReturn(mCodebase, aURI);
+ }
+ 
+ void
+ nsPrincipal::SetURI(nsIURI* aURI)
+ {
+-  mCodebase = aURI;
++  mCodebase = NS_TryToMakeImmutable(aURI);
+ 
+   // Invalidate our cached origin
+   mOrigin = nsnull;
+ }
+ 
+ 
+ nsresult
+ nsPrincipal::SetCertificate(const nsACString& aFingerprint,
+@@ -620,25 +623,28 @@ nsPrincipal::GetHashValue(PRUint32* aVal
+   }
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsPrincipal::GetDomain(nsIURI** aDomain)
+ {
+-  NS_IF_ADDREF(*aDomain = mDomain);
++  if (!mDomain) {
++    *aDomain = nsnull;
++    return NS_OK;
++  }
+ 
+-  return NS_OK;
++  return NS_EnsureSafeToReturn(mDomain, aDomain);
+ }
+ 
+ NS_IMETHODIMP
+ nsPrincipal::SetDomain(nsIURI* aDomain)
+ {
+-  mDomain = aDomain;
++  mDomain = NS_TryToMakeImmutable(aDomain);
+   // Domain has changed, forget cached security policy
+   SetSecurityPolicy(nsnull);
+ 
+   // Invalidate our cached origin
+   mOrigin = nsnull;
+ 
+   return NS_OK;
+ }
+Index: caps/src/nsNullPrincipal.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/caps/src/nsNullPrincipal.cpp,v
+retrieving revision 1.2
+diff -u -p -d -8 -r1.2 nsNullPrincipal.cpp
+--- caps/src/nsNullPrincipal.cpp	11 May 2006 16:06:35 -0000	1.2
++++ caps/src/nsNullPrincipal.cpp	31 May 2006 16:06:03 -0000
+@@ -243,25 +243,23 @@ nsNullPrincipal::DisableCapability(const
+   // Just a no-op.  They're all disabled anyway.
+   *aAnnotation = nsnull;
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP 
+ nsNullPrincipal::GetURI(nsIURI** aURI)
+ {
+-  NS_ADDREF(*aURI = mURI);
+-  return NS_OK;
++  return NS_EnsureSafeToReturn(mURI, aURI);
+ }
+ 
+ NS_IMETHODIMP
+ nsNullPrincipal::GetDomain(nsIURI** aDomain)
+ {
+-  NS_ADDREF(*aDomain = mURI);
+-  return NS_OK;
++  return NS_EnsureSafeToReturn(mURI, aDomain);
+ }
+ 
+ NS_IMETHODIMP
+ nsNullPrincipal::SetDomain(nsIURI* aDomain)
+ {
+   // I think the right thing to do here is to just throw...  Silently failing
+   // seems counterproductive.
+   return NS_ERROR_NOT_AVAILABLE;

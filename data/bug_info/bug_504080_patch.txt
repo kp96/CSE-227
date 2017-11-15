@@ -1,0 +1,4281 @@
+Index: mozilla/dbm/include/mcom_db.h
+===================================================================
+RCS file: /cvsroot/mozilla/dbm/include/mcom_db.h,v
+retrieving revision 3.43
+retrieving revision 3.44
+diff -u -u -r3.43 -r3.44
+--- mozilla/dbm/include/mcom_db.h	27 Nov 2008 14:57:17 -0000	3.43
++++ mozilla/dbm/include/mcom_db.h	4 Jun 2009 23:18:50 -0000	3.44
+@@ -392,11 +392,8 @@
+ #endif
+ 
+ PR_BEGIN_EXTERN_C
+-#if defined(__WATCOMC__) || defined(__WATCOM_CPLUSPLUS__)
++
+ extern DB *
+-#else
+-PR_EXTERN(DB *)
+-#endif
+ dbopen (const char *, int, int, DBTYPE, const void *);
+ 
+ /* set or unset a global lock flag to disable the
+Index: mozilla/dbm/src/db.c
+===================================================================
+RCS file: /cvsroot/mozilla/dbm/src/db.c,v
+retrieving revision 3.5
+retrieving revision 3.6
+diff -u -u -r3.5 -r3.6
+--- mozilla/dbm/src/db.c	26 Feb 2009 23:22:10 -0000	3.5
++++ mozilla/dbm/src/db.c	4 Jun 2009 23:19:31 -0000	3.6
+@@ -64,11 +64,7 @@
+ 		all_databases_locked_closed = 0;
+ }
+ 
+-#if defined(__WATCOMC__) || defined(__WATCOM_CPLUSPLUS__)
+ DB *
+-#else
+-PR_IMPLEMENT(DB *)
+-#endif
+ dbopen(const char *fname, int flags,int mode, DBTYPE type, const void *openinfo)
+ {
+ 
+Index: mozilla/dbm/src/hash.c
+===================================================================
+RCS file: /cvsroot/mozilla/dbm/src/hash.c,v
+retrieving revision 3.25
+retrieving revision 3.26
+diff -u -u -r3.25 -r3.26
+--- mozilla/dbm/src/hash.c	26 Feb 2009 23:22:10 -0000	3.25
++++ mozilla/dbm/src/hash.c	10 Jun 2009 00:42:15 -0000	3.26
+@@ -339,7 +339,7 @@
+ 		if (stat(file, &statbuf))
+ 			return (NULL);
+ 
+-#if !defined(_WIN32) && !defined(_WINDOWS) && !defined(macintosh) && !defined(VMS) && !defined(XP_OS2)
++#if !defined(_WIN32) && !defined(_WINDOWS) && !defined(macintosh) && !defined(XP_OS2)
+ #if defined(__QNX__) && !defined(__QNXNTO__)
+ 		hashp->BSIZE = 512; /* preferred blk size on qnx4 */
+ #else
+Index: mozilla/dbm/src/mktemp.c
+===================================================================
+RCS file: /cvsroot/mozilla/dbm/src/mktemp.c,v
+retrieving revision 3.8
+retrieving revision 3.9
+diff -u -u -r3.8 -r3.9
+--- mozilla/dbm/src/mktemp.c	26 Feb 2009 23:22:10 -0000	3.8
++++ mozilla/dbm/src/mktemp.c	4 Jun 2009 23:19:31 -0000	3.9
+@@ -78,11 +78,13 @@
+ 	return (_gettemp(path, &fd, extraFlags) ? fd : -1);
+ }
+ 
++#ifdef WINCE /* otherwise, use the one in libc */
+ char *
+ mktemp(char *path)
+ {
+ 	return(_gettemp(path, (int *)NULL, 0) ? path : (char *)NULL);
+ }
++#endif
+ 
+ /* NB: This routine modifies its input string, and does not always restore it.
+ ** returns 1 on success, 0 on failure.
+Index: mozilla/security/coreconf/HP-UX.mk
+===================================================================
+RCS file: /cvsroot/mozilla/security/coreconf/HP-UX.mk,v
+retrieving revision 1.11
+retrieving revision 1.12
+diff -u -u -r1.11 -r1.12
+--- mozilla/security/coreconf/HP-UX.mk	15 Nov 2005 18:19:17 -0000	1.11
++++ mozilla/security/coreconf/HP-UX.mk	11 Jun 2009 00:55:32 -0000	1.12
+@@ -76,7 +76,7 @@
+ 
+ LDFLAGS			= -z -Wl,+s
+ 
+-MKSHLIB			= $(LD) $(DSO_LDOPTS)
++MKSHLIB			= $(LD) $(DSO_LDOPTS) $(RPATH)
+ ifdef MAPFILE
+ MKSHLIB += -c $(MAPFILE)
+ endif
+@@ -84,8 +84,8 @@
+          sed -e 's; DATA ;;' -e 's,;;,,' -e 's,;.*,,' -e 's,^,+e ,' > $@
+ 
+ DSO_LDOPTS		= -b +h $(notdir $@)
+-ifeq ($(OS_TEST),ia64)
+-	DSO_LDOPTS	+= +b '$$ORIGIN'
++ifeq ($(USE_64), 1)
++RPATH   = +b '$$ORIGIN'
+ endif
+ DSO_LDFLAGS		=
+ 
+Index: mozilla/security/coreconf/Linux.mk
+===================================================================
+RCS file: /cvsroot/mozilla/security/coreconf/Linux.mk,v
+retrieving revision 1.35
+retrieving revision 1.39
+diff -u -u -r1.35 -r1.39
+--- mozilla/security/coreconf/Linux.mk	5 Sep 2008 23:17:23 -0000	1.35
++++ mozilla/security/coreconf/Linux.mk	15 Jun 2009 21:09:55 -0000	1.39
+@@ -52,10 +52,6 @@
+ 
+ DEFAULT_COMPILER = gcc
+ 
+-ifeq ($(OS_TEST),m68k)
+-	OS_REL_CFLAGS	= -DLINUX1_2 -D_XOPEN_SOURCE
+-	CPU_ARCH	= m68k
+-else
+ ifeq ($(OS_TEST),ppc64)
+ 	OS_REL_CFLAGS	= -DLINUX1_2 -D_XOPEN_SOURCE
+ 	CPU_ARCH	= ppc
+@@ -63,18 +59,10 @@
+ 	ARCHFLAG	= -m64
+ endif
+ else
+-ifeq ($(OS_TEST),ppc)
+-	OS_REL_CFLAGS	= -DLINUX1_2 -D_XOPEN_SOURCE
+-	CPU_ARCH	= ppc
+-else
+ ifeq ($(OS_TEST),alpha)
+         OS_REL_CFLAGS   = -D_ALPHA_ -DLINUX1_2 -D_XOPEN_SOURCE
+ 	CPU_ARCH	= alpha
+ else
+-ifeq ($(OS_TEST),ia64)
+-	OS_REL_CFLAGS	= -DLINUX1_2 -D_XOPEN_SOURCE
+-	CPU_ARCH	= ia64
+-else
+ ifeq ($(OS_TEST),x86_64)
+ ifeq ($(USE_64),1)
+ 	OS_REL_CFLAGS	= -DLINUX1_2 -D_XOPEN_SOURCE
+@@ -85,10 +73,6 @@
+ 	ARCHFLAG	= -m32
+ endif
+ else
+-ifeq ($(OS_TEST),sparc)
+-	OS_REL_CFLAGS   = -DLINUX1_2 -D_XOPEN_SOURCE
+-	CPU_ARCH        = sparc
+-else
+ ifeq ($(OS_TEST),sparc64)
+ 	OS_REL_CFLAGS   = -DLINUX1_2 -D_XOPEN_SOURCE
+ 	CPU_ARCH        = sparc
+@@ -97,30 +81,19 @@
+ 	OS_REL_CFLAGS   = -DLINUX1_2 -D_XOPEN_SOURCE
+ 	CPU_ARCH        = arm
+ else
+-ifeq ($(OS_TEST),parisc)
+-	OS_REL_CFLAGS   = -DLINUX1_2 -D_XOPEN_SOURCE
+-	CPU_ARCH        = hppa
+-else
+-ifeq ($(OS_TEST),parisc64)
++ifeq (,$(filter-out parisc%,$(OS_TEST)))
+ 	OS_REL_CFLAGS   = -DLINUX1_2 -D_XOPEN_SOURCE
+ 	CPU_ARCH        = hppa
+ else
+-ifeq ($(OS_TEST),s390)
+-	OS_REL_CFLAGS   = -DLINUX1_2 -D_XOPEN_SOURCE
+-	CPU_ARCH        = s390
+-else
+-ifeq ($(OS_TEST),s390x)
+-	OS_REL_CFLAGS   = -DLINUX1_2 -D_XOPEN_SOURCE
+-	CPU_ARCH        = s390x
+-else
+-ifeq ($(OS_TEST),mips)
+-	OS_REL_CFLAGS   = -DLINUX1_2 -D_XOPEN_SOURCE
+-	CPU_ARCH        = mips
+-else
+ ifeq (,$(filter-out i%86,$(OS_TEST)))
+ 	OS_REL_CFLAGS	= -DLINUX1_2 -Di386 -D_XOPEN_SOURCE
+ 	CPU_ARCH	= x86
+ else
++ifeq ($(OS_TEST),sh4a)
++	OS_REL_CFLAGS   = -DLINUX1_2 -D_XOPEN_SOURCE
++	CPU_ARCH        = sh4
++else
++# $(OS_TEST) == m68k, ppc, ia64, sparc, s390, s390x, mips, sh3, sh4
+ 	OS_REL_CFLAGS   = -DLINUX1_2 -D_XOPEN_SOURCE
+ 	CPU_ARCH	= $(OS_TEST)
+ endif
+@@ -131,20 +104,13 @@
+ endif
+ endif
+ endif
+-endif
+-endif
+-endif
+-endif
+-endif
+-endif
+-endif
+ 
+ 
+ LIBC_TAG		= _glibc
+ 
+ ifeq ($(OS_RELEASE),2.0)
+ 	OS_REL_CFLAGS	+= -DLINUX2_0
+-	MKSHLIB		= $(CC) -shared -Wl,-soname -Wl,$(@:$(OBJDIR)/%.so=%.so)
++	MKSHLIB		= $(CC) -shared -Wl,-soname -Wl,$(@:$(OBJDIR)/%.so=%.so) $(RPATH)
+ 	ifdef MAPFILE
+ 		MKSHLIB += -Wl,--version-script,$(MAPFILE)
+ 	endif
+@@ -182,9 +148,20 @@
+ G++INCLUDES		= -I/usr/include/g++
+ 
+ #
+-# Always set CPU_TAG on Linux, OpenVMS, WINCE.
++# Always set CPU_TAG on Linux, WINCE.
+ #
+ CPU_TAG = _$(CPU_ARCH)
+ 
+ USE_SYSTEM_ZLIB = 1
+ ZLIB_LIBS = -lz
++
++# The -rpath '$$ORIGIN' linker option instructs this library to search for its
++# dependencies in the same directory where it resides.
++ifeq ($(BUILD_SUN_PKG), 1)
++ifeq ($(USE_64), 1)
++RPATH = -Wl,-rpath,'$$ORIGIN:/opt/sun/private/lib64:/opt/sun/private/lib'
++else
++RPATH = -Wl,-rpath,'$$ORIGIN:/opt/sun/private/lib'
++endif
++endif
++
+Index: mozilla/security/coreconf/Linux2.1.mk
+===================================================================
+RCS file: /cvsroot/mozilla/security/coreconf/Linux2.1.mk,v
+retrieving revision 1.6
+retrieving revision 1.7
+diff -u -u -r1.6 -r1.7
+--- mozilla/security/coreconf/Linux2.1.mk	16 Sep 2005 17:09:23 -0000	1.6
++++ mozilla/security/coreconf/Linux2.1.mk	11 Jun 2009 00:55:32 -0000	1.7
+@@ -38,7 +38,7 @@
+ include $(CORE_DEPTH)/coreconf/Linux.mk
+ ifeq ($(OS_RELEASE),2.1)
+         OS_REL_CFLAGS   += -DLINUX2_1
+-        MKSHLIB         = $(CC) $(DSO_LDOPTS) -Wl,-soname -Wl,$(@:$(OBJDIR)/%.so=%.so)
++        MKSHLIB         = $(CC) $(DSO_LDOPTS) -Wl,-soname -Wl,$(@:$(OBJDIR)/%.so=%.so) $(RPATH)
+ 	ifdef MAPFILE
+ 		MKSHLIB += -Wl,--version-script,$(MAPFILE)
+ 	endif
+Index: mozilla/security/coreconf/Linux2.2.mk
+===================================================================
+RCS file: /cvsroot/mozilla/security/coreconf/Linux2.2.mk,v
+retrieving revision 1.6
+retrieving revision 1.7
+diff -u -u -r1.6 -r1.7
+--- mozilla/security/coreconf/Linux2.2.mk	16 Sep 2005 17:09:23 -0000	1.6
++++ mozilla/security/coreconf/Linux2.2.mk	11 Jun 2009 00:55:32 -0000	1.7
+@@ -38,7 +38,7 @@
+ include $(CORE_DEPTH)/coreconf/Linux.mk
+ 
+ OS_REL_CFLAGS   += -DLINUX2_1
+-MKSHLIB         = $(CC) $(DSO_LDOPTS) -Wl,-soname -Wl,$(@:$(OBJDIR)/%.so=%.so)
++MKSHLIB         = $(CC) $(DSO_LDOPTS) -Wl,-soname -Wl,$(@:$(OBJDIR)/%.so=%.so) $(RPATH)
+ 
+ ifdef MAPFILE
+ 	MKSHLIB += -Wl,--version-script,$(MAPFILE)
+Index: mozilla/security/coreconf/Linux2.4.mk
+===================================================================
+RCS file: /cvsroot/mozilla/security/coreconf/Linux2.4.mk,v
+retrieving revision 1.6
+retrieving revision 1.7
+diff -u -u -r1.6 -r1.7
+--- mozilla/security/coreconf/Linux2.4.mk	16 Sep 2005 17:09:23 -0000	1.6
++++ mozilla/security/coreconf/Linux2.4.mk	11 Jun 2009 00:55:32 -0000	1.7
+@@ -38,7 +38,7 @@
+ include $(CORE_DEPTH)/coreconf/Linux.mk
+ 
+ OS_REL_CFLAGS   += -DLINUX2_1
+-MKSHLIB         = $(CC) $(DSO_LDOPTS) -Wl,-soname -Wl,$(@:$(OBJDIR)/%.so=%.so)
++MKSHLIB         = $(CC) $(DSO_LDOPTS) -Wl,-soname -Wl,$(@:$(OBJDIR)/%.so=%.so) $(RPATH)
+ 
+ ifdef MAPFILE
+ 	MKSHLIB += -Wl,--version-script,$(MAPFILE)
+Index: mozilla/security/coreconf/Linux2.5.mk
+===================================================================
+RCS file: /cvsroot/mozilla/security/coreconf/Linux2.5.mk,v
+retrieving revision 1.5
+retrieving revision 1.6
+diff -u -u -r1.5 -r1.6
+--- mozilla/security/coreconf/Linux2.5.mk	16 Sep 2005 17:09:23 -0000	1.5
++++ mozilla/security/coreconf/Linux2.5.mk	11 Jun 2009 00:55:32 -0000	1.6
+@@ -38,7 +38,7 @@
+ include $(CORE_DEPTH)/coreconf/Linux.mk
+ 
+ OS_REL_CFLAGS   += -DLINUX2_1
+-MKSHLIB         = $(CC) $(DSO_LDOPTS) -Wl,-soname -Wl,$(@:$(OBJDIR)/%.so=%.so)
++MKSHLIB         = $(CC) $(DSO_LDOPTS) -Wl,-soname -Wl,$(@:$(OBJDIR)/%.so=%.so) $(RPATH)
+ 
+ ifdef MAPFILE
+ 	MKSHLIB += -Wl,--version-script,$(MAPFILE)
+Index: mozilla/security/coreconf/Linux2.6.mk
+===================================================================
+RCS file: /cvsroot/mozilla/security/coreconf/Linux2.6.mk,v
+retrieving revision 1.5
+retrieving revision 1.6
+diff -u -u -r1.5 -r1.6
+--- mozilla/security/coreconf/Linux2.6.mk	16 Sep 2005 17:09:23 -0000	1.5
++++ mozilla/security/coreconf/Linux2.6.mk	11 Jun 2009 00:55:32 -0000	1.6
+@@ -38,7 +38,7 @@
+ include $(CORE_DEPTH)/coreconf/Linux.mk
+ 
+ OS_REL_CFLAGS   += -DLINUX2_1
+-MKSHLIB         = $(CC) $(DSO_LDOPTS) -Wl,-soname -Wl,$(@:$(OBJDIR)/%.so=%.so)
++MKSHLIB         = $(CC) $(DSO_LDOPTS) -Wl,-soname -Wl,$(@:$(OBJDIR)/%.so=%.so) $(RPATH)
+ 
+ ifdef MAPFILE
+ 	MKSHLIB += -Wl,--version-script,$(MAPFILE)
+Index: mozilla/security/coreconf/OS2.mk
+===================================================================
+RCS file: /cvsroot/mozilla/security/coreconf/OS2.mk,v
+retrieving revision 1.29
+retrieving revision 1.30
+diff -u -u -r1.29 -r1.30
+--- mozilla/security/coreconf/OS2.mk	2 Apr 2008 22:54:05 -0000	1.29
++++ mozilla/security/coreconf/OS2.mk	16 May 2009 00:31:47 -0000	1.30
+@@ -97,7 +97,7 @@
+ 
+ endif   #NO_SHARED_LIB
+ 
+-OS_CFLAGS          = -Wall -W -Wno-unused -Wpointer-arith -Wcast-align -Wno-switch -Zomf -DDEBUG -DTRACING -g
++OS_CFLAGS          = -Wall -Wno-unused -Wpointer-arith -Wcast-align -Wno-switch -Zomf -DDEBUG -DTRACING -g
+ 
+ ifdef BUILD_OPT
+ ifeq (11,$(ALLOW_OPT_CODE_SIZE)$(OPT_CODE_SIZE))
+Index: mozilla/security/coreconf/OpenVMS.mk
+===================================================================
+RCS file: mozilla/security/coreconf/OpenVMS.mk
+diff -N mozilla/security/coreconf/OpenVMS.mk
+--- mozilla/security/coreconf/OpenVMS.mk	16 Sep 2005 17:09:23 -0000	1.9
++++ /dev/null	1 Jan 1970 00:00:00 -0000
+@@ -1,75 +0,0 @@
+-#
+-# ***** BEGIN LICENSE BLOCK *****
+-# Version: MPL 1.1/GPL 2.0/LGPL 2.1
+-#
+-# The contents of this file are subject to the Mozilla Public License Version
+-# 1.1 (the "License"); you may not use this file except in compliance with
+-# the License. You may obtain a copy of the License at
+-# http://www.mozilla.org/MPL/
+-#
+-# Software distributed under the License is distributed on an "AS IS" basis,
+-# WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
+-# for the specific language governing rights and limitations under the
+-# License.
+-#
+-# The Original Code is mozilla.org Code.
+-#
+-# The Initial Developer of the Original Code is
+-# Netscape Communications Corporation.
+-# Portions created by the Initial Developer are Copyright (C) 1998
+-# the Initial Developer. All Rights Reserved.
+-#
+-# Contributor(s):
+-#
+-# Alternatively, the contents of this file may be used under the terms of
+-# either the GNU General Public License Version 2 or later (the "GPL"), or
+-# the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
+-# in which case the provisions of the GPL or the LGPL are applicable instead
+-# of those above. If you wish to allow use of your version of this file only
+-# under the terms of either the GPL or the LGPL, and not to allow others to
+-# use your version of this file under the terms of the MPL, indicate your
+-# decision by deleting the provisions above and replace them with the notice
+-# and other provisions required by the GPL or the LGPL. If you do not delete
+-# the provisions above, a recipient may use your version of this file under
+-# the terms of any one of the MPL, the GPL or the LGPL.
+-#
+-# ***** END LICENSE BLOCK *****
+-
+-#
+-# Config stuff for Compaq OpenVMS
+-#
+-
+-include $(CORE_DEPTH)/coreconf/UNIX.mk
+-
+-CC			= cc
+-CCC			= cxx
+-
+-RANLIB			= /gnu/bin/true
+-
+-CPU_ARCH		:= $(shell uname -Wh)
+-
+-OS_CFLAGS		= -DVMS
+-OS_CXXFLAGS		= -DVMS
+-
+-#
+-# XCFLAGS are the only CFLAGS that are used during a link operation. Defining
+-# OPTIMIZER in XCFLAGS means that each compilation line gets OPTIMIZER
+-# included twice, but at least we get OPTIMIZER included in the link
+-# operations; and OpenVMS needs it!
+-#
+-XCFLAGS                        += $(OPTIMIZER)
+-
+-DSO_LDOPTS	= -shared -auto_symvec
+-MKSHLIB		= $(CC) $(OPTIMIZER) $(LDFLAGS) $(DSO_LDOPTS)
+-
+-ifdef MAPFILE
+-# Add LD options to restrict exported symbols to those in the map file
+-endif
+-# Change PROCESS to put the mapfile in the correct format for this platform
+-PROCESS_MAP_FILE = cp $< $@
+-
+-
+-#
+-# Always set CPU_TAG on Linux, OpenVMS, WINCE.
+-#
+-CPU_TAG = _$(CPU_ARCH)
+Index: mozilla/security/coreconf/OpenVMSV7.1-2.mk
+===================================================================
+RCS file: mozilla/security/coreconf/OpenVMSV7.1-2.mk
+diff -N mozilla/security/coreconf/OpenVMSV7.1-2.mk
+--- mozilla/security/coreconf/OpenVMSV7.1-2.mk	25 Apr 2004 15:02:17 -0000	1.2
++++ /dev/null	1 Jan 1970 00:00:00 -0000
+@@ -1,42 +0,0 @@
+-#
+-# ***** BEGIN LICENSE BLOCK *****
+-# Version: MPL 1.1/GPL 2.0/LGPL 2.1
+-#
+-# The contents of this file are subject to the Mozilla Public License Version
+-# 1.1 (the "License"); you may not use this file except in compliance with
+-# the License. You may obtain a copy of the License at
+-# http://www.mozilla.org/MPL/
+-#
+-# Software distributed under the License is distributed on an "AS IS" basis,
+-# WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
+-# for the specific language governing rights and limitations under the
+-# License.
+-#
+-# The Original Code is mozilla.org Code.
+-#
+-# The Initial Developer of the Original Code is
+-# Netscape Communications Corporation.
+-# Portions created by the Initial Developer are Copyright (C) 1998
+-# the Initial Developer. All Rights Reserved.
+-#
+-# Contributor(s):
+-#
+-# Alternatively, the contents of this file may be used under the terms of
+-# either the GNU General Public License Version 2 or later (the "GPL"), or
+-# the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
+-# in which case the provisions of the GPL or the LGPL are applicable instead
+-# of those above. If you wish to allow use of your version of this file only
+-# under the terms of either the GPL or the LGPL, and not to allow others to
+-# use your version of this file under the terms of the MPL, indicate your
+-# decision by deleting the provisions above and replace them with the notice
+-# and other provisions required by the GPL or the LGPL. If you do not delete
+-# the provisions above, a recipient may use your version of this file under
+-# the terms of any one of the MPL, the GPL or the LGPL.
+-#
+-# ***** END LICENSE BLOCK *****
+-
+-#
+-# Config stuff for Compaq OpenVMS
+-#
+-
+-include $(CORE_DEPTH)/coreconf/OpenVMS.mk
+Index: mozilla/security/coreconf/SunOS5.mk
+===================================================================
+RCS file: /cvsroot/mozilla/security/coreconf/SunOS5.mk,v
+retrieving revision 1.25
+retrieving revision 1.26
+diff -u -u -r1.25 -r1.26
+--- mozilla/security/coreconf/SunOS5.mk	22 Nov 2007 04:39:56 -0000	1.25
++++ mozilla/security/coreconf/SunOS5.mk	11 Jun 2009 00:55:32 -0000	1.26
+@@ -113,7 +113,7 @@
+ # Purify doesn't like -MDupdate
+ NOMD_OS_CFLAGS += $(DSO_CFLAGS) $(OS_DEFINES) $(SOL_CFLAGS)
+ 
+-MKSHLIB  = $(CC) $(DSO_LDOPTS)
++MKSHLIB  = $(CC) $(DSO_LDOPTS) $(RPATH)
+ ifdef NS_USE_GCC
+ ifeq (GNU,$(findstring GNU,$(shell `$(CC) -print-prog-name=ld` -v 2>&1)))
+ 	GCC_USE_GNU_LD = 1
+@@ -166,3 +166,15 @@
+ 
+ NOSUCHFILE   = /solaris-rm-f-sucks
+ 
++ifeq ($(BUILD_SUN_PKG), 1)
++# The -R '$ORIGIN' linker option instructs this library to search for its
++# dependencies in the same directory where it resides.
++ifeq ($(USE_64), 1)
++RPATH = -R '$$ORIGIN:/usr/lib/mps/secv1/64:/usr/lib/mps/64'
++else
++RPATH = -R '$$ORIGIN:/usr/lib/mps/secv1:/usr/lib/mps'
++endif
++else
++RPATH = -R '$$ORIGIN'
++endif
++
+Index: mozilla/security/coreconf/WINCE.mk
+===================================================================
+RCS file: /cvsroot/mozilla/security/coreconf/WINCE.mk,v
+retrieving revision 1.4
+retrieving revision 1.6
+diff -u -u -r1.4 -r1.6
+--- mozilla/security/coreconf/WINCE.mk	20 Nov 2008 04:39:56 -0000	1.4
++++ mozilla/security/coreconf/WINCE.mk	17 Jun 2009 23:01:50 -0000	1.6
+@@ -83,6 +83,8 @@
+ DLL_SUFFIX   = dll
+ OS_DLLFLAGS  += -DLL
+ 
++EXTRA_EXE_LD_FLAGS += -ENTRY:mainWCRTStartup
++
+ ifdef BUILD_OPT
+ #   OS_CFLAGS  += -MD
+     OPTIMIZER  += -O2
+@@ -206,7 +208,7 @@
+ 
+ 
+ #
+-# Always set CPU_TAG on Linux, OpenVMS, WINCE.
++# Always set CPU_TAG on Linux, WINCE.
+ #
+ CPU_TAG = _$(CPU_ARCH)
+ 
+Index: mozilla/security/coreconf/arch.mk
+===================================================================
+RCS file: /cvsroot/mozilla/security/coreconf/arch.mk,v
+retrieving revision 1.22
+retrieving revision 1.23
+diff -u -u -r1.22 -r1.23
+--- mozilla/security/coreconf/arch.mk	11 Mar 2009 18:54:24 -0000	1.22
++++ mozilla/security/coreconf/arch.mk	5 Jun 2009 02:14:49 -0000	1.23
+@@ -165,11 +165,6 @@
+     OS_RELEASE := $(shell uname -v)
+ endif
+ 
+-ifneq (,$(findstring OpenVMS,$(OS_ARCH)))
+-    OS_ARCH = OpenVMS
+-    OS_RELEASE := $(shell uname -v)
+-endif
+-
+ #######################################################################
+ # Master "Core Components" macros for getting the OS target           #
+ #######################################################################
+Index: mozilla/security/coreconf/config.mk
+===================================================================
+RCS file: /cvsroot/mozilla/security/coreconf/config.mk,v
+retrieving revision 1.27
+retrieving revision 1.28
+diff -u -u -r1.27 -r1.28
+--- mozilla/security/coreconf/config.mk	13 Feb 2009 17:14:05 -0000	1.27
++++ mozilla/security/coreconf/config.mk	5 Jun 2009 02:14:49 -0000	1.28
+@@ -63,7 +63,7 @@
+ #######################################################################
+ 
+ TARGET_OSES = FreeBSD BSD_OS NetBSD OpenUNIX OS2 QNX Darwin BeOS OpenBSD \
+-              OpenVMS AIX RISCOS WINNT WIN95 WINCE
++              AIX RISCOS WINNT WIN95 WINCE
+ 
+ ifeq (,$(filter-out $(TARGET_OSES),$(OS_TARGET)))
+ include $(CORE_DEPTH)/coreconf/$(OS_TARGET).mk
+Index: mozilla/security/coreconf/rules.mk
+===================================================================
+RCS file: /cvsroot/mozilla/security/coreconf/rules.mk,v
+retrieving revision 1.78
+retrieving revision 1.80
+diff -u -u -r1.78 -r1.80
+--- mozilla/security/coreconf/rules.mk	20 Jan 2009 23:30:57 -0000	1.78
++++ mozilla/security/coreconf/rules.mk	17 Jun 2009 23:01:50 -0000	1.80
+@@ -273,7 +273,7 @@
+ $(PROGRAM): $(OBJS) $(EXTRA_LIBS)
+ 	@$(MAKE_OBJDIR)
+ ifeq (,$(filter-out _WIN%,$(NS_USE_GCC)_$(OS_TARGET)))
+-	$(MKPROG) $(subst /,\\,$(OBJS)) -Fe$@ -link $(LDFLAGS) $(subst /,\\,$(EXTRA_LIBS) $(EXTRA_SHARED_LIBS) $(OS_LIBS))
++	$(MKPROG) $(subst /,\\,$(OBJS)) -Fe$@ -link $(LDFLAGS) $(subst /,\\,$(EXTRA_LIBS) $(EXTRA_SHARED_LIBS) $(OS_LIBS)) $(EXTRA_EXE_LD_FLAGS)
+ ifdef MT
+ 	if test -f $@.manifest; then \
+ 		$(MT) -NOLOGO -MANIFEST $@.manifest -OUTPUTRESOURCE:$@\;1; \
+@@ -373,7 +373,7 @@
+ 	@$(MAKE_OBJDIR)
+ ifeq (,$(filter-out _WIN%,$(NS_USE_GCC)_$(OS_TARGET)))
+ 	$(MKPROG) $< -Fe$@ -link \
+-	$(LDFLAGS) $(EXTRA_LIBS) $(EXTRA_SHARED_LIBS) $(OS_LIBS)
++	$(LDFLAGS) $(EXTRA_LIBS) $(EXTRA_SHARED_LIBS) $(OS_LIBS) $(EXTRA_EXE_LD_FLAGS)
+ ifdef MT
+ 	if test -f $@.manifest; then \
+ 		$(MT) -NOLOGO -MANIFEST $@.manifest -OUTPUTRESOURCE:$@\;1; \
+@@ -878,7 +878,7 @@
+ 
+ -include $(DEPENDENCIES)
+ 
+-ifneq (,$(filter-out OpenVMS OS2 WIN%,$(OS_TARGET)))
++ifneq (,$(filter-out OS2 WIN%,$(OS_TARGET)))
+ # Can't use sed because of its 4000-char line length limit, so resort to perl
+ PERL_DEPENDENCIES_PROGRAM =                                                   \
+ 	    open(MD, "< $(DEPENDENCIES)");                                    \
+Index: mozilla/security/coreconf/ruleset.mk
+===================================================================
+RCS file: /cvsroot/mozilla/security/coreconf/ruleset.mk,v
+retrieving revision 1.21
+retrieving revision 1.22
+diff -u -u -r1.21 -r1.22
+--- mozilla/security/coreconf/ruleset.mk	3 Jan 2007 13:07:47 -0000	1.21
++++ mozilla/security/coreconf/ruleset.mk	8 Jul 2009 18:15:21 -0000	1.22
+@@ -210,12 +210,8 @@
+ 
+ endif #NS_USE_JDK
+ 
+-#
+-# If this is an "official" build, try to build everything.
+-# I.e., don't exit on errors.
+-#
+-
+-ifdef BUILD_OFFICIAL
++ifdef NSS_BUILD_CONTINUE_ON_ERROR
++# Try to build everything. I.e., don't exit on errors.
+     EXIT_ON_ERROR		= +e
+     CLICK_STOPWATCH		= date
+ else
+Index: mozilla/security/coreconf/nsinstall/nsinstall.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/coreconf/nsinstall/nsinstall.c,v
+retrieving revision 1.12
+retrieving revision 1.13
+diff -u -u -r1.12 -r1.13
+--- mozilla/security/coreconf/nsinstall/nsinstall.c	25 Sep 2008 02:07:12 -0000	1.12
++++ mozilla/security/coreconf/nsinstall/nsinstall.c	5 Jun 2009 02:15:15 -0000	1.13
+@@ -58,7 +58,7 @@
+ 
+ #define HAVE_LCHOWN
+ 
+-#if defined(AIX) || defined(BSDI) || defined(HPUX) || defined(LINUX) || defined(SUNOS4) || defined(SCO) || defined(UNIXWARE) || defined(VMS) || defined(NTO) || defined(DARWIN) || defined(BEOS) || defined(__riscos__)
++#if defined(AIX) || defined(BSDI) || defined(HPUX) || defined(LINUX) || defined(SUNOS4) || defined(SCO) || defined(UNIXWARE) || defined(NTO) || defined(DARWIN) || defined(BEOS) || defined(__riscos__)
+ #undef HAVE_LCHOWN
+ #endif
+ 
+@@ -407,11 +407,6 @@
+ 
+ 	    if (ftruncate(tofd, sb.st_size) < 0)
+ 		fail("cannot truncate %s", toname);
+-	    /*
+-	    ** On OpenVMS we can't chmod() until the file is closed, and we
+-	    ** have to utime() last since fchown/chmod alter the timestamps.
+-	    */
+-#ifndef VMS
+ 	    if (dotimes) {
+ 		utb.actime = sb.st_atime;
+ 		utb.modtime = sb.st_mtime;
+@@ -424,7 +419,7 @@
+ 	    if (chmod(toname, mode) < 0)
+ #endif
+ 		fail("cannot change mode of %s", toname);
+-#endif
++
+ 	    if ((owner || group) && fchown(tofd, uid, gid) < 0)
+ 		fail("cannot change owner of %s", toname);
+ 
+@@ -432,16 +427,6 @@
+ 	    if (close(tofd) < 0)
+ 		fail("close reports write error on %s", toname);
+ 	    close(fromfd);
+-#ifdef VMS
+-	    if (chmod(toname, mode) < 0)
+-		fail("cannot change mode of %s", toname);
+-	    if (dotimes) {
+-		utb.actime = sb.st_atime;
+-		utb.modtime = sb.st_mtime;
+-		if (utime(toname, &utb) < 0)
+-		    fail("cannot set times of %s", toname);
+-	    }
+-#endif
+ 	}
+ 
+ 	free(toname);
+Index: mozilla/security/nss/lib/certdb/cert.h
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/certdb/cert.h,v
+retrieving revision 1.77
+retrieving revision 1.78
+diff -u -u -r1.77 -r1.78
+--- mozilla/security/nss/lib/certdb/cert.h	17 Apr 2009 22:46:27 -0000	1.77
++++ mozilla/security/nss/lib/certdb/cert.h	14 May 2009 01:33:36 -0000	1.78
+@@ -1610,25 +1610,25 @@
+  * Returns a pointer to a static structure.
+  */
+ extern const CERTRevocationFlags*
+-CERT_GetPKIXVerifyNistRevocationPolicy();
++CERT_GetPKIXVerifyNistRevocationPolicy(void);
+ 
+ /*
+  * Returns a pointer to a static structure.
+  */
+ extern const CERTRevocationFlags*
+-CERT_GetClassicOCSPEnabledSoftFailurePolicy();
++CERT_GetClassicOCSPEnabledSoftFailurePolicy(void);
+ 
+ /*
+  * Returns a pointer to a static structure.
+  */
+ extern const CERTRevocationFlags*
+-CERT_GetClassicOCSPEnabledHardFailurePolicy();
++CERT_GetClassicOCSPEnabledHardFailurePolicy(void);
+ 
+ /*
+  * Returns a pointer to a static structure.
+  */
+ extern const CERTRevocationFlags*
+-CERT_GetClassicOCSPDisabledPolicy();
++CERT_GetClassicOCSPDisabledPolicy(void);
+ 
+ /*
+  * Verify a Cert with libpkix
+@@ -1662,7 +1662,7 @@
+ 
+ /* The function return PR_TRUE if cert validation should use
+  * libpkix cert validation engine. */
+-PRBool CERT_GetUsePKIXForValidation();
++PRBool CERT_GetUsePKIXForValidation(void);
+ 
+ SEC_END_PROTOS
+ 
+Index: mozilla/security/nss/lib/certdb/certdb.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/certdb/certdb.c,v
+retrieving revision 1.100
+retrieving revision 1.101
+diff -u -u -r1.100 -r1.101
+--- mozilla/security/nss/lib/certdb/certdb.c	23 Mar 2009 02:18:19 -0000	1.100
++++ mozilla/security/nss/lib/certdb/certdb.c	18 May 2009 21:33:25 -0000	1.101
+@@ -1739,7 +1739,7 @@
+               return SECFailure;
+             PORT_Memcpy(cn, currentInput->name.other.data, 
+                             currentInput->name.other.len);
+-            cn[currentInput->name.other.len + 1] = 0;
++            cn[currentInput->name.other.len] = 0;
+             break;
+         case certIPAddress:
+             if (currentInput->name.other.len == 4) {
+@@ -1751,7 +1751,7 @@
+               memcpy(&addr.ipv6.ip, currentInput->name.other.data, 
+                                     currentInput->name.other.len);
+             }
+-            if (PR_NetAddrToString(&addr, ipbuf, sizeof(ipbuf) == PR_FAILURE))
++            if (PR_NetAddrToString(&addr, ipbuf, sizeof(ipbuf)) == PR_FAILURE)
+               return SECFailure;
+             cn = PORT_ArenaStrdup(nickNames->arena, ipbuf);
+             if (!cn)
+Index: mozilla/security/nss/lib/certdb/certdb.h
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/certdb/certdb.h,v
+retrieving revision 1.21
+retrieving revision 1.22
+diff -u -u -r1.21 -r1.22
+--- mozilla/security/nss/lib/certdb/certdb.h	7 Aug 2008 00:00:09 -0000	1.21
++++ mozilla/security/nss/lib/certdb/certdb.h	29 May 2009 19:16:54 -0000	1.22
+@@ -63,7 +63,7 @@
+ SEC_FindCrlByDERCert(CERTCertDBHandle *handle, SECItem *derCrl, int type);
+ 
+ PRBool
+-SEC_CertNicknameConflict(char *nickname, SECItem *derSubject,
++SEC_CertNicknameConflict(const char *nickname, SECItem *derSubject,
+ 			 CERTCertDBHandle *handle);
+ CERTSignedCrl *
+ SEC_NewCrl(CERTCertDBHandle *handle, char *url, SECItem *derCrl, int type);
+Index: mozilla/security/nss/lib/certdb/certt.h
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/certdb/certt.h,v
+retrieving revision 1.50
+retrieving revision 1.52
+diff -u -u -r1.50 -r1.52
+--- mozilla/security/nss/lib/certdb/certt.h	24 Apr 2009 19:18:32 -0000	1.50
++++ mozilla/security/nss/lib/certdb/certt.h	29 May 2009 18:10:38 -0000	1.52
+@@ -940,12 +940,17 @@
+    cert_pi_certStores      = 10,/* Bitmask of Cert Store flags (see below)
+ 				 * Set in value.scalar.ui */
+    cert_pi_trustAnchors    = 11,/* Specify the list of trusted roots to 
+-				 * validate against. If the list in NULL all
+-				 * default trusted roots are used.
++				 * validate against. 
++				 * The default set of trusted roots, these are
++				 * root CA certs from libnssckbi.so or CA
++				 * certs trusted by user, are used in any of
++				 * the following cases:
++				 *      * when the parameter is not set.
++				 *      * when the list of trust anchors is empty.
+ 				 * Specified in value.pointer.chain */
+    cert_pi_useAIACertFetch = 12, /* Enables cert fetching using AIA extension.
+-				 * Default is off.
+-                                     * Value is in value.scalar.b */
++				 * In NSS 3.12.1 or later. Default is off.
++				 * Value is in value.scalar.b */
+    cert_pi_max                  /* SPECIAL: signifies maximum allowed value,
+ 				 *  can increase in future releases */
+ } CERTValParamInType;
+Index: mozilla/security/nss/lib/certdb/crl.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/certdb/crl.c,v
+retrieving revision 1.66
+retrieving revision 1.67
+diff -u -u -r1.66 -r1.67
+--- mozilla/security/nss/lib/certdb/crl.c	21 Apr 2009 22:53:58 -0000	1.66
++++ mozilla/security/nss/lib/certdb/crl.c	13 May 2009 22:47:28 -0000	1.67
+@@ -3136,6 +3136,7 @@
+         rv = SECFailure;
+         /* no need to keep unused CRL around */
+         SECITEM_ZfreeItem(entry->crl, PR_TRUE);
++        entry->crl = NULL;
+     }
+     return rv;
+ }
+@@ -3206,6 +3207,10 @@
+             if (!removed)
+             {
+                 rv = SECFailure;
++		/* leak old entry since we couldn't remove it from the hash table */
++            }
++            else
++            {
+                 rv2 = NamedCRLCacheEntry_Destroy(oldEntry);
+                 PORT_Assert(SECSuccess == rv2);
+             }
+@@ -3249,7 +3254,11 @@
+                 PORT_Assert(removed);
+                 if (!removed)
+                 {
++		    /* leak old entry since we couldn't remove it from the hash table */
+                     rv = SECFailure;
++                }
++                else
++                {
+                     rv2 = NamedCRLCacheEntry_Destroy(oldEntry);
+                     PORT_Assert(SECSuccess == rv2);
+                 }
+Index: mozilla/security/nss/lib/certdb/stanpcertdb.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/certdb/stanpcertdb.c,v
+retrieving revision 1.83
+retrieving revision 1.84
+diff -u -u -r1.83 -r1.84
+--- mozilla/security/nss/lib/certdb/stanpcertdb.c	2 Dec 2008 23:24:48 -0000	1.83
++++ mozilla/security/nss/lib/certdb/stanpcertdb.c	29 May 2009 19:16:54 -0000	1.84
+@@ -63,7 +63,7 @@
+ #include "dev.h"
+ 
+ PRBool
+-SEC_CertNicknameConflict(char *nickname, SECItem *derSubject,
++SEC_CertNicknameConflict(const char *nickname, SECItem *derSubject,
+ 			 CERTCertDBHandle *handle)
+ {
+     CERTCertificate *cert;
+Index: mozilla/security/nss/lib/certhigh/certvfypkix.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/certhigh/certvfypkix.c,v
+retrieving revision 1.42
+retrieving revision 1.43
+diff -u -u -r1.42 -r1.43
+--- mozilla/security/nss/lib/certhigh/certvfypkix.c	20 Apr 2009 05:17:43 -0000	1.42
++++ mozilla/security/nss/lib/certhigh/certvfypkix.c	29 May 2009 18:10:39 -0000	1.43
+@@ -1690,7 +1690,11 @@
+ 
+         case cert_pi_trustAnchors:
+             certList = param->value.pointer.chain;
+-
++            if (!certList) {
++                PORT_SetError(errCode);
++                r = SECFailure;
++                break;
++            }
+             error = PKIX_List_Create(&certListPkix, plContext);
+             if (error != NULL) {
+                 break;
+Index: mozilla/security/nss/lib/certhigh/ocsp.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/certhigh/ocsp.c,v
+retrieving revision 1.58
+retrieving revision 1.59
+diff -u -u -r1.58 -r1.59
+--- mozilla/security/nss/lib/certhigh/ocsp.c	21 Mar 2009 01:40:35 -0000	1.58
++++ mozilla/security/nss/lib/certhigh/ocsp.c	10 Jun 2009 22:59:09 -0000	1.59
+@@ -730,7 +730,7 @@
+     }
+   
+     if (cacheItem->haveNextUpdate) {
+-        OCSP_TRACE_TIME("have nextUpdate:", cacheItem->thisUpdate);
++        OCSP_TRACE_TIME("have nextUpdate:", cacheItem->nextUpdate);
+     }
+   
+     if (cacheItem->haveNextUpdate &&
+Index: mozilla/security/nss/lib/ckfw/Makefile
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/ckfw/Makefile,v
+retrieving revision 1.16
+retrieving revision 1.17
+diff -u -u -r1.16 -r1.17
+--- mozilla/security/nss/lib/ckfw/Makefile	3 Dec 2008 18:44:24 -0000	1.16
++++ mozilla/security/nss/lib/ckfw/Makefile	22 May 2009 01:03:30 -0000	1.17
+@@ -41,7 +41,7 @@
+ include config.mk
+ include $(CORE_DEPTH)/coreconf/rules.mk
+ 
+-ifdef MOZILLA_CLIENT
++ifdef NOTDEF # was ifdef MOZILLA_CLIENT
+ NSS_BUILD_CAPI = 1
+ endif
+ 
+Index: mozilla/security/nss/lib/ckfw/sessobj.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/ckfw/sessobj.c,v
+retrieving revision 1.14
+retrieving revision 1.15
+diff -u -u -r1.14 -r1.15
+--- mozilla/security/nss/lib/ckfw/sessobj.c	9 Feb 2009 07:55:53 -0000	1.14
++++ mozilla/security/nss/lib/ckfw/sessobj.c	5 Jun 2009 00:22:04 -0000	1.15
+@@ -706,18 +706,15 @@
+     nss_ZFreeIf(n.data);
+     return CKR_HOST_MEMORY;
+   }
++  obj->attributes = ra;
+ 
+-  rt = (CK_ATTRIBUTE_TYPE_PTR)nss_ZRealloc(obj->types, (obj->n + 1));
+-  if( (CK_ATTRIBUTE_TYPE_PTR)NULL == rt ) {
++  rt = (CK_ATTRIBUTE_TYPE_PTR)nss_ZRealloc(obj->types, 
++                                      sizeof(CK_ATTRIBUTE_TYPE) * (obj->n + 1));
++  if (!rt) {
+     nss_ZFreeIf(n.data);
+-    obj->attributes = (NSSItem *)nss_ZRealloc(ra, sizeof(NSSItem) * obj->n);
+-    if (!obj->attributes) {
+-      return CKR_GENERAL_ERROR;
+-    }
+     return CKR_HOST_MEMORY;
+   }
+ 
+-  obj->attributes = ra;
+   obj->types = rt;
+   obj->attributes[obj->n] = n;
+   obj->types[obj->n] = attribute;
+Index: mozilla/security/nss/lib/ckfw/builtins/config.mk
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/ckfw/builtins/config.mk,v
+retrieving revision 1.13
+retrieving revision 1.14
+diff -u -u -r1.13 -r1.14
+--- mozilla/security/nss/lib/ckfw/builtins/config.mk	20 Mar 2009 07:19:36 -0000	1.13
++++ mozilla/security/nss/lib/ckfw/builtins/config.mk	11 Jun 2009 00:55:34 -0000	1.14
+@@ -65,17 +65,3 @@
+ endif
+ endif
+ 
+-ifeq ($(OS_TARGET),SunOS)
+-# The -R '$ORIGIN' linker option instructs this library to search for its
+-# dependencies in the same directory where it resides.
+-MKSHLIB += -R '$$ORIGIN'
+-endif
+-
+-ifeq ($(OS_ARCH), HP-UX) 
+-ifneq ($(OS_TEST), ia64)
+-# pa-risc
+-ifeq ($(USE_64), 1)
+-MKSHLIB += +b '$$ORIGIN'
+-endif
+-endif
+-endif
+Index: mozilla/security/nss/lib/ckfw/capi/config.mk
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/ckfw/capi/config.mk,v
+retrieving revision 1.2
+retrieving revision 1.3
+diff -u -u -r1.2 -r1.3
+--- mozilla/security/nss/lib/ckfw/capi/config.mk	20 Mar 2009 07:19:45 -0000	1.2
++++ mozilla/security/nss/lib/ckfw/capi/config.mk	11 Jun 2009 00:55:42 -0000	1.3
+@@ -65,9 +65,3 @@
+ endif
+ endif
+ 
+-ifeq ($(OS_TARGET),SunOS)
+-# The -R '$ORIGIN' linker option instructs this library to search for its
+-# dependencies in the same directory where it resides.
+-MKSHLIB += -R '$$ORIGIN'
+-endif
+-
+Index: mozilla/security/nss/lib/cryptohi/seckey.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/cryptohi/seckey.c,v
+retrieving revision 1.48
+retrieving revision 1.49
+diff -u -u -r1.48 -r1.49
+--- mozilla/security/nss/lib/cryptohi/seckey.c	6 Jun 2008 01:15:36 -0000	1.48
++++ mozilla/security/nss/lib/cryptohi/seckey.c	18 Jun 2009 17:33:53 -0000	1.49
+@@ -258,11 +258,17 @@
+ 	return NULL;
+     }
+ 
+-    privk = PK11_GenerateKeyPair(slot, CKM_EC_KEY_PAIR_GEN, param, 
+-                                 pubk, PR_FALSE, PR_FALSE, cx);
++    privk = PK11_GenerateKeyPairWithOpFlags(slot, CKM_EC_KEY_PAIR_GEN, 
++                        param, pubk,
++                        PK11_ATTR_SESSION | PK11_ATTR_INSENSITIVE | 
++                        PK11_ATTR_PUBLIC,
++                        CKF_DERIVE, CKF_DERIVE|CKF_SIGN,cx);
+     if (!privk) 
+-	privk = PK11_GenerateKeyPair(slot, CKM_EC_KEY_PAIR_GEN, param, 
+-	                             pubk, PR_FALSE, PR_TRUE, cx);
++        privk = PK11_GenerateKeyPairWithOpFlags(slot, CKM_EC_KEY_PAIR_GEN, 
++                        param, pubk,
++                        PK11_ATTR_SESSION | PK11_ATTR_SENSITIVE | 
++                        PK11_ATTR_PRIVATE,
++                        CKF_DERIVE, CKF_DERIVE|CKF_SIGN,cx);
+ 
+     PK11_FreeSlot(slot);
+     return(privk);
+Index: mozilla/security/nss/lib/freebl/Makefile
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/freebl/Makefile,v
+retrieving revision 1.106
+retrieving revision 1.108
+diff -u -u -r1.106 -r1.108
+--- mozilla/security/nss/lib/freebl/Makefile	12 Apr 2009 23:35:30 -0000	1.106
++++ mozilla/security/nss/lib/freebl/Makefile	11 Jun 2009 00:55:43 -0000	1.108
+@@ -94,6 +94,14 @@
+     MPI_SRCS += mpvalpha.c
+ endif
+ 
++ifeq (OS2,$(OS_TARGET))
++    ASFILES  = mpi_x86_os2.s
++    DEFINES += -DMP_ASSEMBLY_MULTIPLY -DMP_ASSEMBLY_SQUARE 
++    DEFINES += -DMP_ASSEMBLY_DIV_2DX1D
++    DEFINES += -DMP_USE_UINT_DIGIT -DMP_NO_MP_WORD
++    DEFINES += -DMP_CHAR_STORE_SLOW -DMP_IS_LITTLE_ENDIAN
++endif
++
+ ifeq (,$(filter-out WINNT WIN95,$(OS_TARGET)))  #omits WINCE
+ ifndef USE_64
+ # 32-bit Windows
+@@ -222,9 +230,6 @@
+ 
+ ifeq ($(OS_TARGET),SunOS)
+ 
+-# The -R '$ORIGIN' linker option instructs this library to search for its
+-# dependencies in the same directory where it resides.
+-MKSHLIB += -R '$$ORIGIN'
+ ifdef NS_USE_GCC
+     ifdef GCC_USE_GNU_LD
+ 	MKSHLIB += -Wl,-Bsymbolic,-z,now,-z,text
+Index: mozilla/security/nss/lib/freebl/des.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/freebl/des.c,v
+retrieving revision 1.7
+retrieving revision 1.8
+diff -u -u -r1.7 -r1.8
+--- mozilla/security/nss/lib/freebl/des.c	9 Apr 2009 22:11:07 -0000	1.7
++++ mozilla/security/nss/lib/freebl/des.c	4 Jun 2009 23:49:26 -0000	1.8
+@@ -403,6 +403,11 @@
+ #if defined(__GNUC__) && defined(NSS_X86_OR_X64)
+ #define BYTESWAP(word, temp) \
+     __asm("bswap	%0" : "+r" (word));
++#elif (_MSC_VER >= 1300) && defined(NSS_X86_OR_X64)
++#include <stdlib.h>
++#pragma intrinsic(_byteswap_ulong)
++#define BYTESWAP(word, temp) \
++    word = _byteswap_ulong(word);
+ #else
+ #define BYTESWAP(word, temp) \
+     word = (word >> 16) | (word << 16); \
+Index: mozilla/security/nss/lib/freebl/drbg.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/freebl/drbg.c,v
+retrieving revision 1.8
+retrieving revision 1.9
+diff -u -u -r1.8 -r1.9
+--- mozilla/security/nss/lib/freebl/drbg.c	1 Apr 2009 03:37:29 -0000	1.8
++++ mozilla/security/nss/lib/freebl/drbg.c	10 Jun 2009 03:24:01 -0000	1.9
+@@ -381,6 +381,9 @@
+     PRUint8 bytes[PRNG_SEEDLEN*2]; /* entropy + nonce */
+     unsigned int numBytes;
+     if (globalrng == NULL) {
++	/* bytes needs to have enough space to hold
++	 * a SHA256 hash value. Blow up at compile time if this isn't true */
++	PR_STATIC_ASSERT(sizeof(bytes) >= SHA256_LENGTH);
+ 	/* create a new global RNG context */
+ 	globalrng = &theGlobalRng;
+         PORT_Assert(NULL == globalrng->lock);
+@@ -414,6 +417,10 @@
+ 	/* the RNG is in a valid state */
+ 	globalrng->isValid = PR_TRUE;
+ 
++	/* fetch one random value so that we can populate rng->oldV for our
++	 * continous random number test. */
++	prng_generateNewBytes(globalrng, bytes, SHA256_LENGTH, NULL, 0);
++
+ 	/* Fetch more entropy into the PRNG */
+ 	RNG_SystemInfoForRNG();
+     }
+Index: mozilla/security/nss/lib/freebl/nsslowhash.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/freebl/nsslowhash.c,v
+retrieving revision 1.3
+retrieving revision 1.4
+diff -u -u -r1.3 -r1.4
+--- mozilla/security/nss/lib/freebl/nsslowhash.c	15 Apr 2009 21:31:55 -0000	1.3
++++ mozilla/security/nss/lib/freebl/nsslowhash.c	9 Jun 2009 23:34:06 -0000	1.4
+@@ -289,6 +289,7 @@
+ 
+ 
+ static int post = 0;
++static int post_failed = 0;
+ 
+ static NSSLOWInitContext dummyContext = { 0 };
+ 
+@@ -302,11 +303,16 @@
+ 
+     rv = FREEBL_InitStubs();
+     nsprAvailable = (rv ==  SECSuccess ) ? PR_TRUE : PR_FALSE;
++
++    if (post_failed) {
++	return NULL;
++    }
+ 	
+ 
+     if (!post && nsslow_GetFIPSEnabled()) {
+ 	crv = freebl_fipsPowerUpSelfTest();
+ 	if (crv != CKR_OK) {
++	    post_failed = 1;
+ 	    return NULL;
+ 	}
+     }
+@@ -323,12 +329,26 @@
+    return;
+ }
+ 
++void
++NSSLOW_Reset(NSSLOWInitContext *context)
++{
++   PORT_Assert(context == &dummyContext);
++   post_failed = 0;
++   post = 0;
++   return;
++}
++
+ NSSLOWHASHContext *
+ NSSLOWHASH_NewContext(NSSLOWInitContext *initContext, 
+ 			HASH_HashType hashType)
+ {
+    NSSLOWHASHContext *context;
+ 
++   if (post_failed) {
++	PORT_SetError(SEC_ERROR_PKCS11_DEVICE_ERROR);
++	return NULL;
++   }
++
+    if (initContext != &dummyContext) {
+ 	PORT_SetError(SEC_ERROR_INVALID_ARGS);
+ 	return (NULL);
+Index: mozilla/security/nss/lib/freebl/nsslowhash.h
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/freebl/nsslowhash.h,v
+retrieving revision 1.2
+retrieving revision 1.3
+diff -u -u -r1.2 -r1.3
+--- mozilla/security/nss/lib/freebl/nsslowhash.h	27 Nov 2008 15:20:44 -0000	1.2
++++ mozilla/security/nss/lib/freebl/nsslowhash.h	9 Jun 2009 23:34:06 -0000	1.3
+@@ -45,6 +45,7 @@
+ 
+ NSSLOWInitContext *NSSLOW_Init(void);
+ void NSSLOW_Shutdown(NSSLOWInitContext *context);
++void NSSLOW_Reset(NSSLOWInitContext *context);
+ NSSLOWHASHContext *NSSLOWHASH_NewContext(
+ 			NSSLOWInitContext *initContext, 
+ 			HASH_HashType hashType);
+Index: mozilla/security/nss/lib/freebl/stubs.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/freebl/stubs.c,v
+retrieving revision 1.4
+retrieving revision 1.6
+diff -u -u -r1.4 -r1.6
+--- mozilla/security/nss/lib/freebl/stubs.c	29 Mar 2009 02:21:50 -0000	1.4
++++ mozilla/security/nss/lib/freebl/stubs.c	11 Jun 2009 23:11:22 -0000	1.6
+@@ -535,6 +535,14 @@
+ #define freebl_releaseLibrary(lib) \
+     if (lib) dlclose(lib)
+ 
++static void * FREEBLnsprGlobalLib = NULL;
++static void * FREEBLnssutilGlobalLib = NULL;
++
++void __attribute ((destructor)) FREEBL_unload()
++{
++    freebl_releaseLibrary(FREEBLnsprGlobalLib);
++    freebl_releaseLibrary(FREEBLnssutilGlobalLib);
++}
+ #endif
+ 
+ /*
+@@ -552,28 +560,30 @@
+     void *nssutil = NULL; 
+ 
+     /* NSPR should be first */
+-    if (!ptr_PR_DestroyLock) {
++    if (!FREEBLnsprGlobalLib) {
+ 	nspr = freebl_getLibrary(nsprLibName);
+ 	if (!nspr) {
+ 	    return SECFailure;
+ 	}
+ 	rv = freebl_InitNSPR(nspr);
+-	freebl_releaseLibrary(nspr);
+ 	if (rv != SECSuccess) {
++	    freebl_releaseLibrary(nspr);
+ 	    return rv;
+ 	}
++	FREEBLnsprGlobalLib = nspr; /* adopt */
+     }
+     /* now load NSSUTIL */
+-    if (!ptr_SECITEM_ZfreeItem_Util) {
++    if (!FREEBLnssutilGlobalLib) {
+ 	nssutil= freebl_getLibrary(nssutilLibName);
+ 	if (!nssutil) {
+ 	    return SECFailure;
+ 	}
+ 	rv = freebl_InitNSSUtil(nssutil);
+-	freebl_releaseLibrary(nssutil);
+ 	if (rv != SECSuccess) {
++	    freebl_releaseLibrary(nssutil);
+ 	    return rv;
+ 	}
++	FREEBLnssutilGlobalLib = nssutil; /* adopt */
+     }
+ #endif
+ 
+Index: mozilla/security/nss/lib/freebl/unix_rand.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/freebl/unix_rand.c,v
+retrieving revision 1.37
+retrieving revision 1.38
+diff -u -u -r1.37 -r1.38
+--- mozilla/security/nss/lib/freebl/unix_rand.c	29 Mar 2009 03:45:33 -0000	1.37
++++ mozilla/security/nss/lib/freebl/unix_rand.c	10 Jun 2009 00:42:17 -0000	1.38
+@@ -629,44 +629,6 @@
+ }
+ #endif /* sinix */
+ 
+-#if defined(VMS)
+-#include <c_asm.h>
+-
+-static void
+-GiveSystemInfo(void)
+-{
+-    long si;
+- 
+-    /* 
+-     * This is copied from the SCO/UNIXWARE etc section. And like the comment
+-     * there says, what's the point? This isn't random, it generates the same
+-     * stuff every time its run!
+-     */
+-    si = sysconf(_SC_CHILD_MAX);
+-    RNG_RandomUpdate(&si, sizeof(si));
+- 
+-    si = sysconf(_SC_STREAM_MAX);
+-    RNG_RandomUpdate(&si, sizeof(si));
+- 
+-    si = sysconf(_SC_OPEN_MAX);
+-    RNG_RandomUpdate(&si, sizeof(si));
+-}
+- 
+-/*
+- * Use the "get the cycle counter" instruction on the alpha.
+- * The low 32 bits completely turn over in less than a minute.
+- * The high 32 bits are some non-counter gunk that changes sometimes.
+- */
+-static size_t
+-GetHighResClock(void *buf, size_t maxbytes)
+-{
+-    unsigned long t;
+- 
+-    t = asm("rpcc %v0");
+-    return CopyLowBits(buf, maxbytes, &t, sizeof(t));
+-}
+- 
+-#endif /* VMS */
+ 
+ #ifdef BEOS
+ #include <be/kernel/OS.h>
+@@ -880,9 +842,6 @@
+     return status;
+ }
+ 
+-
+-#if !defined(VMS)
+-
+ #ifdef DARWIN
+ #include <crt_externs.h>
+ #endif
+@@ -1023,65 +982,6 @@
+ #endif
+ 
+ }
+-#else
+-void RNG_SystemInfoForRNG(void)
+-{
+-    FILE *fp;
+-    char buf[BUFSIZ];
+-    size_t bytes;
+-    int extra;
+-    char **cp;
+-    extern char **environ;
+-    char *randfile;
+- 
+-    GiveSystemInfo();
+- 
+-    bytes = RNG_GetNoise(buf, sizeof(buf));
+-    RNG_RandomUpdate(buf, bytes);
+- 
+-    /*
+-     * Pass the C environment and the addresses of the pointers to the
+-     * hash function. This makes the random number function depend on the
+-     * execution environment of the user and on the platform the program
+-     * is running on.
+-     */
+-    cp = environ;
+-    while (*cp) {
+-	RNG_RandomUpdate(*cp, strlen(*cp));
+-	cp++;
+-    }
+-    RNG_RandomUpdate(environ, (char*)cp - (char*)environ);
+- 
+-    /* Give in system information */
+-    if (gethostname(buf, sizeof(buf)) > 0) {
+-	RNG_RandomUpdate(buf, strlen(buf));
+-    }
+-    GiveSystemInfo();
+- 
+-    /* If the user points us to a random file, pass it through the rng */
+-    randfile = getenv("NSRANDFILE");
+-    if ( ( randfile != NULL ) && ( randfile[0] != '\0') ) {
+-	RNG_FileForRNG(randfile);
+-    }
+-
+-    /*
+-    ** We need to generate at least 1024 bytes of seed data. Since we don't
+-    ** do the file stuff for VMS, and because the environ list is so short
+-    ** on VMS, we need to make sure we generate enough. So do another 1000
+-    ** bytes to be sure.
+-    */
+-    extra = 1000;
+-    while (extra > 0) {
+-        cp = environ;
+-        while (*cp) {
+-	    int n = strlen(*cp);
+-	    RNG_RandomUpdate(*cp, n);
+-	    extra -= n;
+-	    cp++;
+-        }
+-    }
+-}
+-#endif
+ 
+ #define TOTAL_FILE_LIMIT 1000000	/* one million */
+ 
+Index: mozilla/security/nss/lib/freebl/win_rand.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/freebl/win_rand.c,v
+retrieving revision 1.24
+retrieving revision 1.26
+diff -u -u -r1.24 -r1.26
+--- mozilla/security/nss/lib/freebl/win_rand.c	2 Apr 2009 02:32:51 -0000	1.24
++++ mozilla/security/nss/lib/freebl/win_rand.c	15 Jul 2009 03:34:04 -0000	1.26
+@@ -58,6 +58,7 @@
+ static DWORD    totalFileBytes;
+ static DWORD    maxFileBytes	= 250000;	/* 250 thousand */
+ static DWORD    dwNumFiles, dwReadEvery, dwFileToRead;
++static PRBool   usedWindowsPRNG;
+ 
+ static BOOL
+ CurrentClockTickTime(LPDWORD lpdwHigh, LPDWORD lpdwLow)
+@@ -131,24 +132,25 @@
+     return n;
+ }
+ 
+-typedef PRInt32 (* Handler)(const char *);
++typedef PRInt32 (* Handler)(const PRUnichar *);
+ #define MAX_DEPTH 2
++#define MAX_FOLDERS 4
++#define MAX_FILES 1024
+ 
+ static void
+ EnumSystemFilesInFolder(Handler func, PRUnichar* szSysDir, int maxDepth) 
+ {
+     int                 iContinue;
++    unsigned int        uFolders  = 0;
++    unsigned int        uFiles    = 0;
+     HANDLE              lFindHandle;
+     WIN32_FIND_DATAW    fdData;
+     PRUnichar           szFileName[_MAX_PATH];
+-    char                narrowFileName[_MAX_PATH];
+ 
+     if (maxDepth < 0)
+     	return;
+-    // tack *.* on the end so we actually look for files. this will
+-    // not overflow
+-    wcscpy(szFileName, szSysDir);
+-    wcscat(szFileName, L"\\*.*");
++    // append *.* so we actually look for files.
++    _snwprintf(szFileName, _MAX_PATH, L"%s\\*.*", szSysDir);
+ 
+     lFindHandle = FindFirstFileW(szFileName, &fdData);
+     if (lFindHandle == INVALID_HANDLE_VALUE)
+@@ -163,13 +165,10 @@
+ 	    _snwprintf(szFileName, _MAX_PATH, L"%s\\%s", szSysDir, 
+ 		       fdData.cFileName);
+ 	    if (fdData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+-		EnumSystemFilesInFolder(func, szFileName, maxDepth - 1);
++		if (++uFolders <= MAX_FOLDERS)
++		    EnumSystemFilesInFolder(func, szFileName, maxDepth - 1);
+ 	    } else {
+-		iContinue = WideCharToMultiByte(CP_ACP, 0, szFileName, -1, 
+-						narrowFileName, _MAX_PATH, 
+-						NULL, NULL);
+-		if (iContinue)
+-		    iContinue = !(*func)(narrowFileName);
++		iContinue = (++uFiles <= MAX_FILES) && !(*func)(szFileName);
+ 	    }
+ 	}
+ 	if (iContinue)
+@@ -187,7 +186,6 @@
+ 	CSIDL_RECENT,
+ #ifndef WINCE		     
+ 	CSIDL_INTERNET_CACHE, 
+-	CSIDL_COMPUTERSNEARME, 
+ 	CSIDL_HISTORY,
+ #endif
+ 	0
+@@ -208,17 +206,16 @@
+ }
+ 
+ static PRInt32
+-CountFiles(const char *file)
++CountFiles(const PRUnichar *file)
+ {
+     dwNumFiles++;
+     return 0;
+ }
+ 
+-static void 
++static int
+ ReadSingleFile(const char *filename)
+ {
+     PRFileDesc *    file;
+-    int             nBytes;
+     unsigned char   buffer[1024];
+ 
+     file = PR_Open(filename, PR_RDONLY, 0);
+@@ -227,27 +224,43 @@
+ 	    ;
+         PR_Close(file);
+     }
++    return (file != NULL);
+ }
+ 
+ static PRInt32
+-ReadOneFile(const char *file)
++ReadOneFile(const PRUnichar *szFileName)
+ {
++    char narrowFileName[_MAX_PATH];
++
+     if (dwNumFiles == dwFileToRead) {
+-	ReadSingleFile(file);
++	int success = WideCharToMultiByte(CP_ACP, 0, szFileName, -1, 
++					  narrowFileName, _MAX_PATH, 
++					  NULL, NULL);
++	if (success)
++	    success = ReadSingleFile(narrowFileName);
++    	if (!success)
++	    dwFileToRead++; /* couldn't read this one, read the next one. */
+     }
+     dwNumFiles++;
+     return dwNumFiles > dwFileToRead;
+ }
+ 
+ static PRInt32
+-ReadFiles(const char *file)
++ReadFiles(const PRUnichar *szFileName)
+ {
++    char narrowFileName[_MAX_PATH];
++
+     if ((dwNumFiles % dwReadEvery) == 0) {
+ 	++filesToRead;
+     }
+     if (filesToRead) {
+-	DWORD    prevFileBytes = totalFileBytes;
+-        RNG_FileForRNG(file);
++	DWORD prevFileBytes = totalFileBytes;
++	int   iContinue     = WideCharToMultiByte(CP_ACP, 0, szFileName, -1, 
++						  narrowFileName, _MAX_PATH, 
++						  NULL, NULL);
++	if (iContinue) {
++	    RNG_FileForRNG(narrowFileName);
++	}
+ 	if (prevFileBytes < totalFileBytes) {
+ 	    --filesToRead;
+ 	}
+@@ -257,7 +270,7 @@
+ }
+ 
+ static void
+-ReadSystemFiles()
++ReadSystemFiles(void)
+ {
+     // first count the number of files
+     dwNumFiles = 0;
+@@ -277,6 +290,7 @@
+         dwReadEvery = 1;  // less than 10 files
+ 
+     dwNumFiles = 0;
++    totalFileBytes = 0;
+     EnumSystemFiles(ReadFiles);
+ }
+ 
+@@ -349,8 +363,9 @@
+     }
+ #endif
+ 
+-    // now let's do some files
+-    ReadSystemFiles();
++    // Skip the potentially slow file scanning if the OS's PRNG worked.
++    if (!usedWindowsPRNG)
++	ReadSystemFiles();
+ 
+     nBytes = RNG_GetNoise(buffer, 20);  // get up to 20 bytes
+     RNG_RandomUpdate(buffer, nBytes);
+@@ -410,8 +425,10 @@
+ size_t RNG_SystemRNG(void *dest, size_t maxLen)
+ {
+     size_t bytes = 0;
++    usedWindowsPRNG = PR_FALSE;
+     if (CeGenRandom(maxLen, dest)) {
+-	    bytes = maxLen;
++	bytes = maxLen;
++	usedWindowsPRNG = PR_TRUE;
+     }
+     if (bytes == 0) {
+ 	bytes = rng_systemFromNoise(dest,maxLen);
+@@ -429,8 +446,6 @@
+     struct stat     stat_buf;
+     unsigned char   buffer[1024];
+ 
+-   /* static DWORD    totalFileBytes = 0; */
+-
+     /* windows doesn't initialize all the bytes in the stat buf,
+      * so initialize them all here to avoid UMRs.
+      */
+@@ -516,6 +531,7 @@
+     HCRYPTPROV hCryptProv;
+     size_t bytes = 0;
+ 
++    usedWindowsPRNG = PR_FALSE;
+     hModule = LoadLibrary("advapi32.dll");
+     if (hModule == NULL) {
+ 	return rng_systemFromNoise(dest,maxLen);
+@@ -525,6 +541,7 @@
+     if (pRtlGenRandom) {
+ 	if (pRtlGenRandom(dest, maxLen)) {
+ 	    bytes = maxLen;
++	    usedWindowsPRNG = PR_TRUE;
+ 	} else {
+ 	    bytes = rng_systemFromNoise(dest,maxLen);
+ 	}
+@@ -544,6 +561,7 @@
+ 	PROV_RSA_FULL, CRYPT_VERIFYCONTEXT)) {
+ 	if (pCryptGenRandom(hCryptProv, maxLen, dest)) {
+ 	    bytes = maxLen;
++	    usedWindowsPRNG = PR_TRUE;
+ 	}
+ 	pCryptReleaseContext(hCryptProv, 0);
+     }
+Index: mozilla/security/nss/lib/freebl/mpi/mpi_x86_os2.s
+===================================================================
+RCS file: mozilla/security/nss/lib/freebl/mpi/mpi_x86_os2.s
+diff -N mozilla/security/nss/lib/freebl/mpi/mpi_x86_os2.s
+--- /dev/null	1 Jan 1970 00:00:00 -0000
++++ mozilla/security/nss/lib/freebl/mpi/mpi_x86_os2.s	4 Jun 2009 23:53:42 -0000	1.1
+@@ -0,0 +1,573 @@
++#
++# ***** BEGIN LICENSE BLOCK *****
++# Version: MPL 1.1/GPL 2.0/LGPL 2.1
++#
++# The contents of this file are subject to the Mozilla Public License Version
++# 1.1 (the "License"); you may not use this file except in compliance with
++# the License. You may obtain a copy of the License at
++# http://www.mozilla.org/MPL/
++#
++# Software distributed under the License is distributed on an "AS IS" basis,
++# WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++# for the specific language governing rights and limitations under the
++# License.
++#
++# The Original Code is the Netscape security libraries.
++#
++# The Initial Developer of the Original Code is
++# Netscape Communications Corporation.
++# Portions created by the Initial Developer are Copyright (C) 2000
++# the Initial Developer. All Rights Reserved.
++#
++# Contributor(s):
++#
++# Alternatively, the contents of this file may be used under the terms of
++# either the GNU General Public License Version 2 or later (the "GPL"), or
++# the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++# in which case the provisions of the GPL or the LGPL are applicable instead
++# of those above. If you wish to allow use of your version of this file only
++# under the terms of either the GPL or the LGPL, and not to allow others to
++# use your version of this file under the terms of the MPL, indicate your
++# decision by deleting the provisions above and replace them with the notice
++# and other provisions required by the GPL or the LGPL. If you do not delete
++# the provisions above, a recipient may use your version of this file under
++# the terms of any one of the MPL, the GPL or the LGPL.
++#
++# ***** END LICENSE BLOCK *****
++
++#  $Id$
++#
++
++.data
++.align 4
++ #
++ # -1 means to call _s_mpi_is_sse to determine if we support sse 
++ #    instructions.
++ #  0 means to use x86 instructions
++ #  1 means to use sse2 instructions
++.type	is_sse,@object
++.size	is_sse,4
++is_sse: .long	-1 
++
++#
++# sigh, handle the difference between -fPIC and not PIC
++# default to pic, since this file seems to be exclusively
++# linux right now (solaris uses mpi_i86pc.s and windows uses
++# mpi_x86_asm.c)
++#
++#.ifndef NO_PIC
++#.macro GET   var,reg
++#    movl   \var@GOTOFF(%ebx),\reg
++#.endm
++#.macro PUT   reg,var
++#    movl   \reg,\var@GOTOFF(%ebx)
++#.endm
++#.else
++.macro GET   var,reg
++    movl   \var,\reg
++.endm
++.macro PUT   reg,var
++    movl   \reg,\var
++.endm
++#.endif
++
++.text
++
++
++ #  ebp - 36:	caller's esi
++ #  ebp - 32:	caller's edi
++ #  ebp - 28:	
++ #  ebp - 24:	
++ #  ebp - 20:	
++ #  ebp - 16:	
++ #  ebp - 12:	
++ #  ebp - 8:	
++ #  ebp - 4:	
++ #  ebp + 0:	caller's ebp
++ #  ebp + 4:	return address
++ #  ebp + 8:	a	argument
++ #  ebp + 12:	a_len	argument
++ #  ebp + 16:	b	argument
++ #  ebp + 20:	c	argument
++ #  registers:
++ # 	eax:
++ #	ebx:	carry
++ #	ecx:	a_len
++ #	edx:
++ #	esi:	a ptr
++ #	edi:	c ptr
++.globl	_s_mpv_mul_d
++.type	_s_mpv_mul_d,@function
++_s_mpv_mul_d:
++    GET    is_sse,%eax
++    cmp    $0,%eax
++    je     _s_mpv_mul_d_x86
++    jg     _s_mpv_mul_d_sse2
++    call   _s_mpi_is_sse2
++    PUT    %eax,is_sse
++    cmp    $0,%eax
++    jg     _s_mpv_mul_d_sse2
++_s_mpv_mul_d_x86:
++    push   %ebp
++    mov    %esp,%ebp
++    sub    $28,%esp
++    push   %edi
++    push   %esi
++    push   %ebx
++    movl   $0,%ebx		# carry = 0
++    mov    12(%ebp),%ecx	# ecx = a_len
++    mov    20(%ebp),%edi
++    cmp    $0,%ecx
++    je     2f			# jmp if a_len == 0
++    mov    8(%ebp),%esi		# esi = a
++    cld
++1:
++    lodsl			# eax = [ds:esi]; esi += 4
++    mov    16(%ebp),%edx	# edx = b
++    mull   %edx			# edx:eax = Phi:Plo = a_i * b
++
++    add    %ebx,%eax		# add carry (%ebx) to edx:eax
++    adc    $0,%edx
++    mov    %edx,%ebx		# high half of product becomes next carry
++
++    stosl			# [es:edi] = ax; edi += 4;
++    dec    %ecx			# --a_len
++    jnz    1b			# jmp if a_len != 0
++2:
++    mov    %ebx,0(%edi)		# *c = carry
++    pop    %ebx
++    pop    %esi
++    pop    %edi
++    leave  
++    ret    
++    nop
++_s_mpv_mul_d_sse2:
++    push   %ebp
++    mov    %esp,%ebp
++    push   %edi
++    push   %esi
++    psubq  %mm2,%mm2		# carry = 0
++    mov    12(%ebp),%ecx	# ecx = a_len
++    movd   16(%ebp),%mm1	# mm1 = b
++    mov    20(%ebp),%edi
++    cmp    $0,%ecx
++    je     6f			# jmp if a_len == 0
++    mov    8(%ebp),%esi		# esi = a
++    cld
++5:
++    movd   0(%esi),%mm0         # mm0 = *a++
++    add    $4,%esi
++    pmuludq %mm1,%mm0           # mm0 = b * *a++
++    paddq  %mm0,%mm2            # add the carry
++    movd   %mm2,0(%edi)         # store the 32bit result
++    add    $4,%edi
++    psrlq  $32, %mm2		# save the carry
++    dec    %ecx			# --a_len
++    jnz    5b			# jmp if a_len != 0
++6:
++    movd   %mm2,0(%edi)		# *c = carry
++    emms
++    pop    %esi
++    pop    %edi
++    leave  
++    ret    
++    nop
++
++ #  ebp - 36:	caller's esi
++ #  ebp - 32:	caller's edi
++ #  ebp - 28:	
++ #  ebp - 24:	
++ #  ebp - 20:	
++ #  ebp - 16:	
++ #  ebp - 12:	
++ #  ebp - 8:	
++ #  ebp - 4:	
++ #  ebp + 0:	caller's ebp
++ #  ebp + 4:	return address
++ #  ebp + 8:	a	argument
++ #  ebp + 12:	a_len	argument
++ #  ebp + 16:	b	argument
++ #  ebp + 20:	c	argument
++ #  registers:
++ # 	eax:
++ #	ebx:	carry
++ #	ecx:	a_len
++ #	edx:
++ #	esi:	a ptr
++ #	edi:	c ptr
++.globl	_s_mpv_mul_d_add
++.type	_s_mpv_mul_d_add,@function
++_s_mpv_mul_d_add:
++    GET    is_sse,%eax
++    cmp    $0,%eax
++    je     _s_mpv_mul_d_add_x86
++    jg     _s_mpv_mul_d_add_sse2
++    call   _s_mpi_is_sse2
++    PUT    %eax,is_sse
++    cmp    $0,%eax
++    jg     _s_mpv_mul_d_add_sse2
++_s_mpv_mul_d_add_x86:
++    push   %ebp
++    mov    %esp,%ebp
++    sub    $28,%esp
++    push   %edi
++    push   %esi
++    push   %ebx
++    movl   $0,%ebx		# carry = 0
++    mov    12(%ebp),%ecx	# ecx = a_len
++    mov    20(%ebp),%edi
++    cmp    $0,%ecx
++    je     11f			# jmp if a_len == 0
++    mov    8(%ebp),%esi		# esi = a
++    cld
++10:
++    lodsl			# eax = [ds:esi]; esi += 4
++    mov    16(%ebp),%edx	# edx = b
++    mull   %edx			# edx:eax = Phi:Plo = a_i * b
++
++    add    %ebx,%eax		# add carry (%ebx) to edx:eax
++    adc    $0,%edx
++    mov    0(%edi),%ebx		# add in current word from *c
++    add    %ebx,%eax		
++    adc    $0,%edx
++    mov    %edx,%ebx		# high half of product becomes next carry
++
++    stosl			# [es:edi] = ax; edi += 4;
++    dec    %ecx			# --a_len
++    jnz    10b			# jmp if a_len != 0
++11:
++    mov    %ebx,0(%edi)		# *c = carry
++    pop    %ebx
++    pop    %esi
++    pop    %edi
++    leave  
++    ret    
++    nop
++_s_mpv_mul_d_add_sse2:
++    push   %ebp
++    mov    %esp,%ebp
++    push   %edi
++    push   %esi
++    psubq  %mm2,%mm2		# carry = 0
++    mov    12(%ebp),%ecx	# ecx = a_len
++    movd   16(%ebp),%mm1	# mm1 = b
++    mov    20(%ebp),%edi
++    cmp    $0,%ecx
++    je     16f			# jmp if a_len == 0
++    mov    8(%ebp),%esi		# esi = a
++    cld
++15:
++    movd   0(%esi),%mm0         # mm0 = *a++
++    add    $4,%esi
++    pmuludq %mm1,%mm0           # mm0 = b * *a++
++    paddq  %mm0,%mm2            # add the carry
++    movd   0(%edi),%mm0
++    paddq  %mm0,%mm2            # add the carry
++    movd   %mm2,0(%edi)         # store the 32bit result
++    add    $4,%edi
++    psrlq  $32, %mm2		# save the carry
++    dec    %ecx			# --a_len
++    jnz    15b			# jmp if a_len != 0
++16:
++    movd   %mm2,0(%edi)		# *c = carry
++    emms
++    pop    %esi
++    pop    %edi
++    leave  
++    ret    
++    nop
++
++ #  ebp - 8:	caller's esi
++ #  ebp - 4:	caller's edi
++ #  ebp + 0:	caller's ebp
++ #  ebp + 4:	return address
++ #  ebp + 8:	a	argument
++ #  ebp + 12:	a_len	argument
++ #  ebp + 16:	b	argument
++ #  ebp + 20:	c	argument
++ #  registers:
++ # 	eax:
++ #	ebx:	carry
++ #	ecx:	a_len
++ #	edx:
++ #	esi:	a ptr
++ #	edi:	c ptr
++.globl	_s_mpv_mul_d_add_prop
++.type	_s_mpv_mul_d_add_prop,@function
++_s_mpv_mul_d_add_prop:
++    GET    is_sse,%eax
++    cmp    $0,%eax
++    je     _s_mpv_mul_d_add_prop_x86
++    jg     _s_mpv_mul_d_add_prop_sse2
++    call   _s_mpi_is_sse2
++    PUT    %eax,is_sse
++    cmp    $0,%eax
++    jg     _s_mpv_mul_d_add_prop_sse2
++_s_mpv_mul_d_add_prop_x86:
++    push   %ebp
++    mov    %esp,%ebp
++    sub    $28,%esp
++    push   %edi
++    push   %esi
++    push   %ebx
++    movl   $0,%ebx		# carry = 0
++    mov    12(%ebp),%ecx	# ecx = a_len
++    mov    20(%ebp),%edi
++    cmp    $0,%ecx
++    je     21f			# jmp if a_len == 0
++    cld
++    mov    8(%ebp),%esi		# esi = a
++20:
++    lodsl			# eax = [ds:esi]; esi += 4
++    mov    16(%ebp),%edx	# edx = b
++    mull   %edx			# edx:eax = Phi:Plo = a_i * b
++
++    add    %ebx,%eax		# add carry (%ebx) to edx:eax
++    adc    $0,%edx
++    mov    0(%edi),%ebx		# add in current word from *c
++    add    %ebx,%eax		
++    adc    $0,%edx
++    mov    %edx,%ebx		# high half of product becomes next carry
++
++    stosl			# [es:edi] = ax; edi += 4;
++    dec    %ecx			# --a_len
++    jnz    20b			# jmp if a_len != 0
++21:
++    cmp    $0,%ebx		# is carry zero?
++    jz     23f
++    mov    0(%edi),%eax		# add in current word from *c
++    add	   %ebx,%eax
++    stosl			# [es:edi] = ax; edi += 4;
++    jnc    23f
++22:
++    mov    0(%edi),%eax		# add in current word from *c
++    adc	   $0,%eax
++    stosl			# [es:edi] = ax; edi += 4;
++    jc     22b
++23:
++    pop    %ebx
++    pop    %esi
++    pop    %edi
++    leave  
++    ret    
++    nop
++_s_mpv_mul_d_add_prop_sse2:
++    push   %ebp
++    mov    %esp,%ebp
++    push   %edi
++    push   %esi
++    push   %ebx
++    psubq  %mm2,%mm2		# carry = 0
++    mov    12(%ebp),%ecx	# ecx = a_len
++    movd   16(%ebp),%mm1	# mm1 = b
++    mov    20(%ebp),%edi
++    cmp    $0,%ecx
++    je     26f			# jmp if a_len == 0
++    mov    8(%ebp),%esi		# esi = a
++    cld
++25:
++    movd   0(%esi),%mm0         # mm0 = *a++
++    movd   0(%edi),%mm3		# fetch the sum
++    add    $4,%esi
++    pmuludq %mm1,%mm0           # mm0 = b * *a++
++    paddq  %mm0,%mm2            # add the carry
++    paddq  %mm3,%mm2            # add *c++
++    movd   %mm2,0(%edi)         # store the 32bit result
++    add    $4,%edi
++    psrlq  $32, %mm2		# save the carry
++    dec    %ecx			# --a_len
++    jnz    25b			# jmp if a_len != 0
++26:
++    movd   %mm2,%ebx
++    cmp    $0,%ebx		# is carry zero?
++    jz     28f
++    mov    0(%edi),%eax
++    add    %ebx, %eax
++    stosl
++    jnc    28f
++27:
++    mov    0(%edi),%eax		# add in current word from *c
++    adc	   $0,%eax
++    stosl			# [es:edi] = ax; edi += 4;
++    jc     27b
++28:
++    emms
++    pop    %ebx
++    pop    %esi
++    pop    %edi
++    leave  
++    ret    
++    nop
++
++
++ #  ebp - 20:	caller's esi
++ #  ebp - 16:	caller's edi
++ #  ebp - 12:	
++ #  ebp - 8:	carry
++ #  ebp - 4:	a_len	local
++ #  ebp + 0:	caller's ebp
++ #  ebp + 4:	return address
++ #  ebp + 8:	pa	argument
++ #  ebp + 12:	a_len	argument
++ #  ebp + 16:	ps	argument
++ #  ebp + 20:	
++ #  registers:
++ # 	eax:
++ #	ebx:	carry
++ #	ecx:	a_len
++ #	edx:
++ #	esi:	a ptr
++ #	edi:	c ptr
++
++.globl	_s_mpv_sqr_add_prop
++.type	_s_mpv_sqr_add_prop,@function
++_s_mpv_sqr_add_prop:
++     GET   is_sse,%eax
++     cmp    $0,%eax
++     je     _s_mpv_sqr_add_prop_x86
++     jg     _s_mpv_sqr_add_prop_sse2
++     call   _s_mpi_is_sse2
++     PUT    %eax,is_sse
++     cmp    $0,%eax
++     jg     _s_mpv_sqr_add_prop_sse2
++_s_mpv_sqr_add_prop_x86:
++     push   %ebp
++     mov    %esp,%ebp
++     sub    $12,%esp
++     push   %edi
++     push   %esi
++     push   %ebx
++     movl   $0,%ebx		# carry = 0
++     mov    12(%ebp),%ecx	# a_len
++     mov    16(%ebp),%edi	# edi = ps
++     cmp    $0,%ecx
++     je     31f			# jump if a_len == 0
++     cld
++     mov    8(%ebp),%esi	# esi = pa
++30:
++     lodsl			# %eax = [ds:si]; si += 4;
++     mull   %eax
++
++     add    %ebx,%eax		# add "carry"
++     adc    $0,%edx
++     mov    0(%edi),%ebx
++     add    %ebx,%eax		# add low word from result
++     mov    4(%edi),%ebx
++     stosl			# [es:di] = %eax; di += 4;
++     adc    %ebx,%edx		# add high word from result
++     movl   $0,%ebx
++     mov    %edx,%eax
++     adc    $0,%ebx
++     stosl			# [es:di] = %eax; di += 4;
++     dec    %ecx		# --a_len
++     jnz    30b			# jmp if a_len != 0
++31:
++    cmp    $0,%ebx		# is carry zero?
++    jz     34f
++    mov    0(%edi),%eax		# add in current word from *c
++    add	   %ebx,%eax
++    stosl			# [es:edi] = ax; edi += 4;
++    jnc    34f
++32:
++    mov    0(%edi),%eax		# add in current word from *c
++    adc	   $0,%eax
++    stosl			# [es:edi] = ax; edi += 4;
++    jc     32b
++34:
++    pop    %ebx
++    pop    %esi
++    pop    %edi
++    leave  
++    ret    
++    nop
++_s_mpv_sqr_add_prop_sse2:
++    push   %ebp
++    mov    %esp,%ebp
++    push   %edi
++    push   %esi
++    push   %ebx
++    psubq  %mm2,%mm2		# carry = 0
++    mov    12(%ebp),%ecx	# ecx = a_len
++    mov    16(%ebp),%edi
++    cmp    $0,%ecx
++    je     36f			# jmp if a_len == 0
++    mov    8(%ebp),%esi		# esi = a
++    cld
++35:
++    movd   0(%esi),%mm0        # mm0 = *a
++    movd   0(%edi),%mm3	       # fetch the sum
++    add	   $4,%esi
++    pmuludq %mm0,%mm0          # mm0 = sqr(a)
++    paddq  %mm0,%mm2           # add the carry
++    paddq  %mm3,%mm2           # add the low word
++    movd   4(%edi),%mm3
++    movd   %mm2,0(%edi)        # store the 32bit result
++    psrlq  $32, %mm2	
++    paddq  %mm3,%mm2           # add the high word
++    movd   %mm2,4(%edi)        # store the 32bit result
++    psrlq  $32, %mm2	       # save the carry.
++    add    $8,%edi
++    dec    %ecx			# --a_len
++    jnz    35b			# jmp if a_len != 0
++36:
++    movd   %mm2,%ebx
++    cmp    $0,%ebx		# is carry zero?
++    jz     38f
++    mov    0(%edi),%eax
++    add    %ebx, %eax
++    stosl
++    jnc    38f
++37:
++    mov    0(%edi),%eax		# add in current word from *c
++    adc	   $0,%eax
++    stosl			# [es:edi] = ax; edi += 4;
++    jc     37b
++38:
++    emms
++    pop    %ebx
++    pop    %esi
++    pop    %edi
++    leave  
++    ret    
++    nop
++
++ #
++ # Divide 64-bit (Nhi,Nlo) by 32-bit divisor, which must be normalized
++ # so its high bit is 1.   This code is from NSPR.
++ #
++ # mp_err _s_mpv_div_2dx1d(mp_digit Nhi, mp_digit Nlo, mp_digit divisor,
++ # 		          mp_digit *qp, mp_digit *rp)
++
++ #  esp +  0:   Caller's ebx
++ #  esp +  4:	return address
++ #  esp +  8:	Nhi	argument
++ #  esp + 12:	Nlo	argument
++ #  esp + 16:	divisor	argument
++ #  esp + 20:	qp	argument
++ #  esp + 24:   rp	argument
++ #  registers:
++ # 	eax:
++ #	ebx:	carry
++ #	ecx:	a_len
++ #	edx:
++ #	esi:	a ptr
++ #	edi:	c ptr
++ # 
++
++.globl	_s_mpv_div_2dx1d
++.type	_s_mpv_div_2dx1d,@function
++_s_mpv_div_2dx1d:
++       push   %ebx
++       mov    8(%esp),%edx
++       mov    12(%esp),%eax
++       mov    16(%esp),%ebx
++       div    %ebx
++       mov    20(%esp),%ebx
++       mov    %eax,0(%ebx)
++       mov    24(%esp),%ebx
++       mov    %edx,0(%ebx)
++       xor    %eax,%eax		# return zero
++       pop    %ebx
++       ret    
++       nop
++  
+Index: mozilla/security/nss/lib/jar/jarver.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/jar/jarver.c,v
+retrieving revision 1.16
+retrieving revision 1.17
+diff -u -u -r1.16 -r1.17
+--- mozilla/security/nss/lib/jar/jarver.c	28 Apr 2009 04:25:03 -0000	1.16
++++ mozilla/security/nss/lib/jar/jarver.c	30 Apr 2009 18:37:05 -0000	1.17
+@@ -343,11 +343,11 @@
+ 
+     /* skip over the preliminary section */
+     /* This is one section at the top of the file with global metainfo */
+-    while (raw_len) {
++    while (raw_len > 0) {
+ 	JAR_Metainfo *met;
+ 
+ 	raw_manifest = jar_eat_line(1, PR_TRUE, raw_manifest, &raw_len);
+-	if (!*raw_manifest)
++	if (raw_len <= 0 || !*raw_manifest)
+ 	    break;
+ 
+ 	met = PORT_ZNew(JAR_Metainfo);
+@@ -443,7 +443,7 @@
+     }
+ 
+     /* done with top section of global data */
+-    while (raw_len) {
++    while (raw_len > 0) {
+ 	*x_md5 = 0;
+ 	*x_sha = 0;
+ 	*x_name = 0;
+@@ -461,7 +461,7 @@
+ 	    } else
+ 		sec = raw_manifest;
+ 
+-	    if (!PORT_Strncasecmp(sec, "Name:", 5)) {
++	    if (sec_len > 0 && !PORT_Strncasecmp(sec, "Name:", 5)) {
+ 		if (type == jarTypeMF)
+ 		    mfdig = jar_digest_section(sec, sec_len);
+ 		else
+@@ -470,9 +470,9 @@
+ 	}
+ 
+ 
+-	while (raw_len) {
++	while (raw_len > 0) {
+ 	    raw_manifest = jar_eat_line(1, PR_TRUE, raw_manifest, &raw_len);
+-	    if (!*raw_manifest)
++	    if (raw_len <= 0 || !*raw_manifest)
+ 		break; /* blank line, done with this entry */
+ 
+ 	    if (PORT_Strlen(raw_manifest) >= SZ) {
+@@ -747,53 +747,72 @@
+ /*
+  *  e a t _ l i n e
+  *
+- *  Consume an ASCII line from the top of a file kept in memory. 
+- *  This destroys the file in place. 
++ * Reads and/or modifies input buffer "data" of length "*len".
++ * This function does zero, one or two of the following tasks:
++ * 1) if "lines" is non-zero, it reads and discards that many lines from
++ *    the input.  NUL characters are treated as end-of-line characters,
++ *    not as end-of-input characters.  The input is NOT NUL terminated.
++ *    Note: presently, all callers pass either 0 or 1 for lines.
++ * 2) After skipping the specified number of input lines, if "eating" is 
++ *    non-zero, it finds the end of the next line of input and replaces
++ *    the end of line character(s) with a NUL character.
++ *  This function modifies the input buffer, containing the file, in place. 
+  *  This function handles PC, Mac, and Unix style text files.
++ *  On entry, *len contains the maximum number of characters that this
++ *  function should ever examine, starting with the character in *data.
++ *  On return, *len is reduced by the number of characters skipped by the
++ *  first task, if any;
++ *  If lines is zero and eating is false, this function returns
++ *  the value in the data argument, but otherwise does nothing.
+  */
+ static char *
+ jar_eat_line(int lines, int eating, char *data, long *len)
+ {
+-    char *ret;
++    char *start = data;
++    long maxLen = *len;
+ 
+-    ret = data;
+-    if (!*len)
+-	return ret;
++    if (maxLen <= 0)
++	return start;
++
++#define GO_ON ((data - start) < maxLen)
+ 
+     /* Eat the requisite number of lines, if any;
+-	 prior to terminating the current line with a 0. */
++       prior to terminating the current line with a 0. */
++    for (/* yip */ ; lines > 0; lines--) {
++	while (GO_ON && *data && *data != '\r' && *data != '\n')
++	    data++;
+ 
+-    for (/* yip */ ; lines; lines--) {
+-	while (*data && *data != '\n')
++	/* Eat any leading CR */
++	if (GO_ON && *data == '\r')
+ 	    data++;
+ 
+ 	/* After the CR, ok to eat one LF */
+-	if (*data == '\n')
++	if (GO_ON && *data == '\n')
+ 	    data++;
+ 
+-	/* If there are zeros, we put them there */
+-	while (*data == 0 && data - ret < *len)
++	/* If there are NULs, this function probably put them there */
++	while (GO_ON && !*data)
+ 	    data++;
+     }
+-
+-    *len -= data - ret;
+-    ret = data;
+-
+-    if (eating) {
++    maxLen -= data - start;           /* we have this many characters left. */
++    *len  = maxLen;
++    start = data;                     /* now start again here.            */
++    if (maxLen > 0 && eating) {
+ 	/* Terminate this line with a 0 */
+-	while (*data && *data != '\n' && *data != '\r')
++	while (GO_ON && *data && *data != '\n' && *data != '\r')
+ 	    data++;
+ 
+-	/* In any case we are allowed to eat CR */
+-	if (*data == '\r')
++	/* If not past the end, we are allowed to eat one CR */
++	if (GO_ON && *data == '\r')
+ 	    *data++ = 0;
+ 
+-	/* After the CR, ok to eat one LF */
+-	if (*data == '\n')
++	/* After the CR (if any), if not past the end, ok to eat one LF */
++	if (GO_ON && *data == '\n')
+ 	    *data++ = 0;
+     }
+-    return ret;
++    return start;
+ }
++#undef GO_ON
+ 
+ /*
+  *  j a r _ d i g e s t _ s e c t i o n
+@@ -811,9 +830,9 @@
+     global_end = manifest;
+     global_len = length;
+ 
+-    while (global_len) {
++    while (global_len > 0) {
+ 	global_end = jar_eat_line(1, PR_FALSE, global_end, &global_len);
+-	if (*global_end == 0 || *global_end == '\n')
++	if (global_len > 0 && (*global_end == 0 || *global_end == '\n'))
+ 	    break;
+     }
+     return JAR_calculate_digest (manifest, global_end - manifest);
+Index: mozilla/security/nss/lib/libpkix/include/pkix_errorstrings.h
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/libpkix/include/pkix_errorstrings.h,v
+retrieving revision 1.31
+retrieving revision 1.32
+diff -u -u -r1.31 -r1.32
+--- mozilla/security/nss/lib/libpkix/include/pkix_errorstrings.h	20 Apr 2009 05:17:45 -0000	1.31
++++ mozilla/security/nss/lib/libpkix/include/pkix_errorstrings.h	8 Jun 2009 21:13:07 -0000	1.32
+@@ -142,7 +142,7 @@
+ PKIX_ERRORENTRY(CERTCHECKEXTENDEDKEYUSAGEFAILED,pkix_pl_Cert_CheckExtendedKeyUsage failed,0),
+ PKIX_ERRORENTRY(CERTCHECKKEYUSAGEFAILED,CERT_CheckKeyUsage failed,SEC_ERROR_INADEQUATE_KEY_USAGE),
+ PKIX_ERRORENTRY(CERTCHECKNAMECONSTRAINTSFAILED,PKIX_PL_Cert_CheckNameConstraints failed,0),
+-PKIX_ERRORENTRY(CERTCHECKVALIDITYFAILED,PKIX_PL_Cert_CheckValidity failed,SEC_ERROR_CERT_NOT_VALID),
++PKIX_ERRORENTRY(CERTCHECKVALIDITYFAILED,PKIX_PL_Cert_CheckValidity failed,0),
+ PKIX_ERRORENTRY(CERTCOMPLETECRLDECODEDENTRIESFAILED,CERT_CompleteCRLDecodedEntries failed,0),
+ PKIX_ERRORENTRY(CERTCOPYNAMECONSTRAINTFAILED,CERT_CopyNameConstraint failed,0),
+ PKIX_ERRORENTRY(CERTCOPYNAMEFAILED,CERT_CopyName failed,0),
+Index: mozilla/security/nss/lib/libpkix/pkix_pl_nss/module/pkix_pl_aiamgr.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/libpkix/pkix_pl_nss/module/pkix_pl_aiamgr.c,v
+retrieving revision 1.11
+retrieving revision 1.12
+diff -u -u -r1.11 -r1.12
+--- mozilla/security/nss/lib/libpkix/pkix_pl_nss/module/pkix_pl_aiamgr.c	19 Dec 2008 21:53:34 -0000	1.11
++++ mozilla/security/nss/lib/libpkix/pkix_pl_nss/module/pkix_pl_aiamgr.c	15 Jul 2009 22:36:45 -0000	1.12
+@@ -274,6 +274,8 @@
+                 /* find or create httpClient = default client */
+ 		httpClient = SEC_GetRegisteredHttpClient();
+ 		aiaMgr->client.hdata.httpClient = httpClient;
++		if (!httpClient)
++		    PKIX_ERROR(PKIX_OUTOFMEMORY);
+ 
+ 		if (httpClient->version == 1) {
+ 
+Index: mozilla/security/nss/lib/libpkix/pkix_pl_nss/pki/pkix_pl_crldp.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/libpkix/pkix_pl_nss/pki/pkix_pl_crldp.c,v
+retrieving revision 1.1
+retrieving revision 1.2
+diff -u -u -r1.1 -r1.2
+--- mozilla/security/nss/lib/libpkix/pkix_pl_nss/pki/pkix_pl_crldp.c	18 Apr 2009 06:31:27 -0000	1.1
++++ mozilla/security/nss/lib/libpkix/pkix_pl_nss/pki/pkix_pl_crldp.c	15 Jul 2009 22:38:23 -0000	1.2
+@@ -152,7 +152,7 @@
+             issuerName = certIssuerName;
+         }
+         rdnArena = PORT_NewArena(DER_DEFAULT_CHUNKSIZE);
+-        if (rdnArena) {
++        if (!rdnArena) {
+             PKIX_ERROR(PKIX_PORTARENAALLOCFAILED);
+         }
+         issuerNameCopy = (CERTName *)PORT_ArenaZNew(rdnArena, CERTName*);
+@@ -164,7 +164,7 @@
+             PKIX_ERROR(PKIX_ALLOCERROR);
+         }
+         rv = CERT_AddRDN(issuerNameCopy, (CERTRDN*)relName);
+-        if (rv = SECFailure) {
++        if (rv == SECFailure) {
+             PKIX_ERROR(PKIX_ALLOCERROR);
+         }
+         dpl->distPointType = relativeDistinguishedName;
+Index: mozilla/security/nss/lib/nss/config.mk
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/nss/config.mk,v
+retrieving revision 1.33
+retrieving revision 1.35
+diff -u -u -r1.33 -r1.35
+--- mozilla/security/nss/lib/nss/config.mk	11 Apr 2009 21:18:43 -0000	1.33
++++ mozilla/security/nss/lib/nss/config.mk	11 Jun 2009 00:55:45 -0000	1.35
+@@ -129,29 +129,6 @@
+ 	../libpkix/pkix_pl_nss/module \
+ 	$(NULL)
+ 
+-ifeq ($(OS_TARGET),SunOS)
+-ifeq ($(BUILD_SUN_PKG), 1)
+-# The -R '$ORIGIN' linker option instructs this library to search for its
+-# dependencies in the same directory where it resides.
+-ifeq ($(USE_64), 1)
+-MKSHLIB += -R '$$ORIGIN:/usr/lib/mps/secv1/64:/usr/lib/mps/64'
+-else
+-MKSHLIB += -R '$$ORIGIN:/usr/lib/mps/secv1:/usr/lib/mps'
+-endif
+-else
+-MKSHLIB += -R '$$ORIGIN'
+-endif
+-endif
+-
+-ifeq ($(OS_ARCH), HP-UX) 
+-ifneq ($(OS_TEST), ia64)
+-# pa-risc
+-ifeq ($(USE_64), 1)
+-MKSHLIB += +b '$$ORIGIN'
+-endif
+-endif
+-endif
+-
+ ifeq (,$(filter-out WINNT WIN95,$(OS_TARGET)))
+ ifndef NS_USE_GCC
+ # Export 'mktemp' to be backward compatible with NSS 3.2.x and 3.3.x
+Index: mozilla/security/nss/lib/nss/nss.h
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/nss/nss.h,v
+retrieving revision 1.66
+retrieving revision 1.67
+diff -u -u -r1.66 -r1.67
+--- mozilla/security/nss/lib/nss/nss.h	30 Apr 2009 18:16:09 -0000	1.66
++++ mozilla/security/nss/lib/nss/nss.h	20 Jul 2009 20:06:57 -0000	1.67
+@@ -66,7 +66,7 @@
+  * The format of the version string should be
+  *     "<major version>.<minor version>[.<patch level>][ <ECC>][ <Beta>]"
+  */
+-#define NSS_VERSION  "3.12.4.1" _NSS_ECC_STRING _NSS_CUSTOMIZED " Beta"
++#define NSS_VERSION  "3.12.4.4" _NSS_ECC_STRING _NSS_CUSTOMIZED " Beta"
+ #define NSS_VMAJOR   3
+ #define NSS_VMINOR   12
+ #define NSS_VPATCH   4
+Index: mozilla/security/nss/lib/nss/nssinit.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/nss/nssinit.c,v
+retrieving revision 1.97
+retrieving revision 1.98
+diff -u -u -r1.97 -r1.98
+--- mozilla/security/nss/lib/nss/nssinit.c	22 Aug 2008 01:33:03 -0000	1.97
++++ mozilla/security/nss/lib/nss/nssinit.c	29 May 2009 19:23:30 -0000	1.98
+@@ -39,6 +39,7 @@
+ /* $Id$ */
+ 
+ #include <ctype.h>
++#include <string.h>
+ #include "seccomon.h"
+ #include "prinit.h"
+ #include "prprf.h"
+@@ -555,7 +556,11 @@
+ 				STAN_GetDefaultTrustDomain());
+ 	if ((!noModDB) && (!noCertDB) && (!noRootInit)) {
+ 	    if (!SECMOD_HasRootCerts()) {
+-		nss_FindExternalRoot(configdir, secmodName);
++		const char *dbpath = configdir;
++		if (strncmp(dbpath, "sql:", 4) == 0) {
++		    dbpath += 4;
++		}
++		nss_FindExternalRoot(dbpath, secmodName);
+ 	    }
+ 	}
+ 	pk11sdr_Init();
+Index: mozilla/security/nss/lib/pk11wrap/pk11auth.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/pk11wrap/pk11auth.c,v
+retrieving revision 1.9
+retrieving revision 1.10
+diff -u -u -r1.9 -r1.10
+--- mozilla/security/nss/lib/pk11wrap/pk11auth.c	5 Apr 2008 01:42:52 -0000	1.9
++++ mozilla/security/nss/lib/pk11wrap/pk11auth.c	16 Jun 2009 06:15:23 -0000	1.10
+@@ -630,7 +630,7 @@
+ void PK11_LogoutAll(void)
+ {
+     SECMODListLock *lock = SECMOD_GetDefaultModuleListLock();
+-    SECMODModuleList *modList = SECMOD_GetDefaultModuleList();
++    SECMODModuleList *modList;
+     SECMODModuleList *mlp = NULL;
+     int i;
+ 
+@@ -640,6 +640,7 @@
+     }
+ 
+     SECMOD_GetReadLock(lock);
++    modList = SECMOD_GetDefaultModuleList();
+     /* find the number of entries */
+     for (mlp = modList; mlp != NULL; mlp = mlp->next) {
+ 	for (i=0; i < mlp->module->slotCount; i++) {
+Index: mozilla/security/nss/lib/pk11wrap/pk11sdr.h
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/pk11wrap/pk11sdr.h,v
+retrieving revision 1.2
+retrieving revision 1.4
+diff -u -u -r1.2 -r1.4
+--- mozilla/security/nss/lib/pk11wrap/pk11sdr.h	25 Apr 2004 15:03:12 -0000	1.2
++++ mozilla/security/nss/lib/pk11wrap/pk11sdr.h	14 Jul 2009 21:45:19 -0000	1.4
+@@ -43,13 +43,14 @@
+ 
+ /*
+  * PK11SDR_Encrypt - encrypt data using the specified key id or SDR default
+- *
++ * result should be freed with SECItem_ZfreeItem
+  */
+ SECStatus
+ PK11SDR_Encrypt(SECItem *keyid, SECItem *data, SECItem *result, void *cx);
+ 
+ /*
+  * PK11SDR_Decrypt - decrypt data previously encrypted with PK11SDR_Encrypt
++ * result should be freed with SECItem_ZfreeItem
+  */
+ SECStatus
+ PK11SDR_Decrypt(SECItem *data, SECItem *result, void *cx);
+Index: mozilla/security/nss/lib/pk11wrap/pk11skey.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/pk11wrap/pk11skey.c,v
+retrieving revision 1.114
+retrieving revision 1.117
+diff -u -u -r1.114 -r1.117
+--- mozilla/security/nss/lib/pk11wrap/pk11skey.c	31 Mar 2009 23:49:06 -0000	1.114
++++ mozilla/security/nss/lib/pk11wrap/pk11skey.c	20 Jun 2009 00:38:53 -0000	1.117
+@@ -50,6 +50,7 @@
+ #include "secitem.h"
+ #include "secoid.h"
+ #include "secerr.h"
++#include "hasht.h"
+ 
+ /* forward static declarations. */
+ static PK11SymKey *pk11_DeriveWithTemplate(PK11SymKey *baseKey, 
+@@ -678,6 +679,26 @@
+     return PK11_GetKeyData(symKey);
+ }
+ 
++
++/*
++ * PKCS #11 key Types with predefined length
++ */
++unsigned int
++pk11_GetPredefinedKeyLength(CK_KEY_TYPE keyType)
++{
++    int length = 0;
++    switch (keyType) {
++      case CKK_DES: length = 8; break;
++      case CKK_DES2: length = 16; break;
++      case CKK_DES3: length = 24; break;
++      case CKK_SKIPJACK: length = 10; break;
++      case CKK_BATON: length = 20; break;
++      case CKK_JUNIPER: length = 20; break;
++      default: break;
++    }
++    return length;
++}
++
+ /* return the keylength if possible.  '0' if not */
+ unsigned int
+ PK11_GetKeyLength(PK11SymKey *key)
+@@ -688,20 +709,12 @@
+ 
+     /* First try to figure out the key length from its type */
+     keyType = PK11_ReadULongAttribute(key->slot,key->objectID,CKA_KEY_TYPE);
+-    switch (keyType) {
+-      case CKK_DES: key->size = 8; break;
+-      case CKK_DES2: key->size = 16; break;
+-      case CKK_DES3: key->size = 24; break;
+-      case CKK_SKIPJACK: key->size = 10; break;
+-      case CKK_BATON: key->size = 20; break;
+-      case CKK_JUNIPER: key->size = 20; break;
+-      case CKK_GENERIC_SECRET:
+-	if (key->type == CKM_SSL3_PRE_MASTER_KEY_GEN)  {
+-	    key->size=48;
+-	}
+-	break;
+-      default: break;
++    key->size = pk11_GetPredefinedKeyLength(keyType);
++    if ((keyType == CKK_GENERIC_SECRET) &&
++	(key->type == CKM_SSL3_PRE_MASTER_KEY_GEN))  {
++	key->size=48;
+     }
++
+    if( key->size != 0 ) return key->size;
+ 
+    if (key->data.data == NULL) {
+@@ -1636,7 +1649,6 @@
+ 	    int templateCount;
+ 	    CK_ATTRIBUTE *attrs = keyTemplate;
+ 	    CK_ECDH1_DERIVE_PARAMS *mechParams = NULL;
+-	    SECItem *pubValue = NULL;
+ 
+ 	    if (pubKey->keyType != ecKey) {
+ 		PORT_SetError(SEC_ERROR_BAD_KEY);
+@@ -1655,28 +1667,23 @@
+ 
+ 	    keyType = PK11_GetKeyType(target,keySize);
+ 	    key_size = keySize;
+-	    symKey->size = keySize;
+-	    if (key_size == 0) templateCount--;
++	    if (key_size == 0) {
++		if (pk11_GetPredefinedKeyLength(keyType)) {
++		    templateCount --;
++		} else {
++		    /* sigh, some tokens can't figure this out and require
++		     * CKA_VALUE_LEN to be set */
++		    key_size = SHA1_LENGTH;
++		}
++	    }
++	    symKey->size = key_size;
+ 
+ 	    mechParams = PORT_ZNew(CK_ECDH1_DERIVE_PARAMS); 
+ 	    mechParams->kdf = CKD_SHA1_KDF;
+ 	    mechParams->ulSharedDataLen = 0;
+ 	    mechParams->pSharedData = NULL;
+-
+-	    if (PR_GetEnv("NSS_USE_DECODED_CKA_EC_POINT")) {
+-		mechParams->ulPublicDataLen =  pubKey->u.ec.publicValue.len;
+-		mechParams->pPublicData =  pubKey->u.ec.publicValue.data;
+-	    } else {
+-		pubValue = SEC_ASN1EncodeItem(NULL, NULL,
+-			&pubKey->u.ec.publicValue,
+-			SEC_ASN1_GET(SEC_OctetStringTemplate));
+-		if (pubValue == NULL) {
+-	    	    PORT_ZFree(mechParams, sizeof(CK_ECDH1_DERIVE_PARAMS));
+-		    break;
+-		}
+-		mechParams->ulPublicDataLen =  pubValue->len;
+-		mechParams->pPublicData =  pubValue->data;
+-	    }
++	    mechParams->ulPublicDataLen =  pubKey->u.ec.publicValue.len;
++	    mechParams->pPublicData =  pubKey->u.ec.publicValue.data;
+ 
+ 	    mechanism.mechanism = derive;
+ 	    mechanism.pParameter = mechParams;
+@@ -1688,9 +1695,28 @@
+ 		templateCount, &symKey->objectID);
+ 	    pk11_ExitKeyMonitor(symKey);
+ 
+-	    if (pubValue) {
++	    /* old PKCS #11 spec was ambiguous on what needed to be passed,
++	     * try this again with and encoded public key */
++	    if (crv != CKR_OK) {
++		SECItem *pubValue = SEC_ASN1EncodeItem(NULL, NULL,
++			&pubKey->u.ec.publicValue,
++			SEC_ASN1_GET(SEC_OctetStringTemplate));
++		if (pubValue == NULL) {
++	    	    PORT_ZFree(mechParams, sizeof(CK_ECDH1_DERIVE_PARAMS));
++		    break;
++		}
++		mechParams->ulPublicDataLen =  pubValue->len;
++		mechParams->pPublicData =  pubValue->data;
++
++		pk11_EnterKeyMonitor(symKey);
++		crv = PK11_GETTAB(slot)->C_DeriveKey(symKey->session, 
++		    &mechanism, privKey->pkcs11ID, keyTemplate, 
++		    templateCount, &symKey->objectID);
++		pk11_ExitKeyMonitor(symKey);
++
+ 		SECITEM_FreeItem(pubValue,PR_TRUE);
+ 	    }
++
+ 	    PORT_ZFree(mechParams, sizeof(CK_ECDH1_DERIVE_PARAMS));
+ 
+ 	    if (crv == CKR_OK) return symKey;
+@@ -1722,7 +1748,6 @@
+     int                     templateCount;
+     CK_ATTRIBUTE           *attrs           = keyTemplate;
+     CK_ECDH1_DERIVE_PARAMS *mechParams      = NULL;
+-    SECItem *pubValue = NULL;
+ 
+     if (pubKey->keyType != ecKey) {
+ 	PORT_SetError(SEC_ERROR_BAD_KEY);
+@@ -1750,9 +1775,27 @@
+ 
+     keyType = PK11_GetKeyType(target,keySize);
+     key_size = keySize;
+-    symKey->size = keySize;
+-    if (key_size == 0) 
+-    	templateCount--;
++    if (key_size == 0) {
++	if (pk11_GetPredefinedKeyLength(keyType)) {
++	    templateCount --;
++	} else {
++	    /* sigh, some tokens can't figure this out and require
++	     * CKA_VALUE_LEN to be set */
++	    switch (kdf) {
++	    case CKD_NULL:
++		key_size = (pubKey->u.ec.publicValue.len-1)/2;
++		break;
++	    case CKD_SHA1_KDF:
++		key_size = SHA1_LENGTH;
++		break;
++	    default:
++		PORT_Assert(!"Invalid CKD");
++		PORT_SetError(SEC_ERROR_INVALID_ALGORITHM);
++		return NULL;
++	    }
++	}
++    }
++    symKey->size = key_size;
+ 
+     mechParams = PORT_ZNew(CK_ECDH1_DERIVE_PARAMS);
+     if (!mechParams) {
+@@ -1767,21 +1810,8 @@
+ 	mechParams->ulSharedDataLen = sharedData->len;
+ 	mechParams->pSharedData     = sharedData->data;
+     }
+-    if (PR_GetEnv("NSS_USE_DECODED_CKA_EC_POINT")) {
+-	mechParams->ulPublicDataLen =  pubKey->u.ec.publicValue.len;
+-	mechParams->pPublicData =  pubKey->u.ec.publicValue.data;
+-    } else {
+-	pubValue = SEC_ASN1EncodeItem(NULL, NULL,
+-		&pubKey->u.ec.publicValue,
+-		SEC_ASN1_GET(SEC_OctetStringTemplate));
+-	if (pubValue == NULL) {
+-    	    PORT_ZFree(mechParams, sizeof(CK_ECDH1_DERIVE_PARAMS));
+-	    PK11_FreeSymKey(symKey);
+-	    return NULL;
+-	}
+-	mechParams->ulPublicDataLen =  pubValue->len;
+-	mechParams->pPublicData =  pubValue->data;
+-    }
++    mechParams->ulPublicDataLen =  pubKey->u.ec.publicValue.len;
++    mechParams->pPublicData =  pubKey->u.ec.publicValue.data;
+ 
+     mechanism.mechanism      = derive;
+     mechanism.pParameter     = mechParams;
+@@ -1792,11 +1822,30 @@
+     	privKey->pkcs11ID, keyTemplate, templateCount, &symKey->objectID);
+     pk11_ExitKeyMonitor(symKey);
+ 
+-    PORT_ZFree(mechParams, sizeof(CK_ECDH1_DERIVE_PARAMS));
+-    if (pubValue) {
++    /* old PKCS #11 spec was ambiguous on what needed to be passed,
++     * try this again with and encoded public key */
++    if (crv != CKR_OK) {
++	SECItem *pubValue = SEC_ASN1EncodeItem(NULL, NULL,
++		&pubKey->u.ec.publicValue,
++		SEC_ASN1_GET(SEC_OctetStringTemplate));
++	if (pubValue == NULL) {
++	    goto loser;
++	}
++	mechParams->ulPublicDataLen =  pubValue->len;
++	mechParams->pPublicData =  pubValue->data;
++
++	pk11_EnterKeyMonitor(symKey);
++	crv = PK11_GETTAB(slot)->C_DeriveKey(symKey->session, 
++	    &mechanism, privKey->pkcs11ID, keyTemplate, 
++	    templateCount, &symKey->objectID);
++	pk11_ExitKeyMonitor(symKey);
++
+ 	SECITEM_FreeItem(pubValue,PR_TRUE);
+     }
+ 
++loser:
++    PORT_ZFree(mechParams, sizeof(CK_ECDH1_DERIVE_PARAMS));
++
+     if (crv != CKR_OK) {
+ 	PK11_FreeSymKey(symKey);
+ 	symKey = NULL;
+Index: mozilla/security/nss/lib/pk11wrap/pk11slot.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/pk11wrap/pk11slot.c,v
+retrieving revision 1.97
+retrieving revision 1.98
+diff -u -u -r1.97 -r1.98
+--- mozilla/security/nss/lib/pk11wrap/pk11slot.c	17 Dec 2008 06:09:15 -0000	1.97
++++ mozilla/security/nss/lib/pk11wrap/pk11slot.c	16 Jun 2009 06:15:23 -0000	1.98
+@@ -482,13 +482,19 @@
+ SECMOD_HasRootCerts(void)
+ {
+    SECMODModuleList *mlp;
+-   SECMODModuleList *modules = SECMOD_GetDefaultModuleList();
++   SECMODModuleList *modules;
+    SECMODListLock *moduleLock = SECMOD_GetDefaultModuleListLock();
+    int i;
+    PRBool found = PR_FALSE;
+ 
++    if (!moduleLock) {
++    	PORT_SetError(SEC_ERROR_NOT_INITIALIZED);
++	return found;
++    }
++
+    /* work through all the slots */
+    SECMOD_GetReadLock(moduleLock);
++   modules = SECMOD_GetDefaultModuleList();
+    for(mlp = modules; mlp != NULL; mlp = mlp->next) {
+ 	for (i=0; i < mlp->module->slotCount; i++) {
+ 	    PK11SlotInfo *tmpSlot = mlp->module->slots[i];
+@@ -514,17 +520,22 @@
+                         const char* tokenName, PRBool presentOnly)
+ {
+     SECMODModuleList *mlp;
+-    SECMODModuleList *modules = SECMOD_GetDefaultModuleList();
++    SECMODModuleList *modules;
+     SECMODListLock *moduleLock = SECMOD_GetDefaultModuleListLock();
+     int i;
+     PK11SlotList* slotList = NULL;
+     PRUint32 slotcount = 0;
+     SECStatus rv = SECSuccess;
+ 
++    if (!moduleLock) {
++    	PORT_SetError(SEC_ERROR_NOT_INITIALIZED);
++	return slotList;
++    }
++
+     slotList = PK11_NewSlotList();
+     if (!slotList) {
+         PORT_SetError(SEC_ERROR_NO_MEMORY);
+-        return NULL;
++        return slotList;
+     }
+ 
+     if ( ((NULL == dllName) || (0 == *dllName)) &&
+@@ -537,6 +548,7 @@
+ 
+     /* work through all the slots */
+     SECMOD_GetReadLock(moduleLock);
++    modules = SECMOD_GetDefaultModuleList();
+     for (mlp = modules; mlp != NULL; mlp = mlp->next) {
+         PORT_Assert(mlp->module);
+         if (!mlp->module) {
+@@ -584,17 +596,22 @@
+ PK11_FindSlotByName(const char *name)
+ {
+    SECMODModuleList *mlp;
+-   SECMODModuleList *modules = SECMOD_GetDefaultModuleList();
++   SECMODModuleList *modules;
+    SECMODListLock *moduleLock = SECMOD_GetDefaultModuleListLock();
+    int i;
+    PK11SlotInfo *slot = NULL;
+ 
++    if (!moduleLock) {
++    	PORT_SetError(SEC_ERROR_NOT_INITIALIZED);
++	return slot;
++    }
+    if ((name == NULL) || (*name == 0)) {
+ 	return PK11_GetInternalKeySlot();
+    }
+ 
+    /* work through all the slots */
+    SECMOD_GetReadLock(moduleLock);
++   modules = SECMOD_GetDefaultModuleList();
+    for(mlp = modules; mlp != NULL; mlp = mlp->next) {
+ 	for (i=0; i < mlp->module->slotCount; i++) {
+ 	    PK11SlotInfo *tmpSlot = mlp->module->slots[i];
+@@ -621,13 +638,18 @@
+ PK11_FindSlotBySerial(char *serial)
+ {
+    SECMODModuleList *mlp;
+-   SECMODModuleList *modules = SECMOD_GetDefaultModuleList();
++   SECMODModuleList *modules;
+    SECMODListLock *moduleLock = SECMOD_GetDefaultModuleListLock();
+    int i;
+    PK11SlotInfo *slot = NULL;
+ 
++    if (!moduleLock) {
++    	PORT_SetError(SEC_ERROR_NOT_INITIALIZED);
++	return slot;
++    }
+    /* work through all the slots */
+    SECMOD_GetReadLock(moduleLock);
++   modules = SECMOD_GetDefaultModuleList();
+    for(mlp = modules; mlp != NULL; mlp = mlp->next) {
+ 	for (i=0; i < mlp->module->slotCount; i++) {
+ 	    PK11SlotInfo *tmpSlot = mlp->module->slots[i];
+@@ -1722,12 +1744,16 @@
+ PK11_TokenExists(CK_MECHANISM_TYPE type)
+ {
+     SECMODModuleList *mlp;
+-    SECMODModuleList *modules = SECMOD_GetDefaultModuleList();
++    SECMODModuleList *modules;
+     SECMODListLock *moduleLock = SECMOD_GetDefaultModuleListLock();
+     PK11SlotInfo *slot;
+     PRBool found = PR_FALSE;
+     int i;
+ 
++    if (!moduleLock) {
++    	PORT_SetError(SEC_ERROR_NOT_INITIALIZED);
++	return found;
++    }
+     /* we only need to know if there is a token that does this mechanism.
+      * check the internal module first because it's fast, and supports 
+      * almost everything. */
+@@ -1739,6 +1765,7 @@
+     if (found) return PR_TRUE; /* bypass getting module locks */
+ 
+     SECMOD_GetReadLock(moduleLock);
++    modules = SECMOD_GetDefaultModuleList();
+     for(mlp = modules; mlp != NULL && (!found); mlp = mlp->next) {
+ 	for (i=0; i < mlp->module->slotCount; i++) {
+ 	    slot = mlp->module->slots[i];
+@@ -1764,18 +1791,27 @@
+ PK11_GetAllTokens(CK_MECHANISM_TYPE type, PRBool needRW, PRBool loadCerts, 
+                   void *wincx)
+ {
+-    PK11SlotList *     list         = PK11_NewSlotList();
+-    PK11SlotList *     loginList    = PK11_NewSlotList();
+-    PK11SlotList *     friendlyList = PK11_NewSlotList();
++    PK11SlotList *     list;
++    PK11SlotList *     loginList;
++    PK11SlotList *     friendlyList;
+     SECMODModuleList * mlp;
+-    SECMODModuleList * modules      = SECMOD_GetDefaultModuleList();
+-    SECMODListLock *   moduleLock   = SECMOD_GetDefaultModuleListLock();
++    SECMODModuleList * modules;
++    SECMODListLock *   moduleLock;
+     int                i;
+ #if defined( XP_WIN32 ) 
+     int                j            = 0;
+     PRInt32            waste[16];
+ #endif
+ 
++    moduleLock   = SECMOD_GetDefaultModuleListLock();
++    if (!moduleLock) {
++    	PORT_SetError(SEC_ERROR_NOT_INITIALIZED);
++	return NULL;
++    }
++
++    list         = PK11_NewSlotList();
++    loginList    = PK11_NewSlotList();
++    friendlyList = PK11_NewSlotList();
+     if ((list == NULL)  || (loginList == NULL) || (friendlyList == NULL)) {
+ 	if (list) PK11_FreeSlotList(list);
+ 	if (loginList) PK11_FreeSlotList(loginList);
+@@ -1784,6 +1820,8 @@
+     }
+ 
+     SECMOD_GetReadLock(moduleLock);
++
++    modules      = SECMOD_GetDefaultModuleList();
+     for(mlp = modules; mlp != NULL; mlp = mlp->next) {
+ 
+ #if defined( XP_WIN32 ) 
+Index: mozilla/security/nss/lib/pk11wrap/pk11util.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/pk11wrap/pk11util.c,v
+retrieving revision 1.53
+retrieving revision 1.54
+diff -u -u -r1.53 -r1.54
+--- mozilla/security/nss/lib/pk11wrap/pk11util.c	28 Sep 2005 17:17:49 -0000	1.53
++++ mozilla/security/nss/lib/pk11wrap/pk11util.c	16 Jun 2009 06:15:23 -0000	1.54
+@@ -223,6 +223,10 @@
+     SECMODModuleList *mlp;
+     SECMODModule *module = NULL;
+ 
++    if (!moduleLock) {
++    	PORT_SetError(SEC_ERROR_NOT_INITIALIZED);
++	return module;
++    }
+     SECMOD_GetReadLock(moduleLock);
+     for(mlp = modules; mlp != NULL; mlp = mlp->next) {
+ 	if (PORT_Strcmp(name,mlp->module->commonName) == 0) {
+@@ -258,6 +262,10 @@
+     SECMODModuleList *mlp;
+     SECMODModule *module = NULL;
+ 
++    if (!moduleLock) {
++    	PORT_SetError(SEC_ERROR_NOT_INITIALIZED);
++	return module;
++    }
+     SECMOD_GetReadLock(moduleLock);
+     for(mlp = modules; mlp != NULL; mlp = mlp->next) {
+ 	if (id == mlp->module->moduleID) {
+@@ -282,6 +290,10 @@
+     int i;
+     PK11SlotInfo *slot = NULL;
+ 
++    if (!moduleLock) {
++    	PORT_SetError(SEC_ERROR_NOT_INITIALIZED);
++	return slot;
++    }
+     SECMOD_GetReadLock(moduleLock);
+     for (i=0; i < module->slotCount; i++) {
+ 	PK11SlotInfo *cSlot = module->slots[i];
+@@ -329,6 +341,11 @@
+     SECMODModuleList **mlpp;
+     SECStatus rv = SECFailure;
+ 
++    if (!moduleLock) {
++    	PORT_SetError(SEC_ERROR_NOT_INITIALIZED);
++	return rv;
++    }
++
+     *type = SECMOD_EXTERNAL;
+ 
+     SECMOD_GetWriteLock(moduleLock);
+@@ -405,6 +422,10 @@
+ 	PORT_SetError(SEC_ERROR_MODULE_STUCK);
+ 	return rv;
+     }
++    if (!moduleLock) {
++    	PORT_SetError(SEC_ERROR_NOT_INITIALIZED);
++	return rv;
++    }
+ 
+     SECMOD_GetWriteLock(moduleLock);
+     for(mlpp = &modules,mlp = modules; 
+@@ -508,6 +529,10 @@
+     char *string;
+     PK11SlotInfo *retSlot = NULL;
+ 
++    if (!moduleLock) {
++    	PORT_SetError(SEC_ERROR_NOT_INITIALIZED);
++	return retSlot;
++    }
+     SECMOD_GetReadLock(moduleLock);
+     for (i=0; i < module->slotCount; i++) {
+ 	PK11SlotInfo *slot = module->slots[i];
+@@ -574,6 +599,10 @@
+     PK11SlotInfo* slot;
+ 
+     PR_SetErrorText(0, NULL);
++    if (!moduleLock) {
++    	PORT_SetError(SEC_ERROR_NOT_INITIALIZED);
++	return result;
++    }
+ 
+     module = SECMOD_CreateModule(dllPath, moduleName, modparms, nssparms);
+ 
+@@ -693,10 +722,14 @@
+ SECMOD_IsModulePresent( unsigned long int pubCipherEnableFlags )
+ {
+     PRBool result = PR_FALSE;
+-    SECMODModuleList *mods = SECMOD_GetDefaultModuleList();
+-    SECMOD_GetReadLock(moduleLock);
+-
++    SECMODModuleList *mods;
+ 
++    if (!moduleLock) {
++    	PORT_SetError(SEC_ERROR_NOT_INITIALIZED);
++	return result;
++    }
++    SECMOD_GetReadLock(moduleLock);
++    mods = SECMOD_GetDefaultModuleList();
+     for ( ; mods != NULL; mods = mods->next) {
+         if (mods->module->ssl[0] & 
+ 		SECMOD_PubCipherFlagstoInternal(pubCipherEnableFlags)) {
+@@ -867,6 +900,11 @@
+     PK11SlotInfo **newSlots = NULL;
+     PK11SlotInfo **oldSlots = NULL;
+ 
++    if (!moduleLock) {
++    	PORT_SetError(SEC_ERROR_NOT_INITIALIZED);
++	return SECFailure;
++    }
++
+     /* C_GetSlotList is not a session function, make sure 
+      * calls are serialized */
+     PZ_Lock(mod->refLock);
+@@ -988,6 +1026,10 @@
+     int i;
+     int error = SEC_ERROR_NO_EVENT;
+ 
++    if (!moduleLock) {
++    	PORT_SetError(SEC_ERROR_NOT_INITIALIZED);
++	return NULL;
++    }
+     PZ_Lock(mod->refLock);
+     if (mod->evControlMask & SECMOD_END_WAIT) {
+ 	mod->evControlMask &= ~SECMOD_END_WAIT;
+@@ -1184,6 +1226,10 @@
+     int i;
+     PRBool ret = PR_FALSE;
+ 
++    if (!moduleLock) {
++    	PORT_SetError(SEC_ERROR_NOT_INITIALIZED);
++	return ret;
++    }
+     SECMOD_GetReadLock(moduleLock);
+     for (i=0; i < mod->slotCount; i++) {
+ 	PK11SlotInfo *slot = mod->slots[i];
+Index: mozilla/security/nss/lib/pkcs12/p12d.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/pkcs12/p12d.c,v
+retrieving revision 1.43
+retrieving revision 1.44
+diff -u -u -r1.43 -r1.44
+--- mozilla/security/nss/lib/pkcs12/p12d.c	4 Mar 2009 21:56:57 -0000	1.43
++++ mozilla/security/nss/lib/pkcs12/p12d.c	5 Jun 2009 00:18:51 -0000	1.44
+@@ -2407,7 +2407,10 @@
+ 	rv = PK11_ImportDERCert(cert->slot, derCert, CK_INVALID_HANDLE,
+ 							nickData, PR_FALSE);
+     }
+-
++    if (rv) {
++	cert->problem = 1;
++	cert->error = PORT_GetError();
++    }
+     cert->installed = PR_TRUE;
+     if(nickName) SECITEM_ZfreeItem(nickName, PR_TRUE);
+     return rv;
+Index: mozilla/security/nss/lib/smime/config.mk
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/smime/config.mk,v
+retrieving revision 1.27
+retrieving revision 1.28
+diff -u -u -r1.27 -r1.28
+--- mozilla/security/nss/lib/smime/config.mk	11 Apr 2009 21:18:45 -0000	1.27
++++ mozilla/security/nss/lib/smime/config.mk	11 Jun 2009 00:55:47 -0000	1.28
+@@ -93,18 +93,3 @@
+ 	../pkcs7 \
+ 	$(NULL)
+ 
+-ifeq ($(OS_TARGET),SunOS)
+-# The -R '$ORIGIN' linker option instructs this library to search for its
+-# dependencies in the same directory where it resides.
+-MKSHLIB += -R '$$ORIGIN'
+-endif
+-
+-ifeq ($(OS_ARCH), HP-UX) 
+-ifneq ($(OS_TEST), ia64)
+-# pa-risc
+-ifeq ($(USE_64), 1)
+-MKSHLIB += +b '$$ORIGIN'
+-endif
+-endif
+-endif
+-
+Index: mozilla/security/nss/lib/softoken/config.mk
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/softoken/config.mk,v
+retrieving revision 1.27
+retrieving revision 1.29
+diff -u -u -r1.27 -r1.29
+--- mozilla/security/nss/lib/softoken/config.mk	12 Apr 2009 17:19:24 -0000	1.27
++++ mozilla/security/nss/lib/softoken/config.mk	11 Jun 2009 00:55:48 -0000	1.29
+@@ -96,21 +96,9 @@
+ endif
+ 
+ ifeq ($(OS_TARGET),SunOS)
+-# The -R '$ORIGIN' linker option instructs this library to search for its
+-# dependencies in the same directory where it resides.
+-MKSHLIB += -R '$$ORIGIN'
+ OS_LIBS += -lbsm 
+ endif
+ 
+-ifeq ($(OS_ARCH), HP-UX) 
+-ifneq ($(OS_TEST), ia64)
+-# pa-risc
+-ifeq ($(USE_64), 1)
+-MKSHLIB += +b '$$ORIGIN'
+-endif
+-endif
+-endif
+-
+ ifeq ($(OS_TARGET),WINCE)
+ DEFINES += -DDBM_USING_NSPR
+ endif
+Index: mozilla/security/nss/lib/softoken/fipstest.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/softoken/fipstest.c,v
+retrieving revision 1.25
+retrieving revision 1.27
+diff -u -u -r1.25 -r1.27
+--- mozilla/security/nss/lib/softoken/fipstest.c	29 Mar 2009 03:45:34 -0000	1.25
++++ mozilla/security/nss/lib/softoken/fipstest.c	19 Jun 2009 23:05:48 -0000	1.27
+@@ -90,17 +90,17 @@
+ #define FIPS_RSA_TYPE                           siBuffer
+ #define FIPS_RSA_PUBLIC_EXPONENT_LENGTH           3 /*   24-bits */
+ #define FIPS_RSA_PRIVATE_VERSION_LENGTH           1 /*    8-bits */
+-#define FIPS_RSA_MESSAGE_LENGTH                 128 /* 1024-bits */
+-#define FIPS_RSA_COEFFICIENT_LENGTH              64 /*  512-bits */
+-#define FIPS_RSA_PRIME0_LENGTH                   64 /*  512-bits */
+-#define FIPS_RSA_PRIME1_LENGTH                   64 /*  512-bits */
+-#define FIPS_RSA_EXPONENT0_LENGTH                64 /*  512-bits */
+-#define FIPS_RSA_EXPONENT1_LENGTH                64 /*  512-bits */
+-#define FIPS_RSA_PRIVATE_EXPONENT_LENGTH        128 /* 1024-bits */
+-#define FIPS_RSA_ENCRYPT_LENGTH                 128 /* 1024-bits */
+-#define FIPS_RSA_DECRYPT_LENGTH                 128 /* 1024-bits */
+-#define FIPS_RSA_SIGNATURE_LENGTH               128 /* 1024-bits */
+-#define FIPS_RSA_MODULUS_LENGTH                 128 /* 1024-bits */
++#define FIPS_RSA_MESSAGE_LENGTH                 256 /* 2048-bits */
++#define FIPS_RSA_COEFFICIENT_LENGTH             128 /* 1024-bits */
++#define FIPS_RSA_PRIME0_LENGTH                  128 /* 1024-bits */
++#define FIPS_RSA_PRIME1_LENGTH                  128 /* 1024-bits */
++#define FIPS_RSA_EXPONENT0_LENGTH               128 /* 1024-bits */
++#define FIPS_RSA_EXPONENT1_LENGTH               128 /* 1024-bits */
++#define FIPS_RSA_PRIVATE_EXPONENT_LENGTH        256 /* 2048-bits */
++#define FIPS_RSA_ENCRYPT_LENGTH                 256 /* 2048-bits */
++#define FIPS_RSA_DECRYPT_LENGTH                 256 /* 2048-bits */
++#define FIPS_RSA_SIGNATURE_LENGTH               256 /* 2048-bits */
++#define FIPS_RSA_MODULUS_LENGTH                 256 /* 2048-bits */
+ 
+ 
+ /* FIPS preprocessor directives for DSA.                        */
+@@ -1149,202 +1149,323 @@
+ static CK_RV
+ sftk_fips_RSA_PowerUpSelfTest( void )
+ {
+-    /* RSA Known Modulus used in both Public/Private Key Values (1024-bits). */
++    /* RSA Known Modulus used in both Public/Private Key Values (2048-bits). */
+     static const PRUint8 rsa_modulus[FIPS_RSA_MODULUS_LENGTH] = {
+-                               0xd5, 0x84, 0x95, 0x07, 0xf4, 0xd0, 0x1f, 0x82,
+-                               0xf3, 0x79, 0xf4, 0x99, 0x48, 0x10, 0xe1, 0x71,
+-                               0xa5, 0x62, 0x22, 0xa3, 0x4b, 0x00, 0xe3, 0x5b,
+-                               0x3a, 0xcc, 0x10, 0x83, 0xe0, 0xaf, 0x61, 0x13,
+-                               0x54, 0x6a, 0xa2, 0x6a, 0x2c, 0x5e, 0xb3, 0xcc,
+-                               0xa3, 0x71, 0x9a, 0xb2, 0x3e, 0x78, 0xec, 0xb5,
+-                               0x0e, 0x6e, 0x31, 0x3b, 0x77, 0x1f, 0x6e, 0x94,
+-                               0x41, 0x60, 0xd5, 0x6e, 0xd9, 0xc6, 0xf9, 0x29,
+-                               0xc3, 0x40, 0x36, 0x25, 0xdb, 0xea, 0x0b, 0x07,
+-                               0xae, 0x76, 0xfd, 0x99, 0x29, 0xf4, 0x22, 0xc1,
+-                               0x1a, 0x8f, 0x05, 0xfe, 0x98, 0x09, 0x07, 0x05,
+-                               0xc2, 0x0f, 0x0b, 0x11, 0x83, 0x39, 0xca, 0xc7,
+-                               0x43, 0x63, 0xff, 0x33, 0x80, 0xe7, 0xc3, 0x78,
+-                               0xae, 0xf1, 0x73, 0x52, 0x98, 0x1d, 0xde, 0x5c,
+-                               0x53, 0x6e, 0x01, 0x73, 0x0d, 0x12, 0x7e, 0x77,
+-                               0x03, 0xf1, 0xef, 0x1b, 0xc8, 0xa8, 0x0f, 0x97};
++                            0xb8, 0x15, 0x00, 0x33, 0xda, 0x0c, 0x9d, 0xa5,
++                            0x14, 0x8c, 0xde, 0x1f, 0x23, 0x07, 0x54, 0xe2,
++                            0xc6, 0xb9, 0x51, 0x04, 0xc9, 0x65, 0x24, 0x6e,
++                            0x0a, 0x46, 0x34, 0x5c, 0x37, 0x86, 0x6b, 0x88,
++                            0x24, 0x27, 0xac, 0xa5, 0x02, 0x79, 0xfb, 0xed,
++                            0x75, 0xc5, 0x3f, 0x6e, 0xdf, 0x05, 0x5f, 0x0f,
++                            0x20, 0x70, 0xa0, 0x5b, 0x85, 0xdb, 0xac, 0xb9,
++                            0x5f, 0x02, 0xc2, 0x64, 0x1e, 0x84, 0x5b, 0x3e,
++                            0xad, 0xbf, 0xf6, 0x2e, 0x51, 0xd6, 0xad, 0xf7,
++                            0xa7, 0x86, 0x75, 0x86, 0xec, 0xa7, 0xe1, 0xf7,
++                            0x08, 0xbf, 0xdc, 0x56, 0xb1, 0x3b, 0xca, 0xd8,
++                            0xfc, 0x51, 0xdf, 0x9a, 0x2a, 0x37, 0x06, 0xf2,
++                            0xd1, 0x6b, 0x9a, 0x5e, 0x2a, 0xe5, 0x20, 0x57,
++                            0x35, 0x9f, 0x1f, 0x98, 0xcf, 0x40, 0xc7, 0xd6,
++                            0x98, 0xdb, 0xde, 0xf5, 0x64, 0x53, 0xf7, 0x9d,
++                            0x45, 0xf3, 0xd6, 0x78, 0xb9, 0xe3, 0xa3, 0x20,
++                            0xcd, 0x79, 0x43, 0x35, 0xef, 0xd7, 0xfb, 0xb9,
++                            0x80, 0x88, 0x27, 0x2f, 0x63, 0xa8, 0x67, 0x3d,
++                            0x4a, 0xfa, 0x06, 0xc6, 0xd2, 0x86, 0x0b, 0xa7,
++                            0x28, 0xfd, 0xe0, 0x1e, 0x93, 0x4b, 0x17, 0x2e,
++                            0xb0, 0x11, 0x6f, 0xc6, 0x2b, 0x98, 0x0f, 0x15,
++                            0xe3, 0x87, 0x16, 0x7a, 0x7c, 0x67, 0x3e, 0x12,
++                            0x2b, 0xf8, 0xbe, 0x48, 0xc1, 0x97, 0x47, 0xf4,
++                            0x1f, 0x81, 0x80, 0x12, 0x28, 0xe4, 0x7b, 0x1e,
++                            0xb7, 0x00, 0xa4, 0xde, 0xaa, 0xfb, 0x0f, 0x77,
++                            0x84, 0xa3, 0xd6, 0xb2, 0x03, 0x48, 0xdd, 0x53,
++                            0x8b, 0x46, 0x41, 0x28, 0x52, 0xc4, 0x53, 0xf0,
++                            0x1c, 0x95, 0xd9, 0x36, 0xe0, 0x0f, 0x26, 0x46,
++                            0x9c, 0x61, 0x0e, 0x80, 0xca, 0x86, 0xaf, 0x39,
++                            0x95, 0xe5, 0x60, 0x43, 0x61, 0x3e, 0x2b, 0xb4,
++                            0xe8, 0xbd, 0x8d, 0x77, 0x62, 0xf5, 0x32, 0x43,
++                            0x2f, 0x4b, 0x65, 0x82, 0x14, 0xdd, 0x29, 0x5b};
+ 
+     /* RSA Known Public Key Values (24-bits). */
+     static const PRUint8 rsa_public_exponent[FIPS_RSA_PUBLIC_EXPONENT_LENGTH] 
+                                                        = { 0x01, 0x00, 0x01 };
+     /* RSA Known Private Key Values (version                 is    8-bits), */
+-    /*                              (private exponent        is 1024-bits), */
+-    /*                              (private prime0          is  512-bits), */
+-    /*                              (private prime1          is  512-bits), */
+-    /*                              (private prime exponent0 is  512-bits), */
+-    /*                              (private prime exponent1 is  512-bits), */
+-    /*                          and (private coefficient     is  512-bits). */
++    /*                              (private exponent        is 2048-bits), */
++    /*                              (private prime0          is 1024-bits), */
++    /*                              (private prime1          is 1024-bits), */
++    /*                              (private prime exponent0 is 1024-bits), */
++    /*                              (private prime exponent1 is 1024-bits), */
++    /*                          and (private coefficient     is 1024-bits). */
+     static const PRUint8 rsa_version[] = { 0x00 };
+ 
+     static const PRUint8 rsa_private_exponent[FIPS_RSA_PRIVATE_EXPONENT_LENGTH]
+-                           = { 0x85, 0x27, 0x47, 0x61, 0x4c, 0xd4, 0xb5, 0xb2,
+-                               0x0e, 0x70, 0x91, 0x8f, 0x3d, 0x97, 0xf9, 0x5f,
+-                               0xcc, 0x09, 0x65, 0x1c, 0x7c, 0x5b, 0xb3, 0x6d,
+-                               0x63, 0x3f, 0x7b, 0x55, 0x22, 0xbb, 0x7c, 0x48,
+-                               0x77, 0xae, 0x80, 0x56, 0xc2, 0x10, 0xd5, 0x03,
+-                               0xdb, 0x31, 0xaf, 0x8d, 0x54, 0xd4, 0x48, 0x99,
+-                               0xa8, 0xc4, 0x23, 0x43, 0xb8, 0x48, 0x0b, 0xc7,
+-                               0xbc, 0xf5, 0xcc, 0x64, 0x72, 0xbf, 0x59, 0x06,
+-                               0x04, 0x1c, 0x32, 0xf5, 0x14, 0x2e, 0x6e, 0xe2,
+-                               0x0f, 0x5c, 0xde, 0x36, 0x3c, 0x6e, 0x7c, 0x4d,
+-                               0xcc, 0xd3, 0x00, 0x6e, 0xe5, 0x45, 0x46, 0xef,
+-                               0x4d, 0x25, 0x46, 0x6d, 0x7f, 0xed, 0xbb, 0x4f,
+-                               0x4d, 0x9f, 0xda, 0x87, 0x47, 0x8f, 0x74, 0x44,
+-                               0xb7, 0xbe, 0x9d, 0xf5, 0xdd, 0xd2, 0x4c, 0xa5,
+-                               0xab, 0x74, 0xe5, 0x29, 0xa1, 0xd2, 0x45, 0x3b,
+-                               0x33, 0xde, 0xd5, 0xae, 0xf7, 0x03, 0x10, 0x21};
++                         = {0x29, 0x08, 0x05, 0x53, 0x89, 0x76, 0xe6, 0x6c,
++                            0xb5, 0x77, 0xf0, 0xca, 0xdf, 0xf3, 0xf2, 0x67,
++                            0xda, 0x03, 0xd4, 0x9b, 0x4c, 0x88, 0xce, 0xe5,
++                            0xf8, 0x44, 0x4d, 0xc7, 0x80, 0x58, 0xe5, 0xff,
++                            0x22, 0x8f, 0xf5, 0x5b, 0x92, 0x81, 0xbe, 0x35,
++                            0xdf, 0xda, 0x67, 0x99, 0x3e, 0xfc, 0xe3, 0x83,
++                            0x6b, 0xa7, 0xaf, 0x16, 0xb7, 0x6f, 0x8f, 0xc0,
++                            0x81, 0xfd, 0x0b, 0x77, 0x65, 0x95, 0xfb, 0x00,
++                            0xad, 0x99, 0xec, 0x35, 0xc6, 0xe8, 0x23, 0x3e,
++                            0xe0, 0x88, 0x88, 0x09, 0xdb, 0x16, 0x50, 0xb7,
++                            0xcf, 0xab, 0x74, 0x61, 0x9e, 0x7f, 0xc5, 0x67,
++                            0x38, 0x56, 0xc7, 0x90, 0x85, 0x78, 0x5e, 0x84,
++                            0x21, 0x49, 0xea, 0xce, 0xb2, 0xa0, 0xff, 0xe4,
++                            0x70, 0x7f, 0x57, 0x7b, 0xa8, 0x36, 0xb8, 0x54,
++                            0x8d, 0x1d, 0xf5, 0x44, 0x9d, 0x68, 0x59, 0xf9,
++                            0x24, 0x6e, 0x85, 0x8f, 0xc3, 0x5f, 0x8a, 0x2c,
++                            0x94, 0xb7, 0xbc, 0x0e, 0xa5, 0xef, 0x93, 0x06,
++                            0x38, 0xcd, 0x07, 0x0c, 0xae, 0xb8, 0x44, 0x1a,
++                            0xd8, 0xe7, 0xf5, 0x9a, 0x1e, 0x9c, 0x18, 0xc7,
++                            0x6a, 0xc2, 0x7f, 0x28, 0x01, 0x4f, 0xb4, 0xb8,
++                            0x90, 0x97, 0x5a, 0x43, 0x38, 0xad, 0xe8, 0x95,
++                            0x68, 0x83, 0x1a, 0x1b, 0x10, 0x07, 0xe6, 0x02,
++                            0x52, 0x1f, 0xbf, 0x76, 0x6b, 0x46, 0xd6, 0xfb,
++                            0xc3, 0xbe, 0xb5, 0xac, 0x52, 0x53, 0x01, 0x1c,
++                            0xf3, 0xc5, 0xeb, 0x64, 0xf2, 0x1e, 0xc4, 0x38,
++                            0xe9, 0xaa, 0xd9, 0xc3, 0x72, 0x51, 0xa5, 0x44,
++                            0x58, 0x69, 0x0b, 0x1b, 0x98, 0x7f, 0xf2, 0x23,
++                            0xff, 0xeb, 0xf0, 0x75, 0x24, 0xcf, 0xc5, 0x1e,
++                            0xb8, 0x6a, 0xc5, 0x2f, 0x4f, 0x23, 0x50, 0x7d,
++                            0x15, 0x9d, 0x19, 0x7a, 0x0b, 0x82, 0xe0, 0x21,
++                            0x5b, 0x5f, 0x9d, 0x50, 0x2b, 0x83, 0xe4, 0x48,
++                            0xcc, 0x39, 0xe5, 0xfb, 0x13, 0x7b, 0x6f, 0x81 };
+ 
+     static const PRUint8 rsa_prime0[FIPS_RSA_PRIME0_LENGTH]   = {
+-                               0xf9, 0x74, 0x8f, 0x16, 0x02, 0x6b, 0xa0, 0xee,
+-                               0x7f, 0x28, 0x97, 0x91, 0xdc, 0xec, 0xc0, 0x7c,
+-                               0x49, 0xc2, 0x85, 0x76, 0xee, 0x66, 0x74, 0x2d,
+-                               0x1a, 0xb8, 0xf7, 0x2f, 0x11, 0x5b, 0x36, 0xd8,
+-                               0x46, 0x33, 0x3b, 0xd8, 0xf3, 0x2d, 0xa1, 0x03,
+-                               0x83, 0x2b, 0xec, 0x35, 0x43, 0x32, 0xff, 0xdd,
+-                               0x81, 0x7c, 0xfd, 0x65, 0x13, 0x04, 0x7c, 0xfc,
+-                               0x03, 0x97, 0xf0, 0xd5, 0x62, 0xdc, 0x0d, 0xbf};
++                            0xe4, 0xbf, 0x21, 0x62, 0x9b, 0xa9, 0x77, 0x40,
++                            0x8d, 0x2a, 0xce, 0xa1, 0x67, 0x5a, 0x4c, 0x96,
++                            0x45, 0x98, 0x67, 0xbd, 0x75, 0x22, 0x33, 0x6f,
++                            0xe6, 0xcb, 0x77, 0xde, 0x9e, 0x97, 0x7d, 0x96,
++                            0x8c, 0x5e, 0x5d, 0x34, 0xfb, 0x27, 0xfc, 0x6d,
++                            0x74, 0xdb, 0x9d, 0x2e, 0x6d, 0xf6, 0xea, 0xfc,
++                            0xce, 0x9e, 0xda, 0xa7, 0x25, 0xa2, 0xf4, 0x58,
++                            0x6d, 0x0a, 0x3f, 0x01, 0xc2, 0xb4, 0xab, 0x38,
++                            0xc1, 0x14, 0x85, 0xb6, 0xfa, 0x94, 0xc3, 0x85,
++                            0xf9, 0x3c, 0x2e, 0x96, 0x56, 0x01, 0xe7, 0xd6,
++                            0x14, 0x71, 0x4f, 0xfb, 0x4c, 0x85, 0x52, 0xc4,
++                            0x61, 0x1e, 0xa5, 0x1e, 0x96, 0x13, 0x0d, 0x8f,
++                            0x66, 0xae, 0xa0, 0xcd, 0x7d, 0x25, 0x66, 0x19,
++                            0x15, 0xc2, 0xcf, 0xc3, 0x12, 0x3c, 0xe8, 0xa4,
++                            0x52, 0x4c, 0xcb, 0x28, 0x3c, 0xc4, 0xbf, 0x95,
++                            0x33, 0xe3, 0x81, 0xea, 0x0c, 0x6c, 0xa2, 0x05};
+     static const PRUint8 rsa_prime1[FIPS_RSA_PRIME1_LENGTH]   = {
+-                               0xdb, 0x1e, 0xa7, 0x3d, 0xe7, 0xfa, 0x8b, 0x04,
+-                               0x83, 0x48, 0xf3, 0xa5, 0x31, 0x9d, 0x35, 0x5e,
+-                               0x4d, 0x54, 0x77, 0xcc, 0x84, 0x09, 0xf3, 0x11,
+-                               0x0d, 0x54, 0xed, 0x85, 0x39, 0xa9, 0xca, 0xa8,
+-                               0xea, 0xae, 0x19, 0x9c, 0x75, 0xdb, 0x88, 0xb8,
+-                               0x04, 0x8d, 0x54, 0xc6, 0xa4, 0x80, 0xf8, 0x93,
+-                               0xf0, 0xdb, 0x19, 0xef, 0xd7, 0x87, 0x8a, 0x8f,
+-                               0x5a, 0x09, 0x2e, 0x54, 0xf3, 0x45, 0x24, 0x29};
++                            0xce, 0x03, 0x94, 0xf4, 0xa9, 0x2c, 0x1e, 0x06,
++                            0xe7, 0x40, 0x30, 0x01, 0xf7, 0xbb, 0x68, 0x8c,
++                            0x27, 0xd2, 0x15, 0xe3, 0x28, 0x49, 0x5b, 0xa8,
++                            0xc1, 0x9a, 0x42, 0x7e, 0x31, 0xf9, 0x08, 0x34,
++                            0x81, 0xa2, 0x0f, 0x04, 0x61, 0x34, 0xe3, 0x36,
++                            0x92, 0xb1, 0x09, 0x2b, 0xe9, 0xef, 0x84, 0x88,
++                            0xbe, 0x9c, 0x98, 0x60, 0xa6, 0x60, 0x84, 0xe9,
++                            0x75, 0x6f, 0xcc, 0x81, 0xd1, 0x96, 0xef, 0xdd,
++                            0x2e, 0xca, 0xc4, 0xf5, 0x42, 0xfb, 0x13, 0x2b,
++                            0x57, 0xbf, 0x14, 0x5e, 0xc2, 0x7f, 0x77, 0x35,
++                            0x29, 0xc4, 0xe5, 0xe0, 0xf9, 0x6d, 0x15, 0x4a,
++                            0x42, 0x56, 0x1c, 0x3e, 0x0c, 0xc5, 0xce, 0x70,
++                            0x08, 0x63, 0x1e, 0x73, 0xdb, 0x7e, 0x74, 0x05,
++                            0x32, 0x01, 0xc6, 0x36, 0x32, 0x75, 0x6b, 0xed,
++                            0x9d, 0xfe, 0x7c, 0x7e, 0xa9, 0x57, 0xb4, 0xe9,
++                            0x22, 0xe4, 0xe7, 0xfe, 0x36, 0x07, 0x9b, 0xdf};
+     static const PRUint8 rsa_exponent0[FIPS_RSA_EXPONENT0_LENGTH] = {
+-                               0x6a, 0xd1, 0x25, 0x80, 0x18, 0x33, 0x3c, 0x2b,
+-                               0x44, 0x19, 0xfe, 0xa5, 0x40, 0x03, 0xc4, 0xfc,
+-                               0xb3, 0x9c, 0xef, 0x07, 0x99, 0x58, 0x17, 0xc1,
+-                               0x44, 0xa3, 0x15, 0x7d, 0x7b, 0x22, 0x22, 0xdf,
+-                               0x03, 0x58, 0x66, 0xf5, 0x24, 0x54, 0x52, 0x91,
+-                               0x2d, 0x76, 0xfe, 0x63, 0x64, 0x4e, 0x0f, 0x50,
+-                               0x2b, 0x65, 0x79, 0x1f, 0xf1, 0xbf, 0xc7, 0x41,
+-                               0x26, 0xcc, 0xc6, 0x1c, 0xa9, 0x83, 0x6f, 0x03};
++                            0x04, 0x5a, 0x3a, 0xa9, 0x64, 0xaa, 0xd9, 0xd1,
++                            0x09, 0x9e, 0x99, 0xe5, 0xea, 0x50, 0x86, 0x8a,
++                            0x89, 0x72, 0x77, 0xee, 0xdb, 0xee, 0xb5, 0xa9,
++                            0xd8, 0x6b, 0x60, 0xb1, 0x84, 0xb4, 0xff, 0x37,
++                            0xc1, 0x1d, 0xfe, 0x8a, 0x06, 0x89, 0x61, 0x3d,
++                            0x37, 0xef, 0x01, 0xd3, 0xa3, 0x56, 0x02, 0x6c,
++                            0xa3, 0x05, 0xd4, 0xc5, 0x3f, 0x6b, 0x15, 0x59,
++                            0x25, 0x61, 0xff, 0x86, 0xea, 0x0c, 0x84, 0x01,
++                            0x85, 0x72, 0xfd, 0x84, 0x58, 0xca, 0x41, 0xda,
++                            0x27, 0xbe, 0xe4, 0x68, 0x09, 0xe4, 0xe9, 0x63,
++                            0x62, 0x6a, 0x31, 0x8a, 0x67, 0x8f, 0x55, 0xde,
++                            0xd4, 0xb6, 0x3f, 0x90, 0x10, 0x6c, 0xf6, 0x62,
++                            0x17, 0x23, 0x15, 0x7e, 0x33, 0x76, 0x65, 0xb5,
++                            0xee, 0x7b, 0x11, 0x76, 0xf5, 0xbe, 0xe0, 0xf2,
++                            0x57, 0x7a, 0x8c, 0x97, 0x0c, 0x68, 0xf5, 0xf8,
++                            0x41, 0xcf, 0x7f, 0x66, 0x53, 0xac, 0x31, 0x7d};
+     static const PRUint8 rsa_exponent1[FIPS_RSA_EXPONENT1_LENGTH] = {
+-                               0x12, 0x84, 0x1a, 0x99, 0xce, 0x9a, 0x8b, 0x58,
+-                               0xcc, 0x47, 0x43, 0xdf, 0x77, 0xbb, 0xd3, 0x20,
+-                               0xae, 0xe4, 0x2e, 0x63, 0x67, 0xdc, 0xf7, 0x5f,
+-                               0x3f, 0x83, 0x27, 0xb7, 0x14, 0x52, 0x56, 0xbf,
+-                               0xc3, 0x65, 0x06, 0xe1, 0x03, 0xcc, 0x93, 0x57,
+-                               0x09, 0x7b, 0x6f, 0xe8, 0x81, 0x4a, 0x2c, 0xb7,
+-                               0x43, 0xa9, 0x20, 0x1d, 0xf6, 0x56, 0x8b, 0xcc,
+-                               0xe5, 0x4c, 0xd5, 0x4f, 0x74, 0x67, 0x29, 0x51};
++                            0x93, 0x54, 0x14, 0x6e, 0x73, 0x9d, 0x4d, 0x4b,
++                            0xfa, 0x8c, 0xf8, 0xc8, 0x2f, 0x76, 0x22, 0xea,
++                            0x38, 0x80, 0x11, 0x8f, 0x05, 0xfc, 0x90, 0x44,
++                            0x3b, 0x50, 0x2a, 0x45, 0x3d, 0x4f, 0xaf, 0x02,
++                            0x7d, 0xc2, 0x7b, 0xa2, 0xd2, 0x31, 0x94, 0x5c,
++                            0x2e, 0xc3, 0xd4, 0x9f, 0x47, 0x09, 0x37, 0x6a,
++                            0xe3, 0x85, 0xf1, 0xa3, 0x0c, 0xd8, 0xf1, 0xb4,
++                            0x53, 0x7b, 0xc4, 0x71, 0x02, 0x86, 0x42, 0xbb,
++                            0x96, 0xff, 0x03, 0xa3, 0xb2, 0x67, 0x03, 0xea,
++                            0x77, 0x31, 0xfb, 0x4b, 0x59, 0x24, 0xf7, 0x07,
++                            0x59, 0xfb, 0xa9, 0xba, 0x1e, 0x26, 0x58, 0x97,
++                            0x66, 0xa1, 0x56, 0x49, 0x39, 0xb1, 0x2c, 0x55,
++                            0x0a, 0x6a, 0x78, 0x18, 0xba, 0xdb, 0xcf, 0xf4,
++                            0xf7, 0x32, 0x35, 0xa2, 0x04, 0xab, 0xdc, 0xa7,
++                            0x6d, 0xd9, 0xd5, 0x06, 0x6f, 0xec, 0x7d, 0x40,
++                            0x4c, 0xe8, 0x0e, 0xd0, 0xc9, 0xaa, 0xdf, 0x59};
+     static const PRUint8 rsa_coefficient[FIPS_RSA_COEFFICIENT_LENGTH] = {
+-                               0x23, 0xab, 0xf4, 0x03, 0x2f, 0x29, 0x95, 0x74,
+-                               0xac, 0x1a, 0x33, 0x96, 0x62, 0xed, 0xf7, 0xf6,
+-                               0xae, 0x07, 0x2a, 0x2e, 0xe8, 0xab, 0xfb, 0x1e,
+-                               0xb9, 0xb2, 0x88, 0x1e, 0x85, 0x05, 0x42, 0x64,
+-                               0x03, 0xb2, 0x8b, 0xc1, 0x81, 0x75, 0xd7, 0xba,
+-                               0xaa, 0xd4, 0x31, 0x3c, 0x8a, 0x96, 0x23, 0x9d,
+-                               0x3f, 0x06, 0x3e, 0x44, 0xa9, 0x62, 0x2f, 0x61,
+-                               0x5a, 0x51, 0x82, 0x2c, 0x04, 0x85, 0x73, 0xd1};
++                            0x17, 0xd7, 0xf5, 0x0a, 0xf0, 0x68, 0x97, 0x96,
++                            0xc4, 0x29, 0x18, 0x77, 0x9a, 0x1f, 0xe3, 0xf3,
++                            0x12, 0x13, 0x0f, 0x7e, 0x7b, 0xb9, 0xc1, 0x91,
++                            0xf9, 0xc7, 0x08, 0x56, 0x5c, 0xa4, 0xbc, 0x83,
++                            0x71, 0xf9, 0x78, 0xd9, 0x2b, 0xec, 0xfe, 0x6b,
++                            0xdc, 0x2f, 0x63, 0xc9, 0xcd, 0x50, 0x14, 0x5b,
++                            0xd3, 0x6e, 0x85, 0x4d, 0x0c, 0xa2, 0x0b, 0xa0,
++                            0x09, 0xb6, 0xca, 0x34, 0x9c, 0xc2, 0xc1, 0x4a,
++                            0xb0, 0xbc, 0x45, 0x93, 0xa5, 0x7e, 0x99, 0xb5,
++                            0xbd, 0xe4, 0x69, 0x29, 0x08, 0x28, 0xd2, 0xcd,
++                            0xab, 0x24, 0x78, 0x48, 0x41, 0x26, 0x0b, 0x37,
++                            0xa3, 0x43, 0xd1, 0x95, 0x1a, 0xd6, 0xee, 0x22,
++                            0x1c, 0x00, 0x0b, 0xc2, 0xb7, 0xa4, 0xa3, 0x21,
++                            0xa9, 0xcd, 0xe4, 0x69, 0xd3, 0x45, 0x02, 0xb1,
++                            0xb7, 0x3a, 0xbf, 0x51, 0x35, 0x1b, 0x78, 0xc2,
++                            0xcf, 0x0c, 0x0d, 0x60, 0x09, 0xa9, 0x44, 0x02};
+ 
+     /* RSA Known Plaintext Message (1024-bits). */
+     static const PRUint8 rsa_known_plaintext_msg[FIPS_RSA_MESSAGE_LENGTH] = {
+-                                         "Known plaintext message utilized" 
++                                         "Known plaintext message utilized"
+                                          "for RSA Encryption &  Decryption"
+-                                         "block, SHA1, SHA256, SHA384  and"
+-                                         "SHA512 RSA Signature KAT tests."};
++                                         "blocks SHA256, SHA384  and      "
++                                         "SHA512 RSA Signature KAT tests. "
++                                         "Known plaintext message utilized"
++                                         "for RSA Encryption &  Decryption"
++                                         "blocks SHA256, SHA384  and      "
++                                         "SHA512 RSA Signature KAT  tests."};
+ 
+-    /* RSA Known Ciphertext (1024-bits). */
++    /* RSA Known Ciphertext (2048-bits). */
+     static const PRUint8 rsa_known_ciphertext[] = {
+-                               0x1e, 0x7e, 0x12, 0xbb, 0x15, 0x62, 0xd0, 0x23,
+-                               0x53, 0x4c, 0x51, 0x97, 0x77, 0x06, 0xa0, 0xbb,
+-                               0x26, 0x99, 0x9a, 0x8f, 0x39, 0xad, 0x88, 0x5c,
+-                               0xc4, 0xce, 0x33, 0x40, 0x94, 0x92, 0xb4, 0x0e,
+-                               0xab, 0x71, 0xa9, 0x5d, 0x9a, 0x37, 0xe3, 0x9a,
+-                               0x24, 0x95, 0x13, 0xea, 0x0f, 0xbb, 0xf7, 0xff,
+-                               0xdf, 0x31, 0x33, 0x23, 0x1d, 0xce, 0x26, 0x9e,
+-                               0xd1, 0xde, 0x98, 0x40, 0xde, 0x57, 0x86, 0x12,
+-                               0xf1, 0xe6, 0x5a, 0x3f, 0x08, 0x02, 0x81, 0x85,
+-                               0xe0, 0xd9, 0xad, 0x3c, 0x8c, 0x71, 0xf8, 0xcf,
+-                               0x0a, 0x98, 0xc5, 0x08, 0xdc, 0xc4, 0xca, 0x8c,
+-                               0x23, 0x1b, 0x4d, 0x9b, 0xb5, 0x13, 0x44, 0xe1,
+-                               0x5f, 0xf9, 0x30, 0x80, 0x25, 0xe0, 0x1e, 0x94,
+-                               0xa3, 0x0c, 0xdc, 0x82, 0x2e, 0xfb, 0x30, 0xbe,
+-                               0x89, 0xba, 0x76, 0xb6, 0x23, 0xf7, 0xda, 0x7c,
+-                               0xca, 0xe6, 0x02, 0xbd, 0x92, 0xce, 0x64, 0xfc};
+-
+-    /* RSA Known Signed Hash (1024-bits). */
+-    static const PRUint8 rsa_known_sha1_signature[] = {
+-                               0xd2, 0xa4, 0xe0, 0x2b, 0xc7, 0x03, 0x7f, 0xc6,
+-                               0x06, 0x9e, 0xa2, 0x82, 0x19, 0xe9, 0x2b, 0xaf,
+-                               0xe3, 0x48, 0x88, 0xc1, 0xf3, 0xb5, 0x0d, 0xe4,
+-                               0x52, 0x9e, 0xad, 0xd5, 0x58, 0xb5, 0x9f, 0xe8,
+-                               0x40, 0xe9, 0xb7, 0x2e, 0xc6, 0x71, 0x58, 0x56,
+-                               0x04, 0xac, 0xb0, 0xf3, 0x3a, 0x42, 0x38, 0x08,
+-                               0xc4, 0x43, 0x39, 0xba, 0x19, 0xce, 0xb1, 0x99,
+-                               0xf1, 0x8d, 0x89, 0xd8, 0x50, 0x07, 0x14, 0x3d,
+-                               0xcf, 0xd0, 0xb6, 0x79, 0xde, 0x9c, 0x89, 0x32,
+-                               0xb0, 0x73, 0x3f, 0xed, 0x03, 0x0b, 0xdf, 0x6d,
+-                               0x7e, 0xc9, 0x1c, 0x39, 0xe8, 0x2b, 0x16, 0x09,
+-                               0xbb, 0x5f, 0x99, 0x2f, 0xeb, 0xf3, 0x37, 0x73,
+-                               0x0d, 0x0e, 0xcc, 0x95, 0xad, 0x90, 0x80, 0x03,
+-                               0x1d, 0x80, 0x55, 0x37, 0xa1, 0x2a, 0x71, 0x76,
+-                               0x23, 0x87, 0x8c, 0x9b, 0x41, 0x07, 0xc6, 0x3d,
+-                               0xc6, 0xa3, 0x7d, 0x1b, 0xff, 0x4e, 0x11, 0x19};
++                            0x04, 0x12, 0x46, 0xe3, 0x6a, 0xee, 0xde, 0xdd,
++                            0x49, 0xa1, 0xd9, 0x83, 0xf7, 0x35, 0xf9, 0x70,
++                            0x88, 0x03, 0x2d, 0x01, 0x8b, 0xd1, 0xbf, 0xdb,
++                            0xe5, 0x1c, 0x85, 0xbe, 0xb5, 0x0b, 0x48, 0x45,
++                            0x7a, 0xf0, 0xa0, 0xe3, 0xa2, 0xbb, 0x4b, 0xf6,
++                            0x27, 0xd0, 0x1b, 0x12, 0xe3, 0x77, 0x52, 0x34,
++                            0x9e, 0x8e, 0x03, 0xd2, 0xf8, 0x79, 0x6e, 0x39,
++                            0x79, 0x53, 0x3c, 0x44, 0x14, 0x94, 0xbb, 0x8d,
++                            0xaa, 0x14, 0x44, 0xa0, 0x7b, 0xa5, 0x8c, 0x93,
++                            0x5f, 0x99, 0xa4, 0xa3, 0x6e, 0x7a, 0x38, 0x40,
++                            0x78, 0xfa, 0x36, 0x91, 0x5e, 0x9a, 0x9c, 0xba,
++                            0x1e, 0xd4, 0xf9, 0xda, 0x4b, 0x0f, 0xa8, 0xa3,
++                            0x1c, 0xf3, 0x3a, 0xd1, 0xa5, 0xb4, 0x51, 0x16,
++                            0xed, 0x4b, 0xcf, 0xec, 0x93, 0x7b, 0x90, 0x21,
++                            0xbc, 0x3a, 0xf4, 0x0b, 0xd1, 0x3a, 0x2b, 0xba,
++                            0xa6, 0x7d, 0x5b, 0x53, 0xd8, 0x64, 0xf9, 0x29,
++                            0x7b, 0x7f, 0x77, 0x3e, 0x51, 0x4c, 0x9a, 0x94,
++                            0xd2, 0x4b, 0x4a, 0x8d, 0x61, 0x74, 0x97, 0xae,
++                            0x53, 0x6a, 0xf4, 0x90, 0xc2, 0x2c, 0x49, 0xe2,
++                            0xfa, 0xeb, 0x91, 0xc5, 0xe5, 0x83, 0x13, 0xc9,
++                            0x44, 0x4b, 0x95, 0x2c, 0x57, 0x70, 0x15, 0x5c,
++                            0x64, 0x8d, 0x1a, 0xfd, 0x2a, 0xc7, 0xb2, 0x9c,
++                            0x5c, 0x99, 0xd3, 0x4a, 0xfd, 0xdd, 0xf6, 0x82,
++                            0x87, 0x8c, 0x5a, 0xc4, 0xa8, 0x0d, 0x2a, 0xef,
++                            0xc3, 0xa2, 0x7e, 0x8e, 0x67, 0x9f, 0x6f, 0x63,
++                            0xdb, 0xbb, 0x1d, 0x31, 0xc4, 0xbb, 0xbc, 0x13,
++                            0x3f, 0x54, 0xc6, 0xf6, 0xc5, 0x28, 0x32, 0xab,
++                            0x96, 0x42, 0x10, 0x36, 0x40, 0x92, 0xbb, 0x57,
++                            0x55, 0x38, 0xf5, 0x43, 0x7e, 0x43, 0xc4, 0x65,
++                            0x47, 0x64, 0xaa, 0x0f, 0x4c, 0xe9, 0x49, 0x16,
++                            0xec, 0x6a, 0x50, 0xfd, 0x14, 0x49, 0xca, 0xdb,
++                            0x44, 0x54, 0xca, 0xbe, 0xa3, 0x0e, 0x5f, 0xef};
+ 
+-    /* RSA Known Signed Hash (1024-bits). */
++    /* RSA Known Signed Hash (2048-bits). */
+     static const PRUint8 rsa_known_sha256_signature[] = {
+-                               0x27, 0x35, 0xdd, 0xc4, 0xf8, 0xe2, 0x0b, 0xa3,
+-                               0xef, 0x63, 0x57, 0x3b, 0xe1, 0x58, 0x9a, 0xbc,
+-                               0x20, 0x9c, 0x25, 0x12, 0x01, 0xbf, 0xbb, 0x29,
+-                               0x80, 0x1a, 0xb1, 0x37, 0x9c, 0xcd, 0x67, 0xc7,
+-                               0x0d, 0xf8, 0x64, 0x10, 0x9f, 0xe2, 0xa1, 0x9b,
+-                               0x21, 0x90, 0xcc, 0xda, 0x8b, 0x76, 0x5e, 0x79,
+-                               0x00, 0x9d, 0x58, 0x8b, 0x8a, 0xb3, 0xc3, 0xb5,
+-                               0xf1, 0x54, 0xc5, 0x8c, 0x72, 0xba, 0xde, 0x51,
+-                               0x3c, 0x6b, 0x94, 0xd6, 0xf3, 0x1b, 0xa2, 0x53,
+-                               0xe6, 0x1a, 0x46, 0x1d, 0x7f, 0x14, 0x86, 0xcc,
+-                               0xa6, 0x30, 0x92, 0x96, 0xc0, 0x96, 0x24, 0xf0,
+-                               0x42, 0x53, 0x4c, 0xdd, 0x27, 0xdf, 0x1d, 0x2e,
+-                               0x8b, 0x83, 0xbe, 0xed, 0x85, 0x1d, 0x50, 0x46,
+-                               0xa3, 0x7d, 0x20, 0xea, 0x3e, 0x91, 0xfb, 0xf6,
+-                               0x86, 0x51, 0xfd, 0x8c, 0xe5, 0x31, 0xe6, 0x7e,
+-                               0x60, 0x08, 0x0e, 0xec, 0xa6, 0xea, 0x24, 0x8d};
+-
+-    /* RSA Known Signed Hash (1024-bits). */
+-    static const PRUint8 rsa_known_sha384_signature[] = {
+-                               0x0b, 0x03, 0x94, 0x4f, 0x94, 0x78, 0x9b, 0x96,
+-                               0x76, 0xeb, 0x72, 0x58, 0xe1, 0xc5, 0xc7, 0x5f,
+-                               0x85, 0x01, 0xa8, 0xc4, 0xf6, 0x1a, 0xb5, 0x2c,
+-                               0xd1, 0xd8, 0x87, 0xde, 0x3a, 0x9c, 0x9f, 0x57,
+-                               0x81, 0x2a, 0x1e, 0x23, 0x07, 0x70, 0xb0, 0xf9,
+-                               0x28, 0x3d, 0xfa, 0xe5, 0x2e, 0x1b, 0x9a, 0x72,
+-                               0xc3, 0x74, 0xb3, 0x42, 0x1c, 0x9a, 0x13, 0xdc,
+-                               0xc9, 0xd6, 0xd5, 0x88, 0xc9, 0x9c, 0x46, 0xf1,
+-                               0x0c, 0xa6, 0xf7, 0xd8, 0x06, 0xa3, 0x1b, 0xdf,
+-                               0x55, 0xb3, 0x1b, 0x7b, 0x58, 0x1d, 0xff, 0x19,
+-                               0xc7, 0xe0, 0xdd, 0x59, 0xac, 0x2f, 0x78, 0x71,
+-                               0xe7, 0xe0, 0x17, 0xa3, 0x1c, 0x5c, 0x92, 0xef,
+-                               0xb6, 0x75, 0xed, 0xbe, 0x18, 0x39, 0x6b, 0xd7,
+-                               0xc9, 0x08, 0x62, 0x55, 0x62, 0xac, 0x5d, 0xa1,
+-                               0x9b, 0xd5, 0xb8, 0x98, 0x15, 0xc0, 0xf5, 0x41,
+-                               0x85, 0x44, 0x96, 0xca, 0x10, 0xdc, 0x57, 0x21};
+-
+-    /* RSA Known Signed Hash (1024-bits). */
+-    static const PRUint8 rsa_known_sha512_signature[] = {
+-                               0xa5, 0xd0, 0x80, 0x04, 0x22, 0xfc, 0x80, 0x73,
+-                               0x7d, 0x46, 0xc8, 0x7b, 0xac, 0x44, 0x7b, 0xe6,
+-                               0x07, 0xe5, 0x61, 0x4c, 0x33, 0x7f, 0x6f, 0x46,
+-                               0x7c, 0x30, 0xe3, 0x75, 0x59, 0x4b, 0x42, 0xf3,
+-                               0x9f, 0x35, 0x3c, 0x10, 0x56, 0xdb, 0xd2, 0x69,
+-                               0x43, 0xcb, 0x77, 0xe9, 0x7d, 0xcd, 0x07, 0x43,
+-                               0xc5, 0xd4, 0x0c, 0x9d, 0xf5, 0x92, 0xbd, 0x0e,
+-                               0x3b, 0xb7, 0x68, 0x88, 0x84, 0xca, 0xae, 0x0d,
+-                               0xab, 0x71, 0x10, 0xad, 0xab, 0x27, 0xe4, 0xa3,
+-                               0x24, 0x41, 0xeb, 0x1c, 0xa6, 0x5f, 0xf1, 0x85,
+-                               0xd0, 0xf6, 0x22, 0x74, 0x3d, 0x81, 0xbe, 0xdd,
+-                               0x1b, 0x2a, 0x4c, 0xd1, 0x6c, 0xb5, 0x6d, 0x7a,
+-                               0xbb, 0x99, 0x69, 0x01, 0xa6, 0xc0, 0x98, 0xfa,
+-                               0x97, 0xa3, 0xd1, 0xb0, 0xdf, 0x09, 0xe3, 0x3d,
+-                               0x88, 0xee, 0x90, 0xf3, 0x10, 0x41, 0x0f, 0x06,
+-                               0x31, 0xe9, 0x60, 0x2d, 0xbf, 0x63, 0x7b, 0xf8};
++                            0x8c, 0x2d, 0x2e, 0xfb, 0x37, 0xb5, 0x6f, 0x38,
++                            0x9f, 0x06, 0x5a, 0xf3, 0x8c, 0xa0, 0xd0, 0x7a,
++                            0xde, 0xcf, 0xf9, 0x14, 0x95, 0x59, 0xd3, 0x5f,
++                            0x51, 0x5d, 0x5d, 0xad, 0xd8, 0x71, 0x33, 0x50,
++                            0x1d, 0x03, 0x3b, 0x3a, 0x32, 0x00, 0xb4, 0xde,
++                            0x7f, 0xe4, 0xb1, 0xe5, 0x6b, 0x83, 0xf4, 0x80,
++                            0x10, 0x3b, 0xb8, 0x8a, 0xdb, 0xe8, 0x0a, 0x42,
++                            0x9e, 0x8d, 0xd7, 0xbe, 0xed, 0xde, 0x5a, 0x3d,
++                            0xc6, 0xdb, 0xfe, 0x49, 0x6a, 0xe9, 0x1e, 0x75,
++                            0x66, 0xf1, 0x3f, 0x9e, 0x3f, 0xff, 0x05, 0x65,
++                            0xde, 0xca, 0x62, 0x62, 0xf3, 0xec, 0x53, 0x09,
++                            0xa0, 0x37, 0xd5, 0x66, 0x62, 0x72, 0x14, 0xb6,
++                            0x51, 0x32, 0x67, 0x50, 0xc1, 0xe1, 0x2f, 0x9e,
++                            0x98, 0x4e, 0x53, 0x96, 0x55, 0x4b, 0xc4, 0x92,
++                            0xc3, 0xb4, 0x80, 0xf0, 0x35, 0xc9, 0x00, 0x4b,
++                            0x5c, 0x85, 0x92, 0xb1, 0xe8, 0x6e, 0xa5, 0x51,
++                            0x38, 0x9f, 0xc9, 0x11, 0xb6, 0x14, 0xdf, 0x34,
++                            0x64, 0x40, 0x82, 0x82, 0xde, 0x16, 0x69, 0x93,
++                            0x89, 0x4e, 0x5c, 0x32, 0xf2, 0x0a, 0x4e, 0x9e,
++                            0xbd, 0x63, 0x99, 0x4f, 0xf3, 0x15, 0x90, 0xc2,
++                            0xfe, 0x6f, 0xb7, 0xf4, 0xad, 0xd4, 0x8e, 0x0b,
++                            0xd2, 0xf5, 0x22, 0xd2, 0x71, 0x65, 0x13, 0xf7,
++                            0x82, 0x7b, 0x75, 0xb6, 0xc1, 0xb4, 0x45, 0xbd,
++                            0x8f, 0x95, 0xcf, 0x5b, 0x95, 0x32, 0xef, 0x18,
++                            0x5f, 0xd3, 0xdf, 0x7e, 0x22, 0xdd, 0x25, 0xeb,
++                            0xe1, 0xbf, 0x3b, 0x9a, 0x55, 0x75, 0x4f, 0x3c,
++                            0x38, 0x67, 0x57, 0x04, 0x04, 0x57, 0x27, 0xf6,
++                            0x34, 0x0e, 0x57, 0x8a, 0x7c, 0xff, 0x7d, 0xca,
++                            0x8c, 0x06, 0xf8, 0x9d, 0xdb, 0xe4, 0xd8, 0x19,
++                            0xdd, 0x4d, 0xfd, 0x8f, 0xa0, 0x06, 0x53, 0xe8,
++                            0x33, 0x00, 0x70, 0x3f, 0x6b, 0xc3, 0xbd, 0x9a,
++                            0x78, 0xb5, 0xa9, 0xef, 0x6d, 0xda, 0x67, 0x92};
++
++   /* RSA Known Signed Hash (2048-bits). */
++   static const PRUint8 rsa_known_sha384_signature[] = {
++                            0x20, 0x2d, 0x21, 0x3a, 0xaa, 0x1e, 0x05, 0x15,
++                            0x5c, 0xca, 0x84, 0x86, 0xc0, 0x15, 0x81, 0xdf,
++                            0xd4, 0x06, 0x9f, 0xe0, 0xc1, 0xed, 0xef, 0x0f,
++                            0xfe, 0xb3, 0xc3, 0xbb, 0x28, 0xa5, 0x56, 0xbf,
++                            0xe3, 0x11, 0x5c, 0xc2, 0xc0, 0x0b, 0xfa, 0xfa,
++                            0x3d, 0xd3, 0x06, 0x20, 0xe2, 0xc9, 0xe4, 0x66,
++                            0x28, 0xb7, 0xc0, 0x3b, 0x3c, 0x96, 0xc6, 0x49,
++                            0x3b, 0xcf, 0x86, 0x49, 0x31, 0xaf, 0x5b, 0xa3,
++                            0xec, 0x63, 0x10, 0xdf, 0xda, 0x2f, 0x68, 0xac,
++                            0x7b, 0x3a, 0x49, 0xfa, 0xe6, 0x0d, 0xfe, 0x37,
++                            0x17, 0x56, 0x8e, 0x5c, 0x48, 0x97, 0x43, 0xf7,
++                            0xa0, 0xbc, 0xe3, 0x4b, 0x42, 0xde, 0x58, 0x1d,
++                            0xd9, 0x5d, 0xb3, 0x08, 0x35, 0xbd, 0xa4, 0xe1,
++                            0x80, 0xc3, 0x64, 0xab, 0x21, 0x97, 0xad, 0xfb,
++                            0x71, 0xee, 0xa3, 0x3d, 0x9c, 0xaa, 0xfa, 0x16,
++                            0x60, 0x46, 0x32, 0xda, 0x44, 0x2e, 0x10, 0x92,
++                            0x20, 0xd8, 0x98, 0x80, 0x84, 0x75, 0x5b, 0x70,
++                            0x91, 0x00, 0x33, 0x19, 0x69, 0xc9, 0x2a, 0xec,
++                            0x3d, 0xe5, 0x5f, 0x0f, 0x9a, 0xa7, 0x97, 0x1f,
++                            0x79, 0xc3, 0x1d, 0x65, 0x74, 0x62, 0xc5, 0xa1,
++                            0x23, 0x65, 0x4b, 0x84, 0xa1, 0x03, 0x98, 0xf3,
++                            0xf1, 0x02, 0x24, 0xca, 0xe5, 0xd4, 0xc8, 0xa2,
++                            0x30, 0xad, 0x72, 0x7d, 0x29, 0x60, 0x1a, 0x8e,
++                            0x6f, 0x23, 0xa4, 0xda, 0x68, 0xa4, 0x45, 0x9c,
++                            0x39, 0x70, 0x44, 0x18, 0x4b, 0x73, 0xfe, 0xf8,
++                            0x33, 0x53, 0x1d, 0x7e, 0x93, 0x93, 0xac, 0xc7,
++                            0x1e, 0x6e, 0x6b, 0xfd, 0x9e, 0xba, 0xa6, 0x71,
++                            0x70, 0x47, 0x6a, 0xd6, 0x82, 0x32, 0xa2, 0x6e,
++                            0x20, 0x72, 0xb0, 0xba, 0xec, 0x91, 0xbb, 0x6b,
++                            0xcc, 0x84, 0x0a, 0x33, 0x2b, 0x8a, 0x8d, 0xeb,
++                            0x71, 0xcd, 0xca, 0x67, 0x1b, 0xad, 0x10, 0xd4,
++                            0xce, 0x4f, 0xc0, 0x29, 0xec, 0xfa, 0xed, 0xfa};
++
++   /* RSA Known Signed Hash (2048-bits). */
++   static const PRUint8 rsa_known_sha512_signature[] = {
++                            0x35, 0x0e, 0x74, 0x9d, 0xeb, 0xc7, 0x67, 0x31,
++                            0x9f, 0xff, 0x0b, 0xbb, 0x5e, 0x66, 0xb4, 0x2f,
++                            0xbf, 0x72, 0x60, 0x4f, 0xe9, 0xbd, 0xec, 0xc8,
++                            0x17, 0x79, 0x5f, 0x39, 0x83, 0xb4, 0x54, 0x2e,
++                            0x01, 0xb9, 0xd3, 0x20, 0x47, 0xcb, 0xd4, 0x42,
++                            0xf2, 0x6e, 0x36, 0xc1, 0x97, 0xad, 0xef, 0x8e,
++                            0xe6, 0x51, 0xee, 0x5e, 0x9e, 0x88, 0xb4, 0x9d,
++                            0xda, 0x3e, 0x77, 0x4b, 0xe8, 0xae, 0x48, 0x53,
++                            0x2c, 0xc4, 0xd3, 0x25, 0x6b, 0x23, 0xb7, 0x54,
++                            0x3c, 0x95, 0x8f, 0xfb, 0x6f, 0x6d, 0xc5, 0x56,
++                            0x39, 0x69, 0x28, 0x0e, 0x74, 0x9b, 0x31, 0xe8,
++                            0x76, 0x77, 0x2b, 0xc1, 0x44, 0x89, 0x81, 0x93,
++                            0xfc, 0xf6, 0xec, 0x5f, 0x8f, 0x89, 0xfc, 0x1d,
++                            0xa4, 0x53, 0x58, 0x8c, 0xe9, 0xc0, 0xc0, 0x26,
++                            0xe6, 0xdf, 0x6d, 0x27, 0xb1, 0x8e, 0x3e, 0xb6,
++                            0x47, 0xe1, 0x02, 0x96, 0xc2, 0x5f, 0x7f, 0x3d,
++                            0xc5, 0x6c, 0x2f, 0xea, 0xaa, 0x5e, 0x39, 0xfc,
++                            0x77, 0xca, 0x00, 0x02, 0x5c, 0x64, 0x7c, 0xce,
++                            0x7d, 0x63, 0x82, 0x05, 0xed, 0xf7, 0x5b, 0x55,
++                            0x58, 0xc0, 0xeb, 0x76, 0xd7, 0x95, 0x55, 0x37,
++                            0x85, 0x7d, 0x17, 0xad, 0xd2, 0x11, 0xfd, 0x97,
++                            0x48, 0xb5, 0xc2, 0x5e, 0xc7, 0x62, 0xc0, 0xe0,
++                            0x68, 0xa8, 0x61, 0x14, 0x41, 0xca, 0x25, 0x3a,
++                            0xec, 0x48, 0x54, 0x22, 0x83, 0x2b, 0x69, 0x54,
++                            0xfd, 0xc8, 0x99, 0x9a, 0xee, 0x37, 0x03, 0xa3,
++                            0x8f, 0x0f, 0x32, 0xb0, 0xaa, 0x74, 0x39, 0x04,
++                            0x7c, 0xd9, 0xc2, 0x8f, 0xbe, 0xf2, 0xc4, 0xbe,
++                            0xdd, 0x7a, 0x7a, 0x7f, 0x72, 0xd3, 0x80, 0x59,
++                            0x18, 0xa0, 0xa1, 0x2d, 0x6f, 0xa3, 0xa9, 0x48,
++                            0xed, 0x20, 0xa6, 0xea, 0xaa, 0x10, 0x83, 0x98,
++                            0x0c, 0x13, 0x69, 0x6e, 0xcd, 0x31, 0x6b, 0xd0,
++                            0x66, 0xa6, 0x5e, 0x30, 0x0c, 0x82, 0xd5, 0x81};
+ 
+     static const RSAPublicKey    bl_public_key = { NULL,
+       { FIPS_RSA_TYPE, (unsigned char *)rsa_modulus,         
+@@ -1447,13 +1568,6 @@
+                        FIPS_RSA_DECRYPT_LENGTH ) != 0 ) )
+         goto rsa_loser;
+ 
+-    rsa_status = sftk_fips_RSA_PowerUpSigSelfTest (HASH_AlgSHA1,
+-                           rsa_public_key, rsa_private_key,
+-                           rsa_known_plaintext_msg, FIPS_RSA_MESSAGE_LENGTH, 
+-                           rsa_known_sha1_signature);
+-    if( rsa_status != SECSuccess )
+-        goto rsa_loser;
+-
+     rsa_status = sftk_fips_RSA_PowerUpSigSelfTest (HASH_AlgSHA256,
+                            rsa_public_key, rsa_private_key,
+                            rsa_known_plaintext_msg, FIPS_RSA_MESSAGE_LENGTH,
+@@ -1822,7 +1936,7 @@
+ 			0x7f,0x7e,0xc8,0xae,0x9c,0x09,0x99,0x7d,
+ 			0xbb,0x9e,0x48,0x7f,0xbb,0x96,0x46,0xb3,
+ 			0x03,0x75,0xf8,0xc8,0x69,0x45,0x3f,0x97,
+-			0x5e,0x2e,0x48,0xe1,0x5d,0x58,0x97,0x4c};
++			0x5e,0x2e,0x48,0xe1,0x5d,0x58,0x97,0x4c };
+    static const PRUint8 rng_known_result[] = {
+ 			0x16,0xe1,0x8c,0x57,0x21,0xd8,0xf1,0x7e,
+ 			0x5a,0xa0,0x16,0x0b,0x7e,0xa6,0x25,0xb4,
+@@ -1830,67 +1944,36 @@
+ 			0xbb,0xaa,0x2a,0x1b,0x22,0x33,0x2e,0x4a,
+ 			0x14,0x07,0x9d,0x52,0xfc,0x73,0x61,0x48,
+ 			0xac,0xc1,0x22,0xfc,0xa4,0xfc,0xac,0xa4,
+-			0xdb,0xda,0x5b,0x27,0x33,0xc4,0xb3,0xec,
+-			0xb0,0xf2,0xee,0x63,0x11,0x61,0xdb,0x30,
+-			0xd3,0x04,0x6b,0x96,0x22,0x1e,0x17,0x24,
+-			0x1a,0x54,0x70,0xf3,0x4d,0x1c,0x6a,0xb0,
+-			0xf9,0xe3,0xc8,0x07,0x97,0x5f,0xbb,0xe5,
+-			0xde,0xce,0xa9,0x3f,0x91,0xd3,0x82,0x33,
+-			0x11,0x3f,0x5b,0xb2,0xa9,0x1e,0x71,0x59,
+-			0x68,0x8f,0x7d,0x77,0xfd,0xf5,0xcb,0xc8,
+-			0x8f,0x51,0xb9,0x62,0x30,0x1b,0x12,0xa5,
+-			0x7a,0xe1,0xf3,0x15,0x49,0x15,0xe9,0xc4,
+-			0x3d,0x2d,0x1f,0x8c,0xe8,0x4e,0xd1,0xe6,
+-			0x4e,0xf1,0x7a,0x64,0x2e,0x05,0xd6,0xee,
+-			0xb8,0x7b,0x71,0x82,0x38,0x2b,0xc5,0xdd,
+-			0x3a,0x32,0xae,0x64,0x0e,0xed,0x30,0xb2,
+-			0x00,0x72,0x61,0x65,0xfb,0x09,0x26,0x68,
+-			0x3e,0x36,0xb3,0x15,0xe2,0x30,0xde,0x49,
+-			0xed,0x60,0xc5,0x40,0xe1,0x1a,0xe9,0x33,
+-			0x7f,0x77,0xb5,0xa9,0xf7,0xa1,0xb9,0xdb,
+-			0x77,0x61,0x00,0xc2,0x18,0xa1,0xa1,0x3a,
+-			0x0e,0x2a,0x6c,0xa1,0x3f,0x33,0xdd,0xb9,
+-			0x23,0x48,0x75,0x50,0xd3,0xbb,0xd9,0x0e,
+-			0xdb,0xb4,0x62,0x33,0x52,0x41,0x5c,0xfc,
+-			0xdd,0x89,0xd6,0x60,0xe8,0x2b,0x6f,0xb2,
+-			0x7f,0x4d,0x97,0x8c,0x69,0xa4,0x15,0x16,
+-			0x4c,0x7f,0x4d,0x8d,0x2e,0xec,0xfa,0x0e,
+-			0xfa,0x37,0xe9,0x9d,0x21,0x9b,0x69,0x2a,
+-			0xc5,0x4f,0x5b,0x59,0xe9,0x98,0x73,0x54,
+-			0x28,0x33,0x4d,0x7c,0x53,0x8c,0x43,0x2b,
+-			0xc7,0x0e,0xfb,0x35,0x9d,0xf7,0x2e,0x1a,
+-			0xaa,0x80,0xa3,0x70,0x2c,0x72,0x43,0xb0,
+-			0x35,0x3b,0xe2,0x58,0x63,0xf8,0x1d,0xcd,
+-			0x55,0x66,0xb8,0x1e,0x06,0xa5,0xb6,0x4d,
+-			0xc2,0x9f,0x9b,0xde,0xa3,0xda,0x67,0x0e,
+-			0xd9,0x4b,0xfd,0x29,0xba,0x16,0x4e,0x03,
+-			0xe9,0x04,0x9a,0x67,0xf8,0xc4,0xb7,0x01,
+-			0xba,0x3c,0x5f,0xdd,0x8e,0x56,0xf3,0xea,
+-			0xf4,0xfb,0x75,0x76,0x30,0x20,0xe6,0xec,
+-			0x44,0xc9,0x76,0xb2,0x21,0x0c,0x1c,0xb9,
+-			0x5f,0x27,0xff,0x09,0x45,0x2c,0x26,0xfd,
+-			0x27,0xb0,0xca,0x67,0xd3,0xb0,0x77,0x3e,
+-			0x10,0x46,0xdd,0x81,0x70,0x47,0x5c,0x12,
+-			0xe7,0x37,0x49,0x17,0xf5,0x04,0xbc,0x62,
+-			0xef,0xba,0x6e,0x1d,0xb9,0x42,0xb5,0xf9,
+-			0xda,0x2f,0x5b,0x05,0xa7,0x34,0x19,0xf6,
+-			0xa4,0xdb,0x45,0xb0,0x18,0x6b,0x32,0x75,
+-			0x0f,0x34,0xc8,0x1c,0x14,0xca,0x4f,0xf9,
+-			0x43,0x76,0xa5,0x41,0xeb,0xd4,0x37,0xc9,
+-			0xc8,0x94,0xe7,0x0f,0x4a,0xa1,0x72,0xc7,
+-			0x48,0xbd,0x1c,0x84,0x74,0x73,0xd1,0x73,
+-			0xcd,0x1e,0xf0,0xb9,0x66,0x00,0x63,0xab};
++			0xdb,0xda,0x5b,0x27,0x33,0xc4,0xb3 };
++   static const PRUint8 reseed_entropy[] = {
++			0xc6,0x0b,0x0a,0x30,0x67,0x07,0xf4,0xe2,
++			0x24,0xa7,0x51,0x6f,0x5f,0x85,0x3e,0x5d,
++			0x67,0x97,0xb8,0x3b,0x30,0x9c,0x7a,0xb1,
++			0x52,0xc6,0x1b,0xc9,0x46,0xa8,0x62,0x79 };
++   static const PRUint8 additional_input[] = {
++			0x86,0x82,0x28,0x98,0xe7,0xcb,0x01,0x14,
++			0xae,0x87,0x4b,0x1d,0x99,0x1b,0xc7,0x41,
++			0x33,0xff,0x33,0x66,0x40,0x95,0x54,0xc6,
++			0x67,0x4d,0x40,0x2a,0x1f,0xf9,0xeb,0x65 };
++   static const PRUint8 rng_reseed_result[] = {
++			0x02,0x0c,0xc6,0x17,0x86,0x49,0xba,0xc4,
++			0x7b,0x71,0x35,0x05,0xf0,0xdb,0x4a,0xc2,
++			0x2c,0x38,0xc1,0xa4,0x42,0xe5,0x46,0x4a,
++			0x7d,0xf0,0xbe,0x47,0x88,0xb8,0x0e,0xc6,
++			0x25,0x2b,0x1d,0x13,0xef,0xa6,0x87,0x96,
++			0xa3,0x7d,0x5b,0x80,0xc2,0x38,0x76,0x61,
++			0xc7,0x80,0x5d,0x0f,0x05,0x76,0x85 };
+    static const PRUint8 Q[] = {
+ 			0x85,0x89,0x9c,0x77,0xa3,0x79,0xff,0x1a,
+ 			0x86,0x6f,0x2f,0x3e,0x2e,0xf9,0x8c,0x9c,
+ 			0x9d,0xef,0xeb,0xed};
+-  static const PRUint8 GENX[] = {
++   static const PRUint8 GENX[] = {
+ 			0x65,0x48,0xe3,0xca,0xac,0x64,0x2d,0xf7,
+ 			0x7b,0xd3,0x4e,0x79,0xc9,0x7d,0xa6,0xa8,
+ 			0xa2,0xc2,0x1f,0x8f,0xe9,0xb9,0xd3,0xa1,
+ 			0x3f,0xf7,0x0c,0xcd,0xa6,0xca,0xbf,0xce,
+ 			0x84,0x0e,0xb6,0xf1,0x0d,0xbe,0xa9,0xa3};
+-  static const PRUint8 rng_known_DSAX[] = {
++   static const PRUint8 rng_known_DSAX[] = {
+ 			0x7a,0x86,0xf1,0x7f,0xbd,0x4e,0x6e,0xd9,
+ 			0x0a,0x26,0x21,0xd0,0x19,0xcb,0x86,0x73,
+ 			0x10,0x1f,0x60,0xd7};
+@@ -1898,6 +1981,7 @@
+ 
+ 
+    SECStatus rng_status = SECSuccess;
++   PR_STATIC_ASSERT(sizeof(rng_known_result) >= sizeof(rng_reseed_result));
+    PRUint8 result[sizeof(rng_known_result)];
+    PRUint8 DSAX[FIPS_DSA_SUBPRIME_LENGTH];
+ 
+@@ -1909,10 +1993,24 @@
+    if (rng_status != SECSuccess) {
+ 	return ( CKR_DEVICE_ERROR );
+    }
+-   rng_status = PRNGTEST_Generate(result, sizeof result, NULL, 0);
++   rng_status = PRNGTEST_Generate(result, sizeof rng_known_result, NULL, 0);
+    if ( ( rng_status != SECSuccess)  ||
+         ( PORT_Memcmp( result, rng_known_result,
+-                       sizeof result ) != 0 ) ) {
++                       sizeof rng_known_result ) != 0 ) ) {
++	PRNGTEST_Uninstantiate();
++	return ( CKR_DEVICE_ERROR );
++   }
++   rng_status = PRNGTEST_Reseed(reseed_entropy, sizeof reseed_entropy,
++				additional_input, sizeof additional_input);
++   if (rng_status != SECSuccess) {
++	PRNGTEST_Uninstantiate();
++	return ( CKR_DEVICE_ERROR );
++   }
++   rng_status = PRNGTEST_Generate(result, sizeof rng_reseed_result, NULL, 0);
++   if ( ( rng_status != SECSuccess)  ||
++        ( PORT_Memcmp( result, rng_reseed_result,
++                       sizeof rng_reseed_result ) != 0 ) ) {
++	PRNGTEST_Uninstantiate();
+ 	return ( CKR_DEVICE_ERROR );
+    }
+    rng_status = PRNGTEST_Uninstantiate();
+Index: mozilla/security/nss/lib/softoken/pk11pars.h
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/softoken/pk11pars.h,v
+retrieving revision 1.23
+retrieving revision 1.24
+diff -u -u -r1.23 -r1.24
+--- mozilla/security/nss/lib/softoken/pk11pars.h	17 Dec 2008 06:09:17 -0000	1.23
++++ mozilla/security/nss/lib/softoken/pk11pars.h	15 Jun 2009 22:27:03 -0000	1.24
+@@ -122,7 +122,7 @@
+ }
+ 
+ static PRBool secmod_argIsBlank(char c) {
+-   return isspace(c);
++   return isspace((unsigned char )c);
+ }
+ 
+ static PRBool secmod_argIsEscape(char c) {
+Index: mozilla/security/nss/lib/softoken/pkcs11.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/softoken/pkcs11.c,v
+retrieving revision 1.166
+retrieving revision 1.167
+diff -u -u -r1.166 -r1.167
+--- mozilla/security/nss/lib/softoken/pkcs11.c	16 Apr 2009 18:19:26 -0000	1.166
++++ mozilla/security/nss/lib/softoken/pkcs11.c	5 Jun 2009 03:17:58 -0000	1.167
+@@ -2589,8 +2589,6 @@
+ 	crv = CKR_DEVICE_ERROR;
+ 	return crv;
+     }
+-    RNG_SystemInfoForRNG();
+-
+ 
+     /* NOTE:
+      * we should be getting out mutexes from this list, not statically binding
+Index: mozilla/security/nss/lib/softoken/pkcs11u.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/softoken/pkcs11u.c,v
+retrieving revision 1.81
+retrieving revision 1.82
+diff -u -u -r1.81 -r1.82
+--- mozilla/security/nss/lib/softoken/pkcs11u.c	3 Feb 2009 05:34:43 -0000	1.81
++++ mozilla/security/nss/lib/softoken/pkcs11u.c	11 Jun 2009 06:28:06 -0000	1.82
+@@ -143,7 +143,7 @@
+ {
+     SFTKAttribute *myattribute = NULL;
+     SFTKDBHandle *dbHandle = NULL;
+-    CK_RV crv;
++    CK_RV crv = CKR_HOST_MEMORY;
+ 
+     myattribute = (SFTKAttribute*)PORT_Alloc(sizeof(SFTKAttribute));
+     if (myattribute == NULL) {
+Index: mozilla/security/nss/lib/softoken/sdb.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/softoken/sdb.c,v
+retrieving revision 1.12
+retrieving revision 1.16
+diff -u -u -r1.12 -r1.16
+--- mozilla/security/nss/lib/softoken/sdb.c	8 Apr 2009 04:19:35 -0000	1.12
++++ mozilla/security/nss/lib/softoken/sdb.c	11 Jun 2009 06:28:07 -0000	1.16
+@@ -324,7 +324,7 @@
+ /*
+  * Map SQL_LITE errors to PKCS #11 errors as best we can.
+  */
+-static int 
++static CK_RV
+ sdb_mapSQLError(sdbDataType type, int sqlerr)
+ {
+     switch (sqlerr) {
+@@ -731,6 +731,7 @@
+ 
+ loser: 
+     if (findstmt) {
++	sqlite3_reset(findstmt);
+ 	sqlite3_finalize(findstmt);
+     }
+     if (sqlDB) {
+@@ -1977,8 +1978,10 @@
+     int inUpdate;
+     PRUint32 accessOps;
+ 
+-    *certdb = NULL;
+-    *keydb = NULL;
++    if (certdb) 
++	*certdb = NULL;
++    if (keydb) 
++	*keydb = NULL;
+     *newInit = 0;
+ 
+ #ifdef SQLITE_UNSAFE_THREADS
+Index: mozilla/security/nss/lib/softoken/sftkdb.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/softoken/sftkdb.c,v
+retrieving revision 1.22
+retrieving revision 1.24
+diff -u -u -r1.22 -r1.24
+--- mozilla/security/nss/lib/softoken/sftkdb.c	16 Apr 2009 18:19:26 -0000	1.22
++++ mozilla/security/nss/lib/softoken/sftkdb.c	13 Jun 2009 00:09:49 -0000	1.24
+@@ -1328,12 +1328,13 @@
+ sftkdb_SetAttributeValue(SFTKDBHandle *handle, SFTKObject *object,
+                                 const CK_ATTRIBUTE *template, CK_ULONG count)
+ {
+-    CK_RV crv = CKR_OK;
+     CK_ATTRIBUTE *ntemplate;
+     unsigned char *data = NULL;
+     PLArenaPool *arena = NULL;
+-    CK_OBJECT_HANDLE objectID = (object->handle & SFTK_OBJ_ID_MASK);
+     SDB *db;
++    CK_RV crv = CKR_OK;
++    CK_OBJECT_HANDLE objectID = (object->handle & SFTK_OBJ_ID_MASK);
++    PRBool inTransaction = PR_FALSE;
+ 
+     if (handle == NULL) {
+ 	return CKR_TOKEN_WRITE_PROTECTED;
+@@ -1363,18 +1364,20 @@
+     /* make sure we don't have attributes that conflict with the existing DB */
+     crv = sftkdb_checkConflicts(db, object->objclass, template, count, objectID);
+     if (crv != CKR_OK) {
+-	return crv;
++	goto loser;
+     }
+ 
+     arena = PORT_NewArena(256);
+     if (arena ==  NULL) {
+-	return CKR_HOST_MEMORY;
++	crv = CKR_HOST_MEMORY;
++	goto loser;
+     }
+ 
+     crv = (*db->sdb_Begin)(db);
+     if (crv != CKR_OK) {
+ 	goto loser;
+     }
++    inTransaction = PR_TRUE;
+     crv = sftkdb_setAttributeValue(arena, handle, db, 
+ 				   objectID, template, count);
+     if (crv != CKR_OK) {
+@@ -1382,14 +1385,16 @@
+     }
+     crv = (*db->sdb_Commit)(db);
+ loser:
+-    if (crv != CKR_OK) {
++    if (crv != CKR_OK && inTransaction) {
+ 	(*db->sdb_Abort)(db);
+     }
+     if (data) {
+ 	PORT_Free(ntemplate);
+ 	PORT_Free(data);
+     }
+-    PORT_FreeArena(arena, PR_FALSE);
++    if (arena) {
++	PORT_FreeArena(arena, PR_FALSE);
++    }
+     return crv;
+ }
+ 
+@@ -2113,7 +2118,8 @@
+ 		 * give them a new CKA_ID */
+ 		/* NOTE: this changes ptemplate */
+ 		attr = sftkdb_getAttributeFromTemplate(CKA_ID,ptemplate,*plen);
+-		crv = sftkdb_incrementCKAID(arena, attr); 
++		crv = attr ? sftkdb_incrementCKAID(arena, attr) 
++		           : CKR_HOST_MEMORY; 
+ 		/* in the extremely rare event that we needed memory and
+ 		 * couldn't get it, just drop the key */
+ 		if (crv != CKR_OK) {
+Index: mozilla/security/nss/lib/softoken/sftkmod.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/softoken/sftkmod.c,v
+retrieving revision 1.5
+retrieving revision 1.7
+diff -u -u -r1.5 -r1.7
+--- mozilla/security/nss/lib/softoken/sftkmod.c	8 Apr 2009 04:19:35 -0000	1.5
++++ mozilla/security/nss/lib/softoken/sftkmod.c	11 Jun 2009 06:28:07 -0000	1.7
+@@ -628,12 +628,16 @@
+     } 
+     fclose(fd);
+     fclose(fd2);
+-    /* rename dbname2 to dbname */
+     if (found) {
++	/* rename dbname2 to dbname */
+ 	PR_Delete(dbname);
+ 	PR_Rename(dbname2,dbname);
++    } else {
++	PR_Delete(dbname2);
+     }
+     PORT_Free(dbname2);
++    PORT_Free(lib);
++    PORT_Free(name);
+     return SECSuccess;
+ 
+ loser:
+@@ -647,6 +651,8 @@
+ 	PR_Delete(dbname2);
+ 	PORT_Free(dbname2);
+     }
++    PORT_Free(lib);
++    PORT_Free(name);
+     return SECFailure;
+ }
+ 
+@@ -695,9 +701,9 @@
+ 	    block = sftkdb_DupCat(block, module);
+ 	    break;
+ 	}
+-	value = sftk_argFetchValue(&keyEnd[1], &count);
+ 	block = sftkdb_DupnCat(block, module, keyEnd-module+1);
+ 	if (block == NULL) { goto loser; }
++	value = sftk_argFetchValue(&keyEnd[1], &count);
+ 	if (value) {
+ 	    block = sftkdb_DupCat(block, sftk_argStrip(value));
+ 	    PORT_Free(value);
+Index: mozilla/security/nss/lib/softoken/sftkpars.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/softoken/sftkpars.c,v
+retrieving revision 1.7
+retrieving revision 1.8
+diff -u -u -r1.7 -r1.8
+--- mozilla/security/nss/lib/softoken/sftkpars.c	2 Dec 2008 23:24:52 -0000	1.7
++++ mozilla/security/nss/lib/softoken/sftkpars.c	15 Jun 2009 22:27:03 -0000	1.8
+@@ -74,7 +74,7 @@
+ }
+ 
+ static PRBool sftk_argIsBlank(char c) {
+-   return isspace(c);
++   return isspace((unsigned char )c);
+ }
+ 
+ static PRBool sftk_argIsEscape(char c) {
+Index: mozilla/security/nss/lib/softoken/sftkpwd.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/softoken/sftkpwd.c,v
+retrieving revision 1.9
+retrieving revision 1.10
+diff -u -u -r1.9 -r1.10
+--- mozilla/security/nss/lib/softoken/sftkpwd.c	15 Apr 2009 21:34:39 -0000	1.9
++++ mozilla/security/nss/lib/softoken/sftkpwd.c	11 Jun 2009 06:28:07 -0000	1.10
+@@ -610,13 +610,13 @@
+ {
+     SECItem *key = NULL;
+ 
+-    /* if we're a cert db, we don't have one */
+-    if (handle->type == SFTK_CERTDB_TYPE) {
++    /* don't have one */
++    if (!handle) {
+ 	return;
+     }
+ 
+-    /* don't have one */
+-    if (!handle) {
++    /* if we're a cert db, we don't have one */
++    if (handle->type == SFTK_CERTDB_TYPE) {
+ 	return;
+     }
+ 
+Index: mozilla/security/nss/lib/softoken/softkver.h
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/softoken/softkver.h,v
+retrieving revision 1.10
+retrieving revision 1.11
+diff -u -u -r1.10 -r1.11
+--- mozilla/security/nss/lib/softoken/softkver.h	16 Apr 2009 18:58:11 -0000	1.10
++++ mozilla/security/nss/lib/softoken/softkver.h	20 Jul 2009 20:06:59 -0000	1.11
+@@ -57,7 +57,7 @@
+  * The format of the version string should be
+  *     "<major version>.<minor version>[.<patch level>][ <ECC>][ <Beta>]"
+  */
+-#define SOFTOKEN_VERSION  "3.12.4" SOFTOKEN_ECC_STRING
++#define SOFTOKEN_VERSION  "3.12.4.4" SOFTOKEN_ECC_STRING
+ #define SOFTOKEN_VMAJOR   3
+ #define SOFTOKEN_VMINOR   12
+ #define SOFTOKEN_VPATCH   4
+Index: mozilla/security/nss/lib/softoken/legacydb/config.mk
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/softoken/legacydb/config.mk,v
+retrieving revision 1.10
+retrieving revision 1.11
+diff -u -u -r1.10 -r1.11
+--- mozilla/security/nss/lib/softoken/legacydb/config.mk	12 Apr 2009 17:19:25 -0000	1.10
++++ mozilla/security/nss/lib/softoken/legacydb/config.mk	11 Jun 2009 00:55:49 -0000	1.11
+@@ -90,21 +90,9 @@
+ endif
+ 
+ ifeq ($(OS_TARGET),SunOS)
+-# The -R '$ORIGIN' linker option instructs this library to search for its
+-# dependencies in the same directory where it resides.
+-MKSHLIB += -R '$$ORIGIN'
+ OS_LIBS += -lbsm 
+ endif
+ 
+-ifeq ($(OS_ARCH), HP-UX) 
+-ifneq ($(OS_TEST), ia64)
+-# pa-risc
+-ifeq ($(USE_64), 1)
+-MKSHLIB += +b '$$ORIGIN'
+-endif
+-endif
+-endif
+-
+ ifeq ($(OS_TARGET),WINCE)
+ DEFINES += -DDBM_USING_NSPR
+ endif
+Index: mozilla/security/nss/lib/sqlite/config.mk
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/sqlite/config.mk,v
+retrieving revision 1.5
+retrieving revision 1.6
+diff -u -u -r1.5 -r1.6
+--- mozilla/security/nss/lib/sqlite/config.mk	19 Nov 2008 20:09:50 -0000	1.5
++++ mozilla/security/nss/lib/sqlite/config.mk	11 Jun 2009 00:55:50 -0000	1.6
+@@ -55,17 +55,6 @@
+ endif
+ 
+ ifeq ($(OS_TARGET),SunOS)
+-# The -R '$ORIGIN' linker option instructs this library to search for its
+-# dependencies in the same directory where it resides.
+-MKSHLIB += -R '$$ORIGIN'
+ OS_LIBS += -lbsm 
+ endif
+ 
+-ifeq ($(OS_ARCH), HP-UX) 
+-ifneq ($(OS_TEST), ia64)
+-# pa-risc
+-ifeq ($(USE_64), 1)
+-MKSHLIB += +b '$$ORIGIN'
+-endif
+-endif
+-endif
+Index: mozilla/security/nss/lib/ssl/config.mk
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/ssl/config.mk,v
+retrieving revision 1.28
+retrieving revision 1.29
+diff -u -u -r1.28 -r1.29
+--- mozilla/security/nss/lib/ssl/config.mk	12 Apr 2009 17:19:26 -0000	1.28
++++ mozilla/security/nss/lib/ssl/config.mk	11 Jun 2009 00:55:52 -0000	1.29
+@@ -107,19 +107,4 @@
+ EXTRA_SHARED_LIBS += -lbe
+ endif
+ 
+-ifeq ($(OS_TARGET),SunOS)
+-# The -R '$ORIGIN' linker option instructs this library to search for its
+-# dependencies in the same directory where it resides.
+-MKSHLIB += -R '$$ORIGIN'
+-endif
+-
+-ifeq ($(OS_ARCH), HP-UX) 
+-ifneq ($(OS_TEST), ia64)
+-# pa-risc
+-ifeq ($(USE_64), 1)
+-MKSHLIB += +b '$$ORIGIN'
+-endif
+-endif
+-endif
+-
+ endif
+Index: mozilla/security/nss/lib/ssl/sslmutex.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/ssl/sslmutex.c,v
+retrieving revision 1.23
+retrieving revision 1.24
+diff -u -u -r1.23 -r1.24
+--- mozilla/security/nss/lib/ssl/sslmutex.c	2 Dec 2008 06:36:59 -0000	1.23
++++ mozilla/security/nss/lib/ssl/sslmutex.c	5 Jun 2009 02:34:14 -0000	1.24
+@@ -89,7 +89,7 @@
+     return SECSuccess;
+ }
+ 
+-#if defined(LINUX) || defined(AIX) || defined(VMS) || defined(BEOS) || defined(BSDI) || (defined(NETBSD) && __NetBSD_Version__ < 500000000) || defined(OPENBSD)
++#if defined(LINUX) || defined(AIX) || defined(BEOS) || defined(BSDI) || (defined(NETBSD) && __NetBSD_Version__ < 500000000) || defined(OPENBSD)
+ 
+ #include <unistd.h>
+ #include <fcntl.h>
+Index: mozilla/security/nss/lib/ssl/sslmutex.h
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/ssl/sslmutex.h,v
+retrieving revision 1.11
+retrieving revision 1.12
+diff -u -u -r1.11 -r1.12
+--- mozilla/security/nss/lib/ssl/sslmutex.h	2 Dec 2008 06:36:59 -0000	1.11
++++ mozilla/security/nss/lib/ssl/sslmutex.h	5 Jun 2009 02:34:15 -0000	1.12
+@@ -83,7 +83,7 @@
+ 
+ typedef int    sslPID;
+ 
+-#elif defined(LINUX) || defined(AIX) || defined(VMS) || defined(BEOS) || defined(BSDI) || (defined(NETBSD) && __NetBSD_Version__ < 500000000) || defined(OPENBSD)
++#elif defined(LINUX) || defined(AIX) || defined(BEOS) || defined(BSDI) || (defined(NETBSD) && __NetBSD_Version__ < 500000000) || defined(OPENBSD)
+ 
+ #include <sys/types.h>
+ #include "prtypes.h"
+Index: mozilla/security/nss/lib/ssl/sslsnce.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/ssl/sslsnce.c,v
+retrieving revision 1.49
+retrieving revision 1.50
+diff -u -u -r1.49 -r1.50
+--- mozilla/security/nss/lib/ssl/sslsnce.c	2 Dec 2008 06:36:59 -0000	1.49
++++ mozilla/security/nss/lib/ssl/sslsnce.c	5 Jun 2009 02:34:15 -0000	1.50
+@@ -260,7 +260,7 @@
+ #define MAX_SSL3_TIMEOUT      86400L  /* 24 hours */
+ #define MIN_SSL3_TIMEOUT          5   /* seconds  */
+ 
+-#if defined(AIX) || defined(LINUX) || defined(VMS) || defined(NETBSD) || defined(OPENBSD)
++#if defined(AIX) || defined(LINUX) || defined(NETBSD) || defined(OPENBSD)
+ #define MAX_SID_CACHE_LOCKS 8	/* two FDs per lock */
+ #elif defined(OSF1)
+ #define MAX_SID_CACHE_LOCKS 16	/* one FD per lock */
+Index: mozilla/security/nss/lib/util/config.mk
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/util/config.mk,v
+retrieving revision 1.4
+retrieving revision 1.5
+diff -u -u -r1.4 -r1.5
+--- mozilla/security/nss/lib/util/config.mk	12 Oct 2007 01:44:50 -0000	1.4
++++ mozilla/security/nss/lib/util/config.mk	11 Jun 2009 00:55:53 -0000	1.5
+@@ -80,25 +80,3 @@
+ 
+ endif
+ 
+-ifeq ($(OS_TARGET),SunOS)
+-ifeq ($(BUILD_SUN_PKG), 1)
+-# The -R '$ORIGIN' linker option instructs this library to search for its
+-# dependencies in the same directory where it resides.
+-ifeq ($(USE_64), 1)
+-MKSHLIB += -R '$$ORIGIN:/usr/lib/mps/secv1/64:/usr/lib/mps/64'
+-else
+-MKSHLIB += -R '$$ORIGIN:/usr/lib/mps/secv1:/usr/lib/mps'
+-endif
+-else
+-MKSHLIB += -R '$$ORIGIN'
+-endif
+-endif
+-
+-ifeq ($(OS_ARCH), HP-UX) 
+-ifneq ($(OS_TEST), ia64)
+-# pa-risc
+-ifeq ($(USE_64), 1)
+-MKSHLIB += +b '$$ORIGIN'
+-endif
+-endif
+-endif
+Index: mozilla/security/nss/lib/util/nssutil.h
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/util/nssutil.h,v
+retrieving revision 1.4
+retrieving revision 1.5
+diff -u -u -r1.4 -r1.5
+--- mozilla/security/nss/lib/util/nssutil.h	13 Apr 2009 17:47:02 -0000	1.4
++++ mozilla/security/nss/lib/util/nssutil.h	20 Jul 2009 20:07:00 -0000	1.5
+@@ -51,7 +51,7 @@
+  * The format of the version string should be
+  *     "<major version>.<minor version>[.<patch level>][ <Beta>]"
+  */
+-#define NSSUTIL_VERSION  "3.12.4 Beta"
++#define NSSUTIL_VERSION  "3.12.4.4 Beta"
+ #define NSSUTIL_VMAJOR   3
+ #define NSSUTIL_VMINOR   12
+ #define NSSUTIL_VPATCH   4

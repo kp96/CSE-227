@@ -1,0 +1,132 @@
+Index: mozilla/configure.in
+===================================================================
+RCS file: /cvsroot/mozilla/configure.in,v
+retrieving revision 1.1885
+diff -u -1 -0 -p -r1.1885 configure.in
+--- mozilla/configure.in	11 Oct 2007 18:50:54 -0000	1.1885
++++ mozilla/configure.in	12 Oct 2007 15:30:24 -0000
+@@ -3925,31 +3925,33 @@ fi
+ 
+ if test -n "$MOZ_NATIVE_NSS"; then
+    NSS_LIBS="$NSS_LIBS -lcrmf"
+ else
+    NSS_CFLAGS='-I$(LIBXUL_DIST)/include/nss'
+    NSS_DEP_LIBS='\\\
+         $(LIBXUL_DIST)/lib/$(LIB_PREFIX)crmf.$(LIB_SUFFIX) \\\
+         $(LIBXUL_DIST)/lib/$(DLL_PREFIX)smime'$NSS_VERSION'$(DLL_SUFFIX) \\\
+         $(LIBXUL_DIST)/lib/$(DLL_PREFIX)ssl'$NSS_VERSION'$(DLL_SUFFIX) \\\
+         $(LIBXUL_DIST)/lib/$(DLL_PREFIX)nss'$NSS_VERSION'$(DLL_SUFFIX) \\\
++        $(LIBXUL_DIST)/lib/$(DLL_PREFIX)nssutil'$NSS_VERSION'$(DLL_SUFFIX) \\\
+         $(LIBXUL_DIST)/lib/$(DLL_PREFIX)softokn'$NSS_VERSION'$(DLL_SUFFIX)'
+ 
+    if test -z "$GNU_CC" && test "$OS_ARCH" = "WINNT" -o "$OS_ARCH" = "WINCE" -o "$OS_ARCH" = "OS2"; then
+        NSS_LIBS='\\\
+         $(LIBXUL_DIST)/lib/$(LIB_PREFIX)crmf.$(LIB_SUFFIX) \\\
+         $(LIBXUL_DIST)/lib/$(LIB_PREFIX)smime'$NSS_VERSION'.$(IMPORT_LIB_SUFFIX) \\\
+         $(LIBXUL_DIST)/lib/$(LIB_PREFIX)ssl'$NSS_VERSION'.$(IMPORT_LIB_SUFFIX) \\\
+         $(LIBXUL_DIST)/lib/$(LIB_PREFIX)nss'$NSS_VERSION'.$(IMPORT_LIB_SUFFIX) \\\
++        $(LIBXUL_DIST)/lib/$(LIB_PREFIX)nssutil'$NSS_VERSION'.$(IMPORT_LIB_SUFFIX) \\\
+         $(LIBXUL_DIST)/lib/$(LIB_PREFIX)softokn'$NSS_VERSION'.$(IMPORT_LIB_SUFFIX)'
+    else
+-       NSS_LIBS='$(LIBS_DIR)'" -lcrmf -lsmime$NSS_VERSION -lssl$NSS_VERSION -lnss$NSS_VERSION -lsoftokn$NSS_VERSION"
++       NSS_LIBS='$(LIBS_DIR)'" -lcrmf -lsmime$NSS_VERSION -lssl$NSS_VERSION -lnss$NSS_VERSION -lnssutil$NSS_VERSION -lsoftokn$NSS_VERSION"
+    fi
+ fi
+ 
+ if test -z "$SKIP_LIBRARY_CHECKS"; then
+ dnl system JPEG support
+ dnl ========================================================
+ MOZ_ARG_WITH_STRING(system-jpeg,
+ [  --with-system-jpeg[=PFX]
+                           Use system libjpeg [installed at prefix PFX]],
+     JPEG_DIR=$withval)
+Index: mozilla/security/manager/Makefile.in
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/Makefile.in,v
+retrieving revision 1.77
+diff -u -1 -0 -p -r1.77 Makefile.in
+--- mozilla/security/manager/Makefile.in	4 Sep 2007 15:29:13 -0000	1.77
++++ mozilla/security/manager/Makefile.in	12 Oct 2007 15:30:24 -0000
+@@ -43,36 +43,38 @@ VPATH		= @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ MODULE = psm
+ 
+ PACKAGE_FILE = psm.pkg
+ 
+ ifndef MOZ_NATIVE_NSS
+ PACKAGE_VARS += \
+ 	NSS3_LIB \
++	NSSUTIL3_LIB \
+ 	SMIME3_LIB \
+ 	SSL3_LIB \
+ 	SOFTOKEN3_LIB \
+ 	SOFTOKEN3_CHK \
+ 	NSSDBM3_LIB \
+ 	LOADABLE_ROOT_MODULE \
+ 	HAVE_FREEBL_LIBS \
+ 	HAVE_FREEBL_LIBS_32 \
+ 	HAVE_FREEBL_LIBS_32INT64 \
+ 	HAVE_FREEBL_LIBS_64 \
+ 	$(NULL)
+ 
+ LOADABLE_ROOT_MODULE = $(DLL_PREFIX)nssckbi$(DLL_SUFFIX)
+ endif
+ 
+ NSS3_LIB = $(DLL_PREFIX)nss3$(DLL_SUFFIX)
++NSSUTIL3_LIB = $(DLL_PREFIX)nssutil3$(DLL_SUFFIX)
+ SMIME3_LIB = $(DLL_PREFIX)smime3$(DLL_SUFFIX)
+ SSL3_LIB =  $(DLL_PREFIX)ssl3$(DLL_SUFFIX)
+ SOFTOKEN3_LIB = $(DLL_PREFIX)softokn3$(DLL_SUFFIX)
+ SOFTOKEN3_CHK = $(DLL_PREFIX)softokn3.chk
+ NSSDBM3_LIB = $(DLL_PREFIX)nssdbm3$(DLL_SUFFIX)
+ 
+ # Default
+ HAVE_FREEBL_LIBS = 1
+ 
+ # 32-bit HP-UX PA-RISC
+@@ -256,20 +258,21 @@ ifndef SKIP_CHK
+ 	$(MAKE) -C $(topsrcdir)/security/nss/cmd/lib $(DEFAULT_GMAKE_FLAGS)
+ 	$(MAKE) -C $(topsrcdir)/security/nss/cmd/shlibsign $(DEFAULT_GMAKE_FLAGS)
+ endif
+ 	$(INSTALL) -m 755 $(DIST)/lib/$(LOADABLE_ROOT_MODULE) $(DIST)/bin
+ ifndef SKIP_CHK
+ 	$(INSTALL) -m 644 $(DIST)/lib/$(SOFTOKEN3_CHK) $(DIST)/bin
+ endif
+ 	$(INSTALL) -m 755 $(DIST)/lib/$(SOFTOKEN3_LIB) $(DIST)/bin
+ 	$(INSTALL) -m 755 $(DIST)/lib/$(NSSDBM3_LIB) $(DIST)/bin
+ 	$(INSTALL) -m 755 $(DIST)/lib/$(NSS3_LIB) $(DIST)/bin
++	$(INSTALL) -m 755 $(DIST)/lib/$(NSSUTIL3_LIB) $(DIST)/bin
+ 	$(INSTALL) -m 755 $(DIST)/lib/$(SSL3_LIB) $(DIST)/bin
+ 	$(INSTALL) -m 755 $(DIST)/lib/$(SMIME3_LIB) $(DIST)/bin
+ ifdef HAVE_FREEBL_LIBS
+ ifndef SKIP_CHK
+ 	$(INSTALL) -m 644 $(DIST)/lib/$(FREEBL_CHK) $(DIST)/bin
+ endif
+ 	$(INSTALL) -m 755 $(DIST)/lib/$(FREEBL_LIB) $(DIST)/bin
+ endif
+ ifdef HAVE_FREEBL_LIBS_32
+ ifndef SKIP_CHK
+@@ -312,20 +315,21 @@ check::
+ 
+ install::
+ ifndef MOZ_NATIVE_NSS
+ 	$(SYSINSTALL) -m 755 $(DIST)/lib/$(LOADABLE_ROOT_MODULE) $(DESTDIR)$(mozappdir)
+ ifndef SKIP_CHK
+ 	$(SYSINSTALL) -m 644 $(DIST)/lib/$(SOFTOKEN3_CHK) $(DESTDIR)$(mozappdir)
+ endif
+ 	$(SYSINSTALL) -m 755 $(DIST)/lib/$(SOFTOKEN3_LIB) $(DESTDIR)$(mozappdir)
+ 	$(SYSINSTALL) -m 755 $(DIST)/lib/$(NSSDBM3_LIB) $(DESTDIR)$(mozappdir)
+ 	$(SYSINSTALL) -m 755 $(DIST)/lib/$(NSS3_LIB) $(DESTDIR)$(mozappdir)
++	$(SYSINSTALL) -m 755 $(DIST)/lib/$(NSSUTIL3_LIB) $(DESTDIR)$(mozappdir)
+ 	$(SYSINSTALL) -m 755 $(DIST)/lib/$(SSL3_LIB) $(DESTDIR)$(mozappdir)
+ 	$(SYSINSTALL) -m 755 $(DIST)/lib/$(SMIME3_LIB) $(DESTDIR)$(mozappdir)
+ ifdef HAVE_FREEBL_LIBS
+ ifndef SKIP_CHK
+ 	$(SYSINSTALL) -m 644 $(DIST)/lib/$(FREEBL_CHK) $(DESTDIR)$(mozappdir)
+ endif
+ 	$(SYSINSTALL) -m 755 $(DIST)/lib/$(FREEBL_LIB) $(DESTDIR)$(mozappdir)
+ endif
+ ifdef HAVE_FREEBL_LIBS_32
+ ifndef SKIP_CHK

@@ -1,0 +1,72 @@
+diff --git a/security/manager/pki/resources/content/certManager.js b/security/manager/pki/resources/content/certManager.js
+--- a/security/manager/pki/resources/content/certManager.js
++++ b/security/manager/pki/resources/content/certManager.js
+@@ -100,22 +100,27 @@ function LoadCerts()
+    .treeBoxObject.view = userTreeView;
+ 
+   orphanTreeView = Components.classes[nsCertTree]
+                       .createInstance(nsICertTree);
+   orphanTreeView.loadCertsFromCache(certcache, nsIX509Cert.UNKNOWN_CERT);
+   document.getElementById('orphan-tree')
+    .treeBoxObject.view = orphanTreeView;
+ 
++  enableBackupAllButton();
++}
++
++function enableBackupAllButton()
++{
+   var rowCnt = userTreeView.rowCount;
+-  var enableBackupAllButton=document.getElementById('mine_backupAllButton');
++  var backupAllButton=document.getElementById('mine_backupAllButton');
+   if(rowCnt < 1) {
+-    enableBackupAllButton.setAttribute("disabled",true);
++    backupAllButton.disabled = true;
+   } else  {
+-    enableBackupAllButton.setAttribute("enabled",true);
++    backupAllButton.disabled = false;
+   }
+ }
+ 
+ function getSelectedCerts()
+ {
+   var ca_tab = document.getElementById("ca_tab");
+   var mine_tab = document.getElementById("mine_tab");
+   var others_tab = document.getElementById("others_tab");
+@@ -423,16 +428,17 @@ function restoreCerts()
+     certdb.importPKCS12File(null, fp.file);
+ 
+     var certcache = Components.classes[nsNSSCertCache].createInstance(nsINSSCertCache);
+     certcache.cacheAllCerts();
+     userTreeView.loadCertsFromCache(certcache, nsIX509Cert.USER_CERT);
+     userTreeView.selection.clearSelection();
+     caTreeView.loadCertsFromCache(certcache, nsIX509Cert.CA_CERT);
+     caTreeView.selection.clearSelection();
++    enableBackupAllButton();
+   }
+ }
+ 
+ function exportCerts()
+ {
+   getSelectedCerts();
+   var numcerts = selected_certs.length;
+   if (!numcerts)
+@@ -523,16 +529,19 @@ function deleteCerts()
+     for (t=numcerts-1; t>=0; t--)
+     {
+       treeView.deleteEntryObject(selected_index[t]);
+     }
+ 
+     selected_tree_items = [];
+     selected_index = [];
+     treeView.selection.clearSelection();
++    if (selTabID == 'mine_tab') {
++      enableBackupAllButton();
++    }
+   }
+ }
+ 
+ function viewCerts()
+ {
+   getSelectedCerts();
+   var numcerts = selected_certs.length;
+   if (!numcerts)

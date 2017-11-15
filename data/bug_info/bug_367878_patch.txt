@@ -1,0 +1,50 @@
+? mozilla/security/manager/ssl/src/nsSSLThread.cpp-good
+Index: mozilla/security/manager/ssl/src/nsNSSComponent.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSComponent.cpp,v
+retrieving revision 1.126.2.6
+diff -u -2 -0 -r1.126.2.6 nsNSSComponent.cpp
+--- mozilla/security/manager/ssl/src/nsNSSComponent.cpp	16 May 2006 01:24:30 -0000	1.126.2.6
++++ mozilla/security/manager/ssl/src/nsNSSComponent.cpp	23 Jan 2007 13:44:53 -0000
+@@ -903,40 +903,41 @@
+       return NS_OK;
+     }
+   }
+   
+   return NS_ERROR_NOT_AVAILABLE;
+ }
+ 
+ static void setOCSPOptions(nsIPrefBranch * pref)
+ {
+   nsNSSShutDownPreventionLock locker;
+   // Set up OCSP //
+   PRInt32 ocspEnabled;
+   pref->GetIntPref("security.OCSP.enabled", &ocspEnabled);
+   switch (ocspEnabled) {
+   case 0:
+     CERT_DisableOCSPChecking(CERT_GetDefaultCertDB());
+     CERT_DisableOCSPDefaultResponder(CERT_GetDefaultCertDB());
+     break;
+   case 1:
+     CERT_EnableOCSPChecking(CERT_GetDefaultCertDB());
++    CERT_DisableOCSPDefaultResponder(CERT_GetDefaultCertDB());
+     break;
+   case 2:
+     {
+       char *signingCA = nsnull;
+       char *url = nsnull;
+ 
+       // Get the signing CA and service url //
+       pref->GetCharPref("security.OCSP.signingCA", &signingCA);
+       pref->GetCharPref("security.OCSP.URL", &url);
+ 
+       // Set OCSP up
+       CERT_EnableOCSPChecking(CERT_GetDefaultCertDB());
+       CERT_SetOCSPDefaultResponder(CERT_GetDefaultCertDB(), url, signingCA);
+       CERT_EnableOCSPDefaultResponder(CERT_GetDefaultCertDB());
+ 
+       nsMemory::Free(signingCA);
+       nsMemory::Free(url);
+     }
+     break;
+   }

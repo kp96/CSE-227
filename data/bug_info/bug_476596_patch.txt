@@ -1,0 +1,198 @@
+Index: resources/application/all-camino.js.in
+===================================================================
+RCS file: /cvsroot/mozilla/camino/resources/application/all-camino.js.in,v
+retrieving revision 1.20
+diff -u -8 -r1.20 all-camino.js.in
+--- resources/application/all-camino.js.in	22 Apr 2009 04:28:15 -0000	1.20
++++ resources/application/all-camino.js.in	11 May 2009 19:07:12 -0000
+@@ -231,16 +231,19 @@
+ // Safe browsing report pages
+ pref("browser.safebrowsing.provider.0.reportGenericURL", "http://{moz:locale}.phish-generic.mozilla.com/?hl={moz:locale}");
+ pref("browser.safebrowsing.provider.0.reportErrorURL", "http://{moz:locale}.phish-error.mozilla.com/?hl={moz:locale}");
+ pref("browser.safebrowsing.provider.0.reportPhishURL", "http://{moz:locale}.phish-report.mozilla.com/?hl={moz:locale}");
+ 
+ // Location to more information about the safe browsing feature
+ pref("browser.safebrowsing.warning.infoURL", "http://en-us.www.mozilla.com/en-US/firefox/phishing-protection/");
+ 
++// URL for checking the reason for a malware warning.
++pref("browser.safebrowsing.malware.reportURL", "http://safebrowsing.clients.google.com/safebrowsing/diagnostic?client={moz:client}&hl={moz:locale}&site=");
++
+ // Name of the about: page contributed by safebrowsing to handle display of error
+ // pages on phishing/malware hits.
+ pref("urlclassifier.alternate_error_page", "safebrowsingblocked");
+ 
+ // The number of random entries to send with a gethash request.
+ pref("urlclassifier.gethashnoise", 4);
+ 
+ // The list of tables that use the gethash request to confirm partial results.
+Index: src/browser/BrowserWindowController.mm
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/browser/BrowserWindowController.mm,v
+retrieving revision 1.402
+diff -u -8 -r1.402 BrowserWindowController.mm
+--- src/browser/BrowserWindowController.mm	11 May 2009 01:31:02 -0000	1.402
++++ src/browser/BrowserWindowController.mm	11 May 2009 19:07:18 -0000
+@@ -82,16 +82,17 @@
+ #import "WebSearchField.h"
+ #import "wallet.h"
+ #import "ToolbarScriptItem.h"
+ #import "SearchEngineManager.h"
+ #import "SearchEngineEditor.h"
+ #import "FlashblockWhitelistManager.h"
+ // For search plugin description keys:
+ #import "XMLSearchPluginParser.h"
++#import "CmXULAppInfo.h"
+ 
+ #import "CHPermissionManager.h"
+ #import "CHBrowserService.h"
+ 
+ #include "GeckoUtils.h"
+ 
+ #include "nsString.h"
+ #include "nsServiceManagerUtils.h"
+@@ -5244,16 +5245,40 @@
+ - (void)showSafeBrowsingInformation
+ {
+   NSString *blockingInformationURL = 
+     [[PreferenceManager sharedInstance] getStringPref:kGeckoPrefSafeBrowsingInformationURL 
+                                           withSuccess:NULL];
+   [self loadURL:blockingInformationURL referrer:nil focusContent:YES allowPopups:NO];  
+ }
+ 
++- (void)showMalwareDiagnosticInformation
++{
++  NSString *malwareDiagnosticURL =
++    [[PreferenceManager sharedInstance] getStringPref:kGeckoPrefSafeBrowsingMalwareDiagnosticURL
++                                          withSuccess:NULL];
++  NSString *locale =
++    [[PreferenceManager sharedInstance] getStringPref:kGeckoPrefUserAgentLocale
++                                        withSuccess:NULL];
++
++  // Fill in certain URL parameter tokens with values.
++  NSMutableString *filledURL = [[malwareDiagnosticURL mutableCopy] autorelease];
++  [filledURL replaceOccurrencesOfString:@"{moz:client}"
++                           withString:[XULAppInfo name]
++                              options:NULL
++                                range:NSMakeRange(0, [filledURL length])];
++  [filledURL replaceOccurrencesOfString:@"{moz:locale}"
++                           withString:locale
++                              options:NULL
++                                range:NSMakeRange(0, [filledURL length])];
++  [filledURL appendString:[mBrowserView currentURI]];
++
++  [self loadURL:filledURL referrer:nil focusContent:YES allowPopups:NO];
++}
++
+ @end
+ 
+ #pragma mark -
+ 
+ @implementation ThrobberHandler
+ 
+ -(id)initWithToolbarItem:(NSToolbarItem*)inButton images:(NSArray*)inImages
+ {
+Index: src/browser/BrowserWrapper.h
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/browser/BrowserWrapper.h,v
+retrieving revision 1.69
+diff -u -8 -r1.69 BrowserWrapper.h
+--- src/browser/BrowserWrapper.h	8 Apr 2009 19:45:16 -0000	1.69
++++ src/browser/BrowserWrapper.h	11 May 2009 19:07:18 -0000
+@@ -81,16 +81,17 @@
+ 
+ - (BOOL)userChangedLocationField;
+ 
+ - (void)contentViewChangedTo:(NSView*)inView forURL:(NSString*)inURL;
+ 
+ // Called when the user clicks buttons on the about:safebrowsingblocked error page.
+ - (void)runAwayFromSafeBrowsingBlockedSite;
+ - (void)showSafeBrowsingInformation;
++- (void)showMalwareDiagnosticInformation;
+ 
+ @end
+ 
+ //
+ // The BrowserWrapper requests UI to be created via this delegate. Unlike the
+ // |BrowserUIDelegate|, this delegate is always present even when in a 
+ // background tab.
+ //
+Index: src/browser/BrowserWrapper.mm
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/browser/BrowserWrapper.mm,v
+retrieving revision 1.162
+diff -u -8 -r1.162 BrowserWrapper.mm
+--- src/browser/BrowserWrapper.mm	11 May 2009 01:31:03 -0000	1.162
++++ src/browser/BrowserWrapper.mm	11 May 2009 19:07:19 -0000
+@@ -974,19 +974,22 @@
+     else if ([elementIdentifier isEqualToString:@"ignoreWarningButton"]) {
+       [self loadURI:[self currentURI] 
+            referrer:nil 
+               flags:NSLoadFlagsBypassClassifier 
+        focusContent:YES 
+         allowPopups:NO];
+     }
+     else if ([elementIdentifier isEqualToString:@"whyBlockedButton"]) {
+-      // Note: pageURI can be examined for e=phishingBlocked or e=malwareBlocked
+-      // to customize the blocking info location for each case...
+-      [mDelegate showSafeBrowsingInformation];
++      // Examine pageURI for e=phishingBlocked or e=malwareBlocked
++      // to customize the blocking info location for each case.
++      if ([pageURI rangeOfString:@"e=malwareBlocked"].location != NSNotFound)
++        [mDelegate showMalwareDiagnosticInformation];
++      else // e=phishingBlocked
++        [mDelegate showSafeBrowsingInformation];
+     }
+   }
+ }
+ 
+ - (BOOL)performKeyEquivalent:(NSEvent*)theEvent
+ {
+   // Catch Command-back/forward, and map them to history back/forward unless
+   // there is a text area or plugin focused in the Gecko view.
+Index: src/preferences/GeckoPrefConstants.h
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/preferences/GeckoPrefConstants.h,v
+retrieving revision 1.10
+diff -u -8 -r1.10 GeckoPrefConstants.h
+--- src/preferences/GeckoPrefConstants.h	11 May 2009 01:31:03 -0000	1.10
++++ src/preferences/GeckoPrefConstants.h	11 May 2009 19:07:20 -0000
+@@ -320,13 +320,14 @@
+ 
+ extern NSString* const kGeckoPrefSafeBrowsingDataProviderName;          // string
+ extern NSString* const kGeckoPrefSafeBrowsingDataProviderUpdateURL;     // string
+ extern NSString* const kGeckoPrefSafeBrowsingDataProviderKeyURL;        // string
+ extern NSString* const kGeckoPrefSafeBrowsingDataProviderReportURL;     // string
+ extern NSString* const kGeckoPrefSafeBrowsingDataProviderGetHashURL;    // string
+ 
+ extern const char* const kGeckoPrefSafeBrowsingInformationURL;          // string
++extern const char* const kGeckoPrefSafeBrowsingMalwareDiagnosticURL;    // string
+ extern const char* const kGeckoPrefSafeBrowsingPhishingCheckingEnabled; // bool
+ extern const char* const kGeckoPrefSafeBrowsingMalwareCheckingEnabled;  // bool
+ extern const char* const kGeckoPrefSafeBrowsingDataProvider;            // int
+ 
+ #pragma GCC visibility pop
+Index: src/preferences/GeckoPrefConstants.mm
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/preferences/GeckoPrefConstants.mm,v
+retrieving revision 1.10
+diff -u -8 -r1.10 GeckoPrefConstants.mm
+--- src/preferences/GeckoPrefConstants.mm	11 May 2009 01:31:03 -0000	1.10
++++ src/preferences/GeckoPrefConstants.mm	11 May 2009 19:07:20 -0000
+@@ -205,16 +205,17 @@
+ 
+ NSString* const kGeckoPrefSafeBrowsingDataProviderName = @"browser.safebrowsing.provider.%i.name";
+ NSString* const kGeckoPrefSafeBrowsingDataProviderUpdateURL = @"browser.safebrowsing.provider.%i.updateURL";
+ NSString* const kGeckoPrefSafeBrowsingDataProviderKeyURL = @"browser.safebrowsing.provider.%i.keyURL";
+ NSString* const kGeckoPrefSafeBrowsingDataProviderReportURL = @"browser.safebrowsing.provider.%i.reportURL";
+ NSString* const kGeckoPrefSafeBrowsingDataProviderGetHashURL = @"browser.safebrowsing.provider.%i.gethashURL";
+ 
+ const char* const kGeckoPrefSafeBrowsingInformationURL = "browser.safebrowsing.warning.infoURL";
++const char* const kGeckoPrefSafeBrowsingMalwareDiagnosticURL = "browser.safebrowsing.malware.reportURL";
+ const char* const kGeckoPrefSafeBrowsingPhishingCheckingEnabled = "browser.safebrowsing.enabled";
+ const char* const kGeckoPrefSafeBrowsingMalwareCheckingEnabled = "browser.safebrowsing.malware.enabled";
+ const char* const kGeckoPrefSafeBrowsingDataProvider = "browser.safebrowsing.dataProvider";
+ 
+ #pragma mark -
+ #pragma mark Values
+ 
+ // kGeckoPrefExternalLoadBehavior values

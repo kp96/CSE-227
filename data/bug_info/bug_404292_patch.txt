@@ -1,0 +1,29 @@
+Index: security/manager/pki/resources/content/crlManager.xul
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/crlManager.xul,v
+retrieving revision 1.26
+diff -u -p -8 -r1.26 crlManager.xul
+--- security/manager/pki/resources/content/crlManager.xul	1 Oct 2007 16:38:22 -0000	1.26
++++ security/manager/pki/resources/content/crlManager.xul	19 Nov 2007 01:28:01 -0000
+@@ -32,20 +32,18 @@
+  use your version of this file under the terms of the MPL, indicate your
+  decision by deleting the provisions above and replace them with the notice
+  and other provisions required by the GPL or the LGPL. If you do not delete
+  the provisions above, a recipient may use your version of this file under
+  the terms of any one of the MPL, the GPL or the LGPL.
+ 
+  ***** END LICENSE BLOCK ***** -->
+ 
+-<!-- CHANGE THIS WHEN MOVING FILES -->
+-<?xml-stylesheet href="chrome://communicator/skin/" type="text/css"?> 
++<?xml-stylesheet href="chrome://global/skin/" type="text/css"?> 
+ 
+-<!-- CHANGE THIS WHEN MOVING FILES -->
+ <!DOCTYPE dialog [
+     <!ENTITY % prefValDTD SYSTEM "chrome://pippki/locale/pref-validation.dtd">
+     %prefValDTD;
+     <!ENTITY % prefCertMgrDTD SYSTEM "chrome://pippki/locale/certManager.dtd">
+     %prefCertMgrDTD;
+ ]>
+ 
+ <dialog id="crlviewer"

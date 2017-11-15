@@ -1,0 +1,50 @@
+Index: browser/base/content/browser.js
+===================================================================
+RCS file: /cvsroot/mozilla/browser/base/content/browser.js,v
+retrieving revision 1.565
+diff -u -8 -p -r1.565 browser.js
+--- browser/base/content/browser.js	28 Feb 2006 04:15:56 -0000	1.565
++++ browser/base/content/browser.js	7 Mar 2006 12:57:15 -0000
+@@ -4616,22 +4616,40 @@ nsContextMenu.prototype = {
+       BrowserPageInfo();
+     },
+     viewFrameInfo : function () {
+       BrowserPageInfo(this.target.ownerDocument);
+     },
+     // Change current window to the URL of the image.
+     viewImage : function (e) {
+         urlSecurityCheck( this.imageURL, this.docURL );
+-        openUILink( this.imageURL, e );
++        try {
++          if (this.docURL != gBrowser.currentURI) {
++            const secMan = Components.classes["@mozilla.org/scriptsecuritymanager;1"]
++                           .getService(Components.interfaces.nsIScriptSecurityManager);
++            const nsIScriptSecMan = Components.interfaces.nsIScriptSecurityManager;
++            secMan.checkLoadURI(gBrowser.currentURI, makeURI(this.imageURL),
++                                nsIScriptSecMan.DISALLOW_SCRIPT);
++          }
++          openUILink( this.imageURL, e );
++        } catch(e) {}
+     },
+     // Change current window to the URL of the background image.
+     viewBGImage : function (e) {
+         urlSecurityCheck( this.bgImageURL, this.docURL );
+-        openUILink( this.bgImageURL, e );
++        try {
++          if (this.docURL != gBrowser.currentURI) {
++            const secMan = Components.classes["@mozilla.org/scriptsecuritymanager;1"]
++                           .getService(Components.interfaces.nsIScriptSecurityManager);
++            const nsIScriptSecMan = Components.interfaces.nsIScriptSecurityManager;
++            secMan.checkLoadURI(gBrowser.currentURI, makeURI(this.bgImageURL),
++                                nsIScriptSecMan.DISALLOW_SCRIPT);
++          }
++          openUILink( this.bgImageURL, e );
++        } catch(e) {}
+     },
+     disableSetDesktopBackground: function() {
+         // Disable the Set as Desktop Background menu item if we're still trying
+         // to load the image or the load failed.
+ 
+         const nsIImageLoadingContent = Components.interfaces.nsIImageLoadingContent;
+         if (!(this.target instanceof nsIImageLoadingContent))
+             return true;

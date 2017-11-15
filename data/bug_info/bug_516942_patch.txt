@@ -1,0 +1,42 @@
+diff --git a/suite/installer/unix/packages b/suite/installer/unix/packages
+--- a/suite/installer/unix/packages
++++ b/suite/installer/unix/packages
+@@ -434,16 +434,17 @@ bin/components/libpippki.so
+ #endif
+ bin/components/pipboot.xpt
+ bin/components/pipnss.xpt
+ bin/components/pippki.xpt
+ bin/libfreebl3.chk
+ bin/libfreebl3.so
+ bin/libnss3.so
+ bin/libnssckbi.so
++bin/libnssdbm3.chk
+ bin/libnssdbm3.so
+ bin/libnssutil3.so
+ bin/libsmime3.so
+ bin/libsoftokn3.chk
+ bin/libsoftokn3.so
+ bin/libssl3.so
+ bin/chrome/pippki.jar
+ bin/chrome/pippki.manifest
+diff --git a/suite/installer/windows/packages b/suite/installer/windows/packages
+--- a/suite/installer/windows/packages
++++ b/suite/installer/windows/packages
+@@ -421,16 +421,17 @@ bin\components\pippki.dll
+ #endif
+ bin\components\pipboot.xpt
+ bin\components\pipnss.xpt
+ bin\components\pippki.xpt
+ bin\freebl3.chk
+ bin\freebl3.dll
+ bin\nss3.dll
+ bin\nssckbi.dll
++bin\nssdbm3.chk
+ bin\nssdbm3.dll
+ bin\nssutil3.dll
+ bin\smime3.dll
+ bin\softokn3.chk
+ bin\softokn3.dll
+ bin\ssl3.dll
+ bin\chrome\pippki.jar
+ bin\chrome\pippki.manifest

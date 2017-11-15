@@ -1,0 +1,29 @@
+Index: docshell/resources/content/netError.xhtml
+===================================================================
+RCS file: /cvsroot/mozilla/docshell/resources/content/netError.xhtml,v
+retrieving revision 1.30
+diff -u -8 -p -r1.30 netError.xhtml
+--- docshell/resources/content/netError.xhtml	2 May 2008 07:24:27 -0000	1.30
++++ docshell/resources/content/netError.xhtml	7 May 2008 15:21:12 -0000
+@@ -218,16 +218,21 @@
+         var link = document.getElementById('cert_domain_link');
+         if (!link)
+           return;
+         
+         var okHost = link.getAttribute("title");
+         var thisHost = document.location.hostname;
+         var proto = document.location.protocol;
+ 
++        // If okHost is a wildcard domain ("*.example.com") let's
++        // use "www" instead.  "*.example.com" isn't going to
++        // get anyone anywhere useful. bug 432491
++        okHost = okHost.replace(/^\*\./, "www.");
++
+         /* case #1: 
+          * example.com uses an invalid security certificate.
+          *
+          * The certificate is only valid for www.example.com
+          *
+          * Make sure to include the "." ahead of thisHost so that
+          * a MitM attack on paypal.com doesn't hyperlink to "notpaypal.com"
+          *

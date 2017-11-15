@@ -1,0 +1,131 @@
+diff --git a/caps/idl/nsIScriptSecurityManager.idl b/caps/idl/nsIScriptSecurityManager.idl
+index cdf1759..b6bc339 100644
+--- a/caps/idl/nsIScriptSecurityManager.idl
++++ b/caps/idl/nsIScriptSecurityManager.idl
+@@ -42,7 +42,7 @@ interface nsIURI;
+ interface nsIChannel;
+ 
+ 
+-[scriptable, uuid(0b8a9b32-713f-4c39-bea0-6cacec46f385)]
++[scriptable, uuid(ce216cf7-3bcb-48ab-9ff8-d03a24f19ca5)]
+ interface nsIScriptSecurityManager : nsIXPCSecurityManager
+ {
+     ///////////////// Security Checks //////////////////
+@@ -317,6 +317,14 @@ interface nsIScriptSecurityManager : nsIXPCSecurityManager
+      * script to check whether a given principal is system.
+      */
+     boolean isSystemPrincipal(in nsIPrincipal aPrincipal);
++
++    /**
++     * Same as getSubjectPrincipal(), only faster. cx must *never* be
++     * passed null, and it must be the context on the top of the
++     * context stack. Does *not* reference count the returned
++     * principal.
++     */
++    [noscript,notxpcom] nsIPrincipal getCxSubjectPrincipal(in JSContextPtr cx);
+ };
+ 
+ %{C++
+diff --git a/caps/src/nsScriptSecurityManager.cpp b/caps/src/nsScriptSecurityManager.cpp
+index 8304c1f..fc0054a 100644
+--- a/caps/src/nsScriptSecurityManager.cpp
++++ b/caps/src/nsScriptSecurityManager.cpp
+@@ -470,6 +470,20 @@ nsScriptSecurityManager::IsSystemPrincipal(nsIPrincipal* aPrincipal,
+     return NS_OK;
+ }
+ 
++NS_IMETHODIMP_(nsIPrincipal *)
++nsScriptSecurityManager::GetCxSubjectPrincipal(JSContext *cx)
++{
++    NS_ASSERTION(cx == GetCurrentJSContext(),
++                 "Uh, cx is not the current JS context!");
++
++    nsresult rv = NS_ERROR_FAILURE;
++    nsIPrincipal *principal = GetSubjectPrincipal(cx, &rv);
++    if (NS_FAILED(rv))
++        return nsnull;
++
++    return principal;
++}
++
+ ////////////////////
+ // Policy Storage //
+ ////////////////////
+diff --git a/js/src/xpconnect/shell/xpcshell.cpp b/js/src/xpconnect/shell/xpcshell.cpp
+index 4ee5265..c88782a 100644
+--- a/js/src/xpconnect/shell/xpcshell.cpp
++++ b/js/src/xpconnect/shell/xpcshell.cpp
+@@ -1198,6 +1198,13 @@ FullTrustSecMan::IsSystemPrincipal(nsIPrincipal *aPrincipal, PRBool *_retval)
+     *_retval = aPrincipal == mSystemPrincipal;
+     return NS_OK;
+ }
++
++NS_IMETHODIMP_(nsIPrincipal *)
++FullTrustSecMan::GetCxSubjectPrincipal(JSContext *cx)
++{
++    return mSystemPrincipal;
++}
++
+ #endif
+ 
+ /***************************************************************************/
+diff --git a/js/src/xpconnect/src/XPCCrossOriginWrapper.cpp b/js/src/xpconnect/src/XPCCrossOriginWrapper.cpp
+index f30b766..d69b4c6 100644
+--- a/js/src/xpconnect/src/XPCCrossOriginWrapper.cpp
++++ b/js/src/xpconnect/src/XPCCrossOriginWrapper.cpp
+@@ -230,8 +230,6 @@ IsValFrame(JSContext *cx, JSObject *obj, jsval v, XPCWrappedNative *wn)
+ nsresult
+ IsWrapperSameOrigin(JSContext *cx, JSObject *wrappedObj)
+ {
+-  nsCOMPtr<nsIPrincipal> subjectPrin, objectPrin;
+-
+   // Get the subject principal from the execution stack.
+   nsIScriptSecurityManager *ssm = GetSecurityManager();
+   if (!ssm) {
+@@ -239,8 +237,7 @@ IsWrapperSameOrigin(JSContext *cx, JSObject *wrappedObj)
+     return NS_ERROR_NOT_INITIALIZED;
+   }
+ 
+-  nsresult rv = ssm->GetSubjectPrincipal(getter_AddRefs(subjectPrin));
+-  NS_ENSURE_SUCCESS(rv, rv);
++  nsIPrincipal *subjectPrin = ssm->GetCxSubjectPrincipal(cx);
+ 
+   if (!subjectPrin) {
+     ThrowException(NS_ERROR_FAILURE, cx);
+@@ -248,7 +245,7 @@ IsWrapperSameOrigin(JSContext *cx, JSObject *wrappedObj)
+   }
+ 
+   PRBool isSystem = PR_FALSE;
+-  rv = ssm->IsSystemPrincipal(subjectPrin, &isSystem);
++  nsresult rv = ssm->IsSystemPrincipal(subjectPrin, &isSystem);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   // If we somehow end up being called from chrome, just allow full access.
+@@ -257,6 +254,7 @@ IsWrapperSameOrigin(JSContext *cx, JSObject *wrappedObj)
+     return NS_OK;
+   }
+ 
++  nsCOMPtr<nsIPrincipal> objectPrin;
+   rv = ssm->GetObjectPrincipal(cx, wrappedObj, getter_AddRefs(objectPrin));
+   if (NS_FAILED(rv)) {
+     return rv;
+diff --git a/js/src/xpconnect/src/XPCSafeJSObjectWrapper.cpp b/js/src/xpconnect/src/XPCSafeJSObjectWrapper.cpp
+index bc8e087..aceec3b 100644
+--- a/js/src/xpconnect/src/XPCSafeJSObjectWrapper.cpp
++++ b/js/src/xpconnect/src/XPCSafeJSObjectWrapper.cpp
+@@ -118,11 +118,13 @@ FindPrincipals(JSContext *cx, JSObject *obj, nsIPrincipal **objectPrincipal,
+   nsCOMPtr<nsIScriptSecurityManager> ssm(do_QueryInterface(sm));
+ 
+   if (subjectPrincipal) {
+-    ssm->GetSubjectPrincipal(subjectPrincipal);
++    nsCOMPtr<nsIPrincipal> tmp = ssm->GetCxSubjectPrincipal(cx);
+ 
+-    if (!*subjectPrincipal) {
++    if (!tmp) {
+       return NS_ERROR_XPC_SECURITY_MANAGER_VETO;
+     }
++
++    tmp.swap(*subjectPrincipal);
+   }
+ 
+   ssm->GetObjectPrincipal(cx, obj, objectPrincipal);

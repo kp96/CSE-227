@@ -1,0 +1,778 @@
+Index: Camino.xcodeproj/project.pbxproj
+===================================================================
+RCS file: /cvsroot/mozilla/camino/Camino.xcodeproj/project.pbxproj,v
+retrieving revision 1.84
+diff -u -r1.84 project.pbxproj
+--- Camino.xcodeproj/project.pbxproj	27 Aug 2008 21:14:02 -0000	1.84
++++ Camino.xcodeproj/project.pbxproj	31 Aug 2008 23:47:31 -0000
+@@ -56,6 +56,8 @@
+ 		001FFD9A0C795D5400D9C2C8 /* designmode.css in Copy Gecko Resources */ = {isa = PBXBuildFile; fileRef = 001FFD940C795D3300D9C2C8 /* designmode.css */; };
+ 		00335B8E0C655ABC00A607F2 /* WebSearchField.mm in Sources */ = {isa = PBXBuildFile; fileRef = 00335B8C0C655ABC00A607F2 /* WebSearchField.mm */; };
+ 		00335B900C655ABC00A607F2 /* WebSearchField.mm in Sources */ = {isa = PBXBuildFile; fileRef = 00335B8C0C655ABC00A607F2 /* WebSearchField.mm */; };
++		005F387E0E50852D00D8E7A6 /* InvalidCertOverrideDialog.nib in Resources */ = {isa = PBXBuildFile; fileRef = 005F387C0E50852D00D8E7A6 /* InvalidCertOverrideDialog.nib */; };
++		005F387F0E50852D00D8E7A6 /* InvalidCertOverrideDialog.nib in Resources */ = {isa = PBXBuildFile; fileRef = 005F387C0E50852D00D8E7A6 /* InvalidCertOverrideDialog.nib */; };
+ 		0081150B0B180DDE001CB3F0 /* libthebes.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 0081150A0B180DDE001CB3F0 /* libthebes.a */; };
+ 		0081150D0B180DFA001CB3F0 /* libgkgfxthebes.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 0081150C0B180DFA001CB3F0 /* libgkgfxthebes.a */; };
+ 		008115430B180F35001CB3F0 /* libthebes.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 008115420B180F35001CB3F0 /* libthebes.dylib */; };
+@@ -189,14 +191,8 @@
+ 		0FE7704108C799BB00AFB850 /* triangle_down_normal.tiff in Resources */ = {isa = PBXBuildFile; fileRef = 0FE7703708C799BB00AFB850 /* triangle_down_normal.tiff */; };
+ 		0FE7712B08C7C42F00AFB850 /* CertificateView.mm in Sources */ = {isa = PBXBuildFile; fileRef = 0FE7712A08C7C42F00AFB850 /* CertificateView.mm */; };
+ 		0FE7712C08C7C42F00AFB850 /* CertificateView.mm in Sources */ = {isa = PBXBuildFile; fileRef = 0FE7712A08C7C42F00AFB850 /* CertificateView.mm */; };
+-		0FE7722008C7E6B700AFB850 /* MismatchedCertDomainDialog.nib in Resources */ = {isa = PBXBuildFile; fileRef = 0FE7721808C7E6B700AFB850 /* MismatchedCertDomainDialog.nib */; };
+ 		0FE7722108C7E6B700AFB850 /* DownloadCACertDialog.nib in Resources */ = {isa = PBXBuildFile; fileRef = 0FE7721A08C7E6B700AFB850 /* DownloadCACertDialog.nib */; };
+-		0FE7722208C7E6B700AFB850 /* UnknownCertIssuerDialog.nib in Resources */ = {isa = PBXBuildFile; fileRef = 0FE7721C08C7E6B700AFB850 /* UnknownCertIssuerDialog.nib */; };
+-		0FE7722308C7E6B700AFB850 /* ExpiredCertDialog.nib in Resources */ = {isa = PBXBuildFile; fileRef = 0FE7721E08C7E6B700AFB850 /* ExpiredCertDialog.nib */; };
+-		0FE7722408C7E6B700AFB850 /* MismatchedCertDomainDialog.nib in Resources */ = {isa = PBXBuildFile; fileRef = 0FE7721808C7E6B700AFB850 /* MismatchedCertDomainDialog.nib */; };
+ 		0FE7722508C7E6B700AFB850 /* DownloadCACertDialog.nib in Resources */ = {isa = PBXBuildFile; fileRef = 0FE7721A08C7E6B700AFB850 /* DownloadCACertDialog.nib */; };
+-		0FE7722608C7E6B700AFB850 /* UnknownCertIssuerDialog.nib in Resources */ = {isa = PBXBuildFile; fileRef = 0FE7721C08C7E6B700AFB850 /* UnknownCertIssuerDialog.nib */; };
+-		0FE7722708C7E6B700AFB850 /* ExpiredCertDialog.nib in Resources */ = {isa = PBXBuildFile; fileRef = 0FE7721E08C7E6B700AFB850 /* ExpiredCertDialog.nib */; };
+ 		0FE772BA08C7FF4100AFB850 /* mini_cert_untrusted.tiff in Resources */ = {isa = PBXBuildFile; fileRef = 0FE772B908C7FF4100AFB850 /* mini_cert_untrusted.tiff */; };
+ 		0FE772BB08C7FF4100AFB850 /* mini_cert_untrusted.tiff in Resources */ = {isa = PBXBuildFile; fileRef = 0FE772B908C7FF4100AFB850 /* mini_cert_untrusted.tiff */; };
+ 		0FEA7DE20926BBF500B06154 /* NSFileManager+Utils.m in Sources */ = {isa = PBXBuildFile; fileRef = 0FEA7DE00926BBF500B06154 /* NSFileManager+Utils.m */; };
+@@ -2189,12 +2185,16 @@
+ /* End PBXCopyFilesBuildPhase section */
+ 
+ /* Begin PBXFileReference section */
++		0017874B0E6B3BFB00583A98 /* English */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; name = English; path = resources/localized/English.lproj/Localizable.strings.in; sourceTree = "<group>"; };
++		0017874E0E6B3C7500583A98 /* English */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; name = English; path = resources/localized/English.lproj/CertificateDialogs.strings.in; sourceTree = "<group>"; };
++		001787500E6B3C7500583A98 /* English */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text; name = English; path = resources/localized/English.lproj/InfoPlist.strings.in; sourceTree = "<group>"; };
+ 		001D4A240D75B0B100464BE4 /* MoveCommand.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = MoveCommand.h; path = src/appleevents/MoveCommand.h; sourceTree = "<group>"; };
+ 		001D4A250D75B0B100464BE4 /* MoveCommand.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = MoveCommand.mm; path = src/appleevents/MoveCommand.mm; sourceTree = "<group>"; };
+ 		001FFD930C795D3300D9C2C8 /* contenteditable.css */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = text; name = contenteditable.css; path = ../dist/Embed/res/contenteditable.css; sourceTree = SOURCE_ROOT; };
+ 		001FFD940C795D3300D9C2C8 /* designmode.css */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = text; name = designmode.css; path = ../dist/Embed/res/designmode.css; sourceTree = SOURCE_ROOT; };
+ 		00335B8B0C655ABC00A607F2 /* WebSearchField.h */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.h; name = WebSearchField.h; path = src/browser/WebSearchField.h; sourceTree = "<group>"; };
+ 		00335B8C0C655ABC00A607F2 /* WebSearchField.mm */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.objcpp; name = WebSearchField.mm; path = src/browser/WebSearchField.mm; sourceTree = "<group>"; };
++		005F387D0E50852D00D8E7A6 /* English */ = {isa = PBXFileReference; lastKnownFileType = wrapper.nib; name = English; path = resources/localized/English.lproj/InvalidCertOverrideDialog.nib; sourceTree = "<group>"; };
+ 		0081150A0B180DDE001CB3F0 /* libthebes.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libthebes.a; path = ../staticlib/libthebes.a; sourceTree = SOURCE_ROOT; };
+ 		0081150C0B180DFA001CB3F0 /* libgkgfxthebes.a */ = {isa = PBXFileReference; lastKnownFileType = archive.ar; name = libgkgfxthebes.a; path = ../gfx/src/thebes/libgkgfxthebes.a; sourceTree = SOURCE_ROOT; };
+ 		008115420B180F35001CB3F0 /* libthebes.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libthebes.dylib; path = ../dist/Embed/libthebes.dylib; sourceTree = SOURCE_ROOT; };
+@@ -2294,10 +2294,7 @@
+ 		0FE7703608C799BB00AFB850 /* triangle_right_down.tiff */ = {isa = PBXFileReference; lastKnownFileType = image.tiff; name = triangle_right_down.tiff; path = resources/images/chrome/triangle_right_down.tiff; sourceTree = SOURCE_ROOT; };
+ 		0FE7703708C799BB00AFB850 /* triangle_down_normal.tiff */ = {isa = PBXFileReference; lastKnownFileType = image.tiff; name = triangle_down_normal.tiff; path = resources/images/chrome/triangle_down_normal.tiff; sourceTree = SOURCE_ROOT; };
+ 		0FE7712A08C7C42F00AFB850 /* CertificateView.mm */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.objcpp; name = CertificateView.mm; path = src/security/CertificateView.mm; sourceTree = SOURCE_ROOT; };
+-		0FE7721908C7E6B700AFB850 /* English */ = {isa = PBXFileReference; lastKnownFileType = wrapper.nib; name = English; path = resources/localized/English.lproj/MismatchedCertDomainDialog.nib; sourceTree = "<group>"; };
+ 		0FE7721B08C7E6B700AFB850 /* English */ = {isa = PBXFileReference; lastKnownFileType = wrapper.nib; name = English; path = resources/localized/English.lproj/DownloadCACertDialog.nib; sourceTree = "<group>"; };
+-		0FE7721D08C7E6B700AFB850 /* English */ = {isa = PBXFileReference; lastKnownFileType = wrapper.nib; name = English; path = resources/localized/English.lproj/UnknownCertIssuerDialog.nib; sourceTree = "<group>"; };
+-		0FE7721F08C7E6B700AFB850 /* English */ = {isa = PBXFileReference; lastKnownFileType = wrapper.nib; name = English; path = resources/localized/English.lproj/ExpiredCertDialog.nib; sourceTree = "<group>"; };
+ 		0FE772B908C7FF4100AFB850 /* mini_cert_untrusted.tiff */ = {isa = PBXFileReference; lastKnownFileType = image.tiff; name = mini_cert_untrusted.tiff; path = resources/images/chrome/mini_cert_untrusted.tiff; sourceTree = SOURCE_ROOT; };
+ 		0FEA7DDD0926BBEA00B06154 /* NSFileManager+Utils.h */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.h; name = "NSFileManager+Utils.h"; path = "src/extensions/NSFileManager+Utils.h"; sourceTree = "<group>"; };
+ 		0FEA7DE00926BBF500B06154 /* NSFileManager+Utils.m */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.objc; name = "NSFileManager+Utils.m"; path = "src/extensions/NSFileManager+Utils.m"; sourceTree = "<group>"; };
+@@ -3434,8 +3431,11 @@
+ 				F50EA33D02BAAAB701000103 /* throbber */,
+ 				3FEBB28C089D73A700BD8373 /* bookmarks.plist */,
+ 				3F8C00930681262400658CBC /* Credits.rtf */,
++				0017874F0E6B3C7500583A98 /* InfoPlist.strings.in */,
+ 				089C165CFE840E0CC02AAC07 /* InfoPlist.strings */,
++				0017874A0E6B3BFB00583A98 /* Localizable.strings.in */,
+ 				F52CE65C02BFA8B701026D5D /* Localizable.strings */,
++				0017874D0E6B3C7500583A98 /* CertificateDialogs.strings.in */,
+ 				0FCD85D008C4D6EE00A1923B /* CertificateDialogs.strings */,
+ 				F5F190BB02D1F81A01026D5D /* ToolbarDefaults.plist */,
+ 				F5F190BE02D217C201026D5D /* WebsiteDefaults.strings */,
+@@ -4416,10 +4416,8 @@
+ 				3FC7EBFA05AA1D1C00C557AA /* AccessoryViews.nib */,
+ 				0FCD85DA08C4D7C000A1923B /* ViewCertificateDialog.nib */,
+ 				0FCD868B08C4E83100A1923B /* CertificatesWindow.nib */,
+-				0FE7721808C7E6B700AFB850 /* MismatchedCertDomainDialog.nib */,
+ 				0FE7721A08C7E6B700AFB850 /* DownloadCACertDialog.nib */,
+-				0FE7721C08C7E6B700AFB850 /* UnknownCertIssuerDialog.nib */,
+-				0FE7721E08C7E6B700AFB850 /* ExpiredCertDialog.nib */,
++				005F387C0E50852D00D8E7A6 /* InvalidCertOverrideDialog.nib */,
+ 				0F0AD72C08CA3682002782ED /* CreatePasswordDialog.nib */,
+ 				0FD8181E08CB8E8900D8F88C /* GenerateKeyPairDialog.nib */,
+ 				0FDEEB5408CC06BC00754D9B /* ChooseCertificateDialog.nib */,
+@@ -5064,10 +5062,7 @@
+ 				0FE7703A08C799BB00AFB850 /* triangle_right_pressed.tiff in Resources */,
+ 				0FE7703B08C799BB00AFB850 /* triangle_right_down.tiff in Resources */,
+ 				0FE7703C08C799BB00AFB850 /* triangle_down_normal.tiff in Resources */,
+-				0FE7722008C7E6B700AFB850 /* MismatchedCertDomainDialog.nib in Resources */,
+ 				0FE7722108C7E6B700AFB850 /* DownloadCACertDialog.nib in Resources */,
+-				0FE7722208C7E6B700AFB850 /* UnknownCertIssuerDialog.nib in Resources */,
+-				0FE7722308C7E6B700AFB850 /* ExpiredCertDialog.nib in Resources */,
+ 				0FE772BA08C7FF4100AFB850 /* mini_cert_untrusted.tiff in Resources */,
+ 				0F2453D608C96478001C264F /* lock_badge.tiff in Resources */,
+ 				0F0AD72E08CA3682002782ED /* CreatePasswordDialog.nib in Resources */,
+@@ -5101,6 +5096,7 @@
+ 				00BBBFE80D70A6E400C2D916 /* tab_loading.tiff in Resources */,
+ 				B3128A110E5D14C8009F0595 /* pageBigger.tiff in Resources */,
+ 				B3128A130E5D14CD009F0595 /* pageSmaller.tiff in Resources */,
++				005F387F0E50852D00D8E7A6 /* InvalidCertOverrideDialog.nib in Resources */,
+ 			);
+ 			runOnlyForDeploymentPostprocessing = 0;
+ 		};
+@@ -5258,10 +5254,7 @@
+ 				0FE7703F08C799BB00AFB850 /* triangle_right_pressed.tiff in Resources */,
+ 				0FE7704008C799BB00AFB850 /* triangle_right_down.tiff in Resources */,
+ 				0FE7704108C799BB00AFB850 /* triangle_down_normal.tiff in Resources */,
+-				0FE7722408C7E6B700AFB850 /* MismatchedCertDomainDialog.nib in Resources */,
+ 				0FE7722508C7E6B700AFB850 /* DownloadCACertDialog.nib in Resources */,
+-				0FE7722608C7E6B700AFB850 /* UnknownCertIssuerDialog.nib in Resources */,
+-				0FE7722708C7E6B700AFB850 /* ExpiredCertDialog.nib in Resources */,
+ 				0FE772BB08C7FF4100AFB850 /* mini_cert_untrusted.tiff in Resources */,
+ 				0F2453D708C96478001C264F /* lock_badge.tiff in Resources */,
+ 				0F0AD72F08CA3682002782ED /* CreatePasswordDialog.nib in Resources */,
+@@ -5295,6 +5288,7 @@
+ 				00BBBFE70D70A6E400C2D916 /* tab_loading.tiff in Resources */,
+ 				B3128A120E5D14C8009F0595 /* pageBigger.tiff in Resources */,
+ 				B3128A140E5D14CE009F0595 /* pageSmaller.tiff in Resources */,
++				005F387E0E50852D00D8E7A6 /* InvalidCertOverrideDialog.nib in Resources */,
+ 			);
+ 			runOnlyForDeploymentPostprocessing = 0;
+ 		};
+@@ -5841,6 +5835,38 @@
+ /* End PBXTargetDependency section */
+ 
+ /* Begin PBXVariantGroup section */
++		0017874A0E6B3BFB00583A98 /* Localizable.strings.in */ = {
++			isa = PBXVariantGroup;
++			children = (
++				0017874B0E6B3BFB00583A98 /* English */,
++			);
++			name = Localizable.strings.in;
++			sourceTree = "<group>";
++		};
++		0017874D0E6B3C7500583A98 /* CertificateDialogs.strings.in */ = {
++			isa = PBXVariantGroup;
++			children = (
++				0017874E0E6B3C7500583A98 /* English */,
++			);
++			name = CertificateDialogs.strings.in;
++			sourceTree = "<group>";
++		};
++		0017874F0E6B3C7500583A98 /* InfoPlist.strings.in */ = {
++			isa = PBXVariantGroup;
++			children = (
++				001787500E6B3C7500583A98 /* English */,
++			);
++			name = InfoPlist.strings.in;
++			sourceTree = "<group>";
++		};
++		005F387C0E50852D00D8E7A6 /* InvalidCertOverrideDialog.nib */ = {
++			isa = PBXVariantGroup;
++			children = (
++				005F387D0E50852D00D8E7A6 /* English */,
++			);
++			name = InvalidCertOverrideDialog.nib;
++			sourceTree = "<group>";
++		};
+ 		00BBBF1C0D6A149800C2D916 /* FindBarTextured.nib */ = {
+ 			isa = PBXVariantGroup;
+ 			children = (
+@@ -5977,14 +6003,6 @@
+ 			name = ChooseCertificateDialog.nib;
+ 			sourceTree = "<group>";
+ 		};
+-		0FE7721808C7E6B700AFB850 /* MismatchedCertDomainDialog.nib */ = {
+-			isa = PBXVariantGroup;
+-			children = (
+-				0FE7721908C7E6B700AFB850 /* English */,
+-			);
+-			name = MismatchedCertDomainDialog.nib;
+-			sourceTree = SOURCE_ROOT;
+-		};
+ 		0FE7721A08C7E6B700AFB850 /* DownloadCACertDialog.nib */ = {
+ 			isa = PBXVariantGroup;
+ 			children = (
+@@ -5993,22 +6011,6 @@
+ 			name = DownloadCACertDialog.nib;
+ 			sourceTree = SOURCE_ROOT;
+ 		};
+-		0FE7721C08C7E6B700AFB850 /* UnknownCertIssuerDialog.nib */ = {
+-			isa = PBXVariantGroup;
+-			children = (
+-				0FE7721D08C7E6B700AFB850 /* English */,
+-			);
+-			name = UnknownCertIssuerDialog.nib;
+-			sourceTree = SOURCE_ROOT;
+-		};
+-		0FE7721E08C7E6B700AFB850 /* ExpiredCertDialog.nib */ = {
+-			isa = PBXVariantGroup;
+-			children = (
+-				0FE7721F08C7E6B700AFB850 /* English */,
+-			);
+-			name = ExpiredCertDialog.nib;
+-			sourceTree = SOURCE_ROOT;
+-		};
+ 		3F8C004F06800D8D00658CBC /* Localizable.strings */ = {
+ 			isa = PBXVariantGroup;
+ 			children = (
+Index: embed-replacements/locale/en-US/global/netError.dtd
+===================================================================
+RCS file: /cvsroot/mozilla/camino/embed-replacements/locale/en-US/global/netError.dtd,v
+retrieving revision 1.10
+diff -u -r1.10 netError.dtd
+--- embed-replacements/locale/en-US/global/netError.dtd	27 Nov 2007 22:35:36 -0000	1.10
++++ embed-replacements/locale/en-US/global/netError.dtd	31 Aug 2008 23:47:32 -0000
+@@ -81,7 +81,8 @@
+ ">
+ 
+ <!ENTITY securityOverride.linkText "Or you can add an exception…">
++<!ENTITY securityOverride.exceptionButtonLabel "Add Exception…">
+ <!ENTITY securityOverride.warningText "
+ <p>You should not add an exception if you are using an internet connection that you do not trust completely or if you are not used to seeing a warning for this server.</p>
+-<p>If you still wish to add an exception for this site, you can do so in your advanced encryption settings.</p>
++<xul:button xmlns:xul='http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul' id='exceptionDialogButton' label='&securityOverride.exceptionButtonLabel;'/>
+ ">
+Index: resources/localized/English.lproj/CertificateDialogs.strings.in
+===================================================================
+RCS file: /cvsroot/mozilla/camino/resources/localized/English.lproj/CertificateDialogs.strings.in,v
+retrieving revision 1.2
+diff -u -r1.2 CertificateDialogs.strings.in
+--- resources/localized/English.lproj/CertificateDialogs.strings.in	22 Jan 2008 19:38:47 -0000	1.2
++++ resources/localized/English.lproj/CertificateDialogs.strings.in	31 Aug 2008 23:47:32 -0000
+@@ -95,16 +95,14 @@
+ "CACertExistsMsg" = "Certificate Authority certificate has already been installed.";
+ "CACertExistsDetail" = "You already have a certificate for this Certificate Authority, so there is no need to install it again.";
+ 
+-/* Domain mismatch dialog */
+-"DomainMistmatchMsgFormat" = "You have attempted to establish a connection with “%@”. However, the security certificate presented belongs to “%@”. It is possible, though unlikely, that someone may be trying to intercept your communication with this website.";
++/* Bad cert dialog */
++"InvalidCertTitleFormat" = "Add a security exception for “%@”?";
++"InvalidCertMessageFormat" = "The certificate for “%@” could not be verified; are you sure you want to trust it?";
++"MismatchedCertMessageFormat" = "This certificate is only valid for “%1$@”; are you sure you want to trust it for “%2$@”?";
++"ExpiredCertMessageFormat" = "The certificate for “%@” has expired; are you sure you want to trust it?";
+ 
+-/* Unverifed cert dialog */
+-"UnverifiedCertTitleFormat" = "Unable to verify the identity of “%@” as a trusted site";
+-"UnverifiedCertMessageFormat" = "The certificate presented by this site could not be verified because its Certificate Authority is untrusted, the certificate is incomplete, or the site you are connecting is not %@.";
+-
+-/* Expired cert dialog */
+-"ExpiredCertTitleFormat" = "The certificate for “%@” has expired";
+-"ExpiredCertMessageFormat" = "The certificate for “%@” expired on “%@”, and is therefore invalid. Connecting to this site could put your personal information at risk.";
++"CertOverrideInfoMissingTitle" = "Certificate not found";
++"CertOverrideInfoMissingMessageFormat" = "The certificate information for “%@” could not be found. Please reload the page, then try adding the exception again.";
+ 
+ /* Cert escrow dialog */
+ "EscrowDialogTitleFormat" = "Allow Certificate Authority “%@” to store your private key?";
+Index: src/browser/BrowserWindowController.mm
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/browser/BrowserWindowController.mm,v
+retrieving revision 1.380
+diff -u -r1.380 BrowserWindowController.mm
+--- src/browser/BrowserWindowController.mm	27 Aug 2008 21:14:03 -0000	1.380
++++ src/browser/BrowserWindowController.mm	31 Aug 2008 23:47:35 -0000
+@@ -76,6 +76,7 @@
+ #import "DraggableImageAndTextCell.h"
+ #import "MVPreferencesController.h"
+ #import "ViewCertificateDialogController.h"
++#import "BrowserSecurityDialogs.h"
+ #import "ExtendedSplitView.h"
+ #import "WebSearchField.h"
+ #import "wallet.h"
+@@ -2150,6 +2151,30 @@
+     [[NSWorkspace sharedWorkspace] openURL:[NSURL URLWithString:[sender representedObject]]];
+ }
+ 
++- (void)addCertificateOverrideForSite:(NSString*)uri
++{
++  NSURL* url = [NSURL URLWithString:uri];
++  if (url) {
++    InvalidCertOverrideDialogController* certDialogController =
++      [[[BrowserSecurityUIProvider sharedBrowserSecurityUIProvider] invalidCertOverrideDialogController] retain];
++    if (certDialogController) {
++      [certDialogController showWithSourceURL:url parentWindow:[self window] delegate:self];
++      return;
++    }
++  }
++
++  NSBeep();
++}
++
++- (void)certOverride:(InvalidCertOverrideDialogController*)certDialogController
++  finishedWithResult:(BOOL)didAddOverride
++{
++  [certDialogController release];
++
++  if (didAddOverride)
++    [self reload:self];
++}
++
+ - (void)showSecurityState:(unsigned long)state
+ {
+   [self updateLock:state];
+Index: src/browser/BrowserWrapper.h
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/browser/BrowserWrapper.h,v
+retrieving revision 1.59
+diff -u -r1.59 BrowserWrapper.h
+--- src/browser/BrowserWrapper.h	24 Mar 2008 17:03:28 -0000	1.59
++++ src/browser/BrowserWrapper.h	31 Aug 2008 23:47:35 -0000
+@@ -74,6 +74,8 @@
+ - (void)showBlockedPopups:(nsIArray*)blockedSites whitelistingSource:(BOOL)shouldWhitelist;
+ - (void)blacklistPopupsFromURL:(NSString*)inURL;
+ 
++- (void)addCertificateOverrideForSite:(NSString*)url;
++
+ - (BOOL)userChangedLocationField;
+ 
+ - (void)contentViewChangedTo:(NSView*)inView forURL:(NSString*)inURL;
+Index: src/browser/BrowserWrapper.mm
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/browser/BrowserWrapper.mm,v
+retrieving revision 1.140
+diff -u -r1.140 BrowserWrapper.mm
+--- src/browser/BrowserWrapper.mm	24 Jun 2008 17:44:22 -0000	1.140
++++ src/browser/BrowserWrapper.mm	31 Aug 2008 23:47:36 -0000
+@@ -899,6 +899,8 @@
+ // if the command was sent from an error page overlay.
+ - (void)performCommandForXULElementWithID:(NSString*)elementIdentifier onPage:(NSString*)pageURI
+ {
++  if ([elementIdentifier isEqualToString:@"exceptionDialogButton"])
++    [mDelegate addCertificateOverrideForSite:[self currentURI]];
+ }
+ 
+ - (BOOL)performKeyEquivalent:(NSEvent*)theEvent
+Index: src/security/BrowserSecurityDialogs.h
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/security/BrowserSecurityDialogs.h,v
+retrieving revision 1.2
+diff -u -r1.2 BrowserSecurityDialogs.h
+--- src/security/BrowserSecurityDialogs.h	8 Sep 2005 01:50:00 -0000	1.2
++++ src/security/BrowserSecurityDialogs.h	31 Aug 2008 23:47:36 -0000
+@@ -41,12 +41,11 @@
+ class nsIX509Cert;
+ 
+ @class DownloadCACertDialogController;
+-@class MismatchedCertDomainDialogController;
+-@class UnknownCertIssuerDialogController;
+-@class ExpiredCertDialogController;
++@class InvalidCertOverrideDialogController;
+ @class CreatePasswordDialogController;
+ @class GenKeyPairDialogController;
+ @class ChooseCertDialogController;
++@class AutoSizingTextField;
+ 
+ @interface BrowserSecurityUIProvider : NSObject
+ {
+@@ -57,9 +56,7 @@
+ 
+ // these dialog controllers are autoreleased. You should retain them while running the dialog.
+ - (DownloadCACertDialogController*)downloadCACertDialogController;
+-- (MismatchedCertDomainDialogController*)mismatchedCertDomainDialogController;
+-- (UnknownCertIssuerDialogController*)unknownCertIssuerDialogController;
+-- (ExpiredCertDialogController*)expiredCertDialogController;
++- (InvalidCertOverrideDialogController*)invalidCertOverrideDialogController;
+ - (CreatePasswordDialogController*)createPasswordDialogController;
+ - (GenKeyPairDialogController*)genKeyPairDialogController;
+ - (ChooseCertDialogController*)chooseCertDialogController;
+@@ -95,47 +92,30 @@
+ @end
+ 
+ 
+-// this is really a misnomer. it's shown when a site presents a certificate
+-// that is invalid or untrusted.
+-@interface UnknownCertIssuerDialogController : CertificateDialogController
+-{
+-  IBOutlet NSTextField*       mTitleField;
+-  IBOutlet NSTextField*       mMessageField;
+-}
++// informal protocol implemented by delegates of InvalidCertOverrideDialogController
++@interface NSObject(InvalidCertOverrideDelegate)
+ 
+-- (IBAction)onAcceptOneTime:(id)sender;
+-- (IBAction)onAcceptAlways:(id)sender;
+-- (IBAction)onStop:(id)sender;
++- (void)certOverride:(InvalidCertOverrideDialogController*)certDialogController
++  finishedWithResult:(BOOL)didAddOverride;
+ 
+ @end
+ 
+-
+-@interface ExpiredCertDialogController : CertificateDialogController
++@interface InvalidCertOverrideDialogController : CertificateDialogController
+ {
+-  IBOutlet NSTextField*       mTitleField;
+-  IBOutlet NSTextField*       mMessageField;
++  IBOutlet NSTextField*         mTitleField;
++  IBOutlet AutoSizingTextField* mMessageField;
++  NSString*                     mSourceHost;
++  int                           mSourcePort;
++  int                           mCertFailureFlags;
++  id                            mDelegate;      // weak
+ }
+ 
+-- (IBAction)onOK:(id)sender;
+-- (IBAction)onCancel:(id)sender;
+-
+-
+-@end
+-
+-@interface MismatchedCertDomainDialogController : CertificateDialogController
+-{
+-  IBOutlet NSTextField*       mMessageField;
+-
+-  NSString*                   mTargetURL;   // retained
+-}
++// Shows an override dialog, then calls certOverride:finishedWithResult: on |delegate|
++- (void)showWithSourceURL:(NSURL*)url parentWindow:(NSWindow*)parent delegate:(id)delegate;
+ 
+-- (IBAction)onOK:(id)sender;
++- (IBAction)onTrust:(id)sender;
+ - (IBAction)onCancel:(id)sender;
+ 
+-- (IBAction)viewCertificate:(id)sender;
+-
+-- (void)setCertificateItem:(CertificateItem*)inCert;
+-- (void)setTargetURL:(NSString*)inTargetURL;
+ 
+ @end
+ 
+Index: src/security/BrowserSecurityDialogs.mm
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/security/BrowserSecurityDialogs.mm,v
+retrieving revision 1.5
+diff -u -r1.5 BrowserSecurityDialogs.mm
+--- src/security/BrowserSecurityDialogs.mm	16 Feb 2008 18:43:09 -0000	1.5
++++ src/security/BrowserSecurityDialogs.mm	31 Aug 2008 23:47:36 -0000
+@@ -38,19 +38,26 @@
+ 
+ #import "NSImage+Utils.h"
+ #import "NSString+Utils.h"
++#import "NSString+Gecko.h"
+ 
+ #import "nsCOMPtr.h"
+ #import "nsString.h"
+ 
+ #import "nsIX509Cert.h"
++#import "nsIRecentBadCertsService.h"
++#import "nsISSLStatus.h"
++#import "nsICertOverrideService.h"
++#import "nsServiceManagerUtils.h"
+ 
+-
++#import "AutoSizingTextField.h"
+ #import "CertificateItem.h"
+ #import "CertificateView.h"
+ #import "ViewCertificateDialogController.h"
+ #import "BrowserSecurityDialogs.h"
+ 
+ 
++static const int kDefaultHTTPSPort = 443;
++
+ #pragma mark BrowserSecurityUIProvider
+ #pragma mark -
+ 
+@@ -94,21 +101,9 @@
+   return [dialogController autorelease];
+ }
+ 
+-- (MismatchedCertDomainDialogController*)mismatchedCertDomainDialogController
+-{
+-  MismatchedCertDomainDialogController* dialogController = [[MismatchedCertDomainDialogController alloc] initWithWindowNibName:@"MismatchedCertDomainDialog"];
+-  return [dialogController autorelease];
+-}
+-
+-- (UnknownCertIssuerDialogController*)unknownCertIssuerDialogController
+-{
+-  UnknownCertIssuerDialogController* dialogController = [[UnknownCertIssuerDialogController alloc] initWithWindowNibName:@"UnknownCertIssuerDialog"];
+-  return [dialogController autorelease];
+-}
+-
+-- (ExpiredCertDialogController*)expiredCertDialogController
++- (InvalidCertOverrideDialogController*)invalidCertOverrideDialogController
+ {
+-  ExpiredCertDialogController* dialogController = [[ExpiredCertDialogController alloc] initWithWindowNibName:@"ExpiredCertDialog"];
++  InvalidCertOverrideDialogController* dialogController = [[InvalidCertOverrideDialogController alloc] initWithWindowNibName:@"InvalidCertOverrideDialog"];
+   return [dialogController autorelease];
+ }
+ 
+@@ -219,162 +214,168 @@
+ 
+ @end
+ 
+-#pragma mark -
+-#pragma mark UnknownCertIssuerDialogController
+-#pragma mark -
+-
+-
+-@implementation UnknownCertIssuerDialogController
+-
+-- (IBAction)onAcceptOneTime:(id)sender
+-{
+-  [NSApp stopModalWithCode:NSAlertDefaultReturn];
+-  [[self window] orderOut:nil];
+-}
+-
+-- (IBAction)onAcceptAlways:(id)sender
+-{
+-  [NSApp stopModalWithCode:NSAlertOtherReturn];
+-  [[self window] orderOut:nil];
+-}
+-
+-- (IBAction)onStop:(id)sender
+-{
+-  [NSApp stopModalWithCode:NSAlertAlternateReturn];
+-  [[self window] orderOut:nil];
+-}
+-
+-- (void)setCertificateItem:(CertificateItem*)inCert
+-{
+-  [self window];    // ensure window visible
+-
+-  NSString* titleFormat = NSLocalizedStringFromTable(@"UnverifiedCertTitleFormat", @"CertificateDialogs", @"");
+-  NSString* title = [NSString stringWithFormat:titleFormat, [inCert commonName]];
+-  [mTitleField setStringValue:title];
+-
+-  NSString* msgFormat = NSLocalizedStringFromTable(@"UnverifiedCertMessageFormat", @"CertificateDialogs", @"");
+-  NSString* msg = [NSString stringWithFormat:msgFormat, [inCert commonName]];
+-  [mMessageField setStringValue:msg];
+-
+-  [mCertificateView setDetailsInitiallyExpanded:NO];
+-  [mCertificateView setTrustInitiallyExpanded:NO];
+-
+-  [super setCertificateItem:inCert];
+-}
+-
+-@end
+ 
+ #pragma mark -
+-#pragma mark ExpiredCertDialogController
++#pragma mark InvalidCertOverrideDialogController
+ #pragma mark -
+ 
+-@implementation ExpiredCertDialogController
+-
+-- (IBAction)onOK:(id)sender
+-{
+-  [NSApp stopModalWithCode:NSAlertDefaultReturn];
+-  [[self window] orderOut:nil];
+-}
+-
+-- (IBAction)onCancel:(id)sender
+-{
+-  [NSApp stopModalWithCode:NSAlertAlternateReturn];
+-  [[self window] orderOut:nil];
+-}
+-
+-- (void)setCertificateItem:(CertificateItem*)inCert
+-{
+-  [self window];    // ensure window visible
+-
+-  NSString* titleFormat = NSLocalizedStringFromTable(@"ExpiredCertTitleFormat", @"CertificateDialogs", @"");
+-  NSString* title = [NSString stringWithFormat:titleFormat, [inCert commonName]];
+-  [mTitleField setStringValue:title];
+-
+-  NSString* msgFormat = NSLocalizedStringFromTable(@"ExpiredCertMessageFormat", @"CertificateDialogs", @"");
+-  NSString* msg = [NSString stringWithFormat:msgFormat, [inCert commonName], [inCert expiresString]];
+-  [mMessageField setStringValue:msg];
+-
+-  [mCertificateView setDetailsInitiallyExpanded:NO];
+-  [mCertificateView setTrustInitiallyExpanded:NO];
+-
+-  [super setCertificateItem:inCert];
+-}
++static int kInvalidCertAddOverride = 1;
++static int kInvalidCertCancelOverride = 0;
+ 
+-- (void)windowDidLoad
+-{
+-  [mIcon setImage:[BrowserSecurityUIProvider lockBadgedApplicationIcon]];
+-}
++@implementation InvalidCertOverrideDialogController
+ 
+-@end
++- (void)dealloc {
++  [mSourceHost release];
+ 
+-#pragma mark -
+-#pragma mark MismatchedCertDomainDialogController
+-#pragma mark -
+-
+-@implementation MismatchedCertDomainDialogController
+-
+-- (void)dealloc
+-{
+-  [mTargetURL release];
+   [super dealloc];
+ }
+ 
+-- (IBAction)onOK:(id)sender
++- (IBAction)onTrust:(id)sender
+ {
+-  [NSApp stopModalWithCode:NSAlertDefaultReturn];
+-  [[self window] orderOut:nil];
++  [NSApp endSheet:[self window] returnCode:kInvalidCertAddOverride];
+ }
+ 
+ - (IBAction)onCancel:(id)sender
+ {
+-  [NSApp stopModalWithCode:NSAlertAlternateReturn];
+-  [[self window] orderOut:nil];
++  [NSApp endSheet:[self window] returnCode:kInvalidCertCancelOverride];
+ }
+ 
+-- (IBAction)viewCertificate:(id)sender
+-{
+-//  [ViewCertificateDialogController runModalCertificateWindowWithCertificateItem:mCertItem
+-//                                                       certTypeForTrustSettings:nsIX509Cert::SERVER_CERT];
++// Loads the recent bad cert for the current host+post into the certificate
++// view, and stores its failure flags in mCertFailureFlags.
++// Also return the cert for convenience.
++//
++// mSourceHost and mSourcePort must be set before calling this method. 
++- (CertificateItem*)loadRecentBadCert {
++  nsCOMPtr<nsIRecentBadCertsService> badCertService = do_GetService(NS_RECENTBADCERTS_CONTRACTID);
++  if (badCertService) {
++    nsAutoString hostAndPort;
++    [[NSString stringWithFormat:@"%@:%d", mSourceHost, mSourcePort] assignTo_nsAString:hostAndPort];
++    nsCOMPtr<nsISSLStatus> certStatus;
++    badCertService->GetRecentBadCert(hostAndPort, getter_AddRefs(certStatus));
++    if (certStatus) {
++      mCertFailureFlags = 0;
++      PRBool isDomainMismatch, isInvalidTime, isUntrusted;
++      certStatus->GetIsDomainMismatch(&isDomainMismatch);
++      certStatus->GetIsNotValidAtThisTime(&isInvalidTime);
++      certStatus->GetIsUntrusted(&isUntrusted);
++      if (isUntrusted)
++        mCertFailureFlags |= nsICertOverrideService::ERROR_UNTRUSTED;
++      if (isDomainMismatch)
++        mCertFailureFlags |= nsICertOverrideService::ERROR_MISMATCH;
++      if (isInvalidTime)
++        mCertFailureFlags |= nsICertOverrideService::ERROR_TIME;
++
++      nsCOMPtr<nsICertOverrideService> certOverrideService = do_GetService(NS_CERTOVERRIDE_CONTRACTID);
++      if (certOverrideService) {
++        nsCOMPtr<nsIX509Cert> cert;
++        certStatus->GetServerCert(getter_AddRefs(cert));
++        if (cert) {
++          CertificateItem* certItem = [CertificateItem certificateItemWithCert:cert];
++          [self setCertificateItem:certItem];
++          return certItem;
++        }
++      }
++    }
++  }
++  return nil;
+ }
+ 
+-- (void)updateDialog
++- (void)showWithSourceURL:(NSURL*)url parentWindow:(NSWindow*)parent delegate:(id)delegate
+ {
+-  CertificateItem* certItem = [mCertificateView certificateItem];
+-  if (!certItem) return;
++  [mCertificateView setDetailsInitiallyExpanded:NO];
++  [mCertificateView setTrustInitiallyExpanded:YES];
+ 
+-  NSString* msgFormat = NSLocalizedStringFromTable(@"DomainMistmatchMsgFormat", @"CertificateDialogs", @"");
+-  NSString* msg = [NSString stringWithFormat:msgFormat, mTargetURL, [certItem commonName]];
+-  [mMessageField setStringValue:msg];
+-}
++  mDelegate = delegate;
+ 
+-- (void)windowDidLoad
+-{
+-  [mIcon setImage:[BrowserSecurityUIProvider lockBadgedApplicationIcon]];
+-  [self updateDialog];
+-}
++  mSourceHost = [[url host] retain];
++  mSourcePort = [[url port] intValue];
++  if (mSourcePort == 0)
++    mSourcePort = kDefaultHTTPSPort;
++
++  CertificateItem* certItem = [self loadRecentBadCert];
++
++  // If we didn't find the cert, we are probably in the unlikely case where a
++  // user has opened so many different sites with cert problems before trying to
++  // add an exception for the first that they've blown out the cache. Rather
++  // than adding special recovery for a rare case, just tell them to try again.
++  if (!certItem) {
++    NSString* titleString = NSLocalizedStringFromTable(@"CertOverrideInfoMissingTitle", @"CertificateDialogs", nil);
++    NSString* messageFormat = NSLocalizedStringFromTable(@"CertOverrideInfoMissingMessageFormat", @"CertificateDialogs", nil);
++    NSAlert* alert = [[[NSAlert alloc] init] autorelease];
++    [alert setAlertStyle:NSInformationalAlertStyle];
++    [alert setMessageText:titleString];
++    [alert setInformativeText:[NSString stringWithFormat:messageFormat, mSourceHost]];
++    [alert beginSheetModalForWindow:parent
++                      modalDelegate:self
++                     didEndSelector:@selector(alertDidEnd:returnCode:contextInfo:)
++                        contextInfo:nil];
++    return;
++  }
+ 
+-- (void)setCertificateItem:(CertificateItem*)inCert
+-{
+-  [self window];
+-  [mCertificateView setDetailsInitiallyExpanded:NO];
+-  [mCertificateView setTrustInitiallyExpanded:NO];
+-  [mCertificateView setCertificateItem:inCert];
+-  [mCertificateView setDelegate:self];
+-  [self updateDialog];
+-}
++  NSString* titleFormat = NSLocalizedStringFromTable(@"InvalidCertTitleFormat", @"CertificateDialogs", nil);
++  [mTitleField setStringValue:[NSString stringWithFormat:titleFormat, mSourceHost]];
+ 
+-- (void)setTargetURL:(NSString*)inTargetURL
+-{
+-  [mTargetURL autorelease];
+-  mTargetURL = [inTargetURL retain];
+-}
++  // Rather than overwhelm the user with information, just pick the most
++  // important problem to tell them about.
++  NSString* problemDescription = nil;
++  if (mCertFailureFlags & nsICertOverrideService::ERROR_UNTRUSTED) {
++    NSString* messageFormat = NSLocalizedStringFromTable(@"InvalidCertMessageFormat", @"CertificateDialogs", nil);
++    problemDescription = [NSString stringWithFormat:messageFormat, mSourceHost];
++  }
++  else if (mCertFailureFlags & nsICertOverrideService::ERROR_MISMATCH) {
++    NSString* messageFormat = NSLocalizedStringFromTable(@"MismatchedCertMessageFormat", @"CertificateDialogs", nil);
++    problemDescription = [NSString stringWithFormat:messageFormat, [certItem commonName], mSourceHost];
++  } else {
++    NSString* messageFormat = NSLocalizedStringFromTable(@"InvalidCertMessageFormat", @"CertificateDialogs", nil);
++    problemDescription = [NSString stringWithFormat:messageFormat, mSourceHost];
++  }
++  float nibMessageHeight = NSHeight([mMessageField frame]);
++  [mMessageField setStringValue:problemDescription];
+ 
+-// CertificateViewDelegate method
+-- (void)certificateView:(CertificateView*)certView showIssuerCertificate:(CertificateItem*)issuerCert
+-{
+-  // if we are modal, then this must also be modal
+-  [ViewCertificateDialogController runModalCertificateWindowWithCertificateItem:issuerCert
+-                                                       certTypeForTrustSettings:nsIX509Cert::CA_CERT];
++  // Adjust the the sheet and other controls to account for the message change.
++  float heightChange = NSHeight([mMessageField frame]) - nibMessageHeight;
++  NSView* scrollView = mCertificateView;
++  do {
++    scrollView = [scrollView superview];
++  } while (![scrollView isKindOfClass:[NSScrollView class]]);
++  NSRect certScrollViewFrame = [scrollView frame];
++  certScrollViewFrame.size.height -= heightChange;
++  [scrollView setFrame:certScrollViewFrame];
++  NSRect sheetFrame = [[self window] frame];
++  sheetFrame.size.height += heightChange;
++  [[self window] setFrame:sheetFrame display:NO];
++
++  [NSApp beginSheet:[self window]
++     modalForWindow:parent
++      modalDelegate:self
++     didEndSelector:@selector(sheetDidEnd:returnCode:contextInfo:)
++        contextInfo:nil];
++}
++
++- (void)alertDidEnd:(NSWindow *)sheet returnCode:(int)returnCode contextInfo:(void *)contextInfo
++{
++  if ([mDelegate respondsToSelector:@selector(certOverride:finishedWithResult:)])
++    [mDelegate certOverride:self finishedWithResult:NO];
++}
++
++- (void)sheetDidEnd:(NSWindow *)sheet returnCode:(int)returnCode contextInfo:(void *)contextInfo
++{
++  [[self window] orderOut:self];
++  BOOL addedOverride = NO;
++  if (returnCode == kInvalidCertAddOverride) {
++    nsCOMPtr<nsICertOverrideService> certOverrideService = do_GetService(NS_CERTOVERRIDE_CONTRACTID);
++    if (certOverrideService) {
++      nsCOMPtr<nsIX509Cert> cert = [[mCertificateView certificateItem] cert];
++      if (cert) {
++        certOverrideService->RememberValidityOverride(nsDependentCString([mSourceHost UTF8String]),
++                                                      mSourcePort, cert, mCertFailureFlags, PR_FALSE);
++        addedOverride = YES;
++      }
++    }
++  }
++
++  if ([mDelegate respondsToSelector:@selector(certOverride:finishedWithResult:)])
++    [mDelegate certOverride:self finishedWithResult:addedOverride];
+ }
+ 
+ @end

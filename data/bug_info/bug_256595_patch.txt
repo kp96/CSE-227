@@ -1,0 +1,16 @@
+Index: widget/src/os2/nsWindow.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/widget/src/os2/nsWindow.cpp,v
+retrieving revision 1.174
+diff -u -r1.174 nsWindow.cpp
+--- widget/src/os2/nsWindow.cpp	23 Aug 2004 15:57:27 -0000	1.174
++++ widget/src/os2/nsWindow.cpp	24 Aug 2004 21:13:39 -0000
+@@ -1585,7 +1585,7 @@
+    
+       WinQueryPresParam( mWnd, PP_FONTNAMESIZE, 0, 0, 128, buf[0], 0);
+    
+-      if( 2 == sscanf( buf[0], "%d.%s", &ptSize, buf[1])) // mmm, scanf()...
++      if( 2 == sscanf( buf[0], "%d.%126s", &ptSize, buf[1]))
+       {
+          float twip2dev, twip2app;
+          twip2dev = mContext->TwipsToDevUnits();

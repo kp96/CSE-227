@@ -1,0 +1,42 @@
+? security/manager/pki/src/dependentLibs.h
+? security/manager/ssl/src/dependentLibs.h
+Index: security/manager/ssl/resources/locale/en-US/pipnss.properties
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/resources/locale/en-US/pipnss.properties,v
+retrieving revision 1.37
+diff -u -r1.37 pipnss.properties
+--- security/manager/ssl/resources/locale/en-US/pipnss.properties	31 Jan 2004 07:10:34 -0000	1.37
++++ security/manager/ssl/resources/locale/en-US/pipnss.properties	29 Feb 2004 04:05:54 -0000
+@@ -73,7 +73,6 @@
+ VerifyAnyCA=Any Certificate Authority
+ HighGrade=2048 (High Grade)
+ MediumGrade=1024 (Medium Grade)
+-LowGrade= 512 (Low Grade)
+ nick_template=%1$s's %2$s ID
+ nick_template_with_num=%1$s's %2$s ID #%3$d
+ #These are the strings set for the ASN1 objects in a certificate.
+Index: security/manager/ssl/src/nsKeygenHandler.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsKeygenHandler.cpp,v
+retrieving revision 1.28
+diff -u -r1.28 nsKeygenHandler.cpp
+--- security/manager/ssl/src/nsKeygenHandler.cpp	26 Feb 2004 04:07:22 -0000	1.28
++++ security/manager/ssl/src/nsKeygenHandler.cpp	29 Feb 2004 04:05:55 -0000
+@@ -56,7 +56,6 @@
+ static SECKeySizeChoiceInfo SECKeySizeChoiceList[] = {
+     { nsnull, 2048 },
+     { nsnull, 1024 },
+-    { nsnull, 512  },
+     { nsnull, 0 }, 
+ };
+ 
+@@ -212,9 +211,6 @@
+ 
+   nssComponent->GetPIPNSSBundleString("MediumGrade", str);
+   SECKeySizeChoiceList[1].name = ToNewUnicode(str);
+-
+-  nssComponent->GetPIPNSSBundleString("LowGrade", str);
+-  SECKeySizeChoiceList[2].name = ToNewUnicode(str);
+ 
+   return NS_OK;
+ }

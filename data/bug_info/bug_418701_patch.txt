@@ -1,0 +1,22 @@
+Index: mozilla/security/manager/ssl/src/nsIdentityChecking.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsIdentityChecking.cpp,v
+retrieving revision 1.9
+diff -u -u -r1.9 nsIdentityChecking.cpp
+--- mozilla/security/manager/ssl/src/nsIdentityChecking.cpp	22 Jan 2008 23:46:49 -0000	1.9
++++ mozilla/security/manager/ssl/src/nsIdentityChecking.cpp	21 Feb 2008 18:21:36 -0000
+@@ -80,6 +80,14 @@
+ 
+ static struct nsMyTrustedEVInfo myTrustedEVInfos[] = {
+   {
++    "1.3.6.1.4.1.8024.0.2.100.1.2",
++    "Quo Vadis EV OID",
++    SEC_OID_UNKNOWN,
++    "CN=QuoVadis Root CA 2,O=QuoVadis Limited,C=BM",
++    "CN=QuoVadis Root CA 2,O=QuoVadis Limited,C=BM",
++    "CA:3A:FB:CF:12:40:36:4B:44:B2:16:20:88:80:48:39:19:93:7C:F7"
++  },
++  {
+     "2.16.840.1.113733.1.7.23.6",
+     "Verisign EV OID",
+     SEC_OID_UNKNOWN,

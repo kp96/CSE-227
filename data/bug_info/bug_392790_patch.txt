@@ -1,0 +1,113 @@
+Index: security/manager/ssl/src/nsNSSCertificate.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSCertificate.cpp,v
+retrieving revision 1.129
+diff -u -8 -p -r1.129 nsNSSCertificate.cpp
+--- security/manager/ssl/src/nsNSSCertificate.cpp	1 Oct 2007 16:38:24 -0000	1.129
++++ security/manager/ssl/src/nsNSSCertificate.cpp	10 Oct 2007 08:19:23 -0000
+@@ -437,16 +437,54 @@ nsNSSCertificate::FormatUIStrings(const 
+       if (NS_SUCCEEDED(nssComponent->GetPIPNSSBundleString("CertDumpKeyUsage", info))) {
+         details.Append(info);
+         details.AppendLiteral(": ");
+       }
+       details.Append(temp1);
+       details.Append(PRUnichar('\n'));
+     }
+ 
++    PRUint32 num;
++    PRUnichar **emailAddr = NULL;
++    if (NS_SUCCEEDED(GetEmailAddresses(&num, &emailAddr)) && num > 0) {
++      details.AppendLiteral("  ");
++      if (NS_SUCCEEDED(nssComponent->GetPIPNSSBundleString("CertInfoEmail", info))) {
++        details.Append(info);
++        details.AppendLiteral(": ");
++      }
++      details.Append(*emailAddr);
++
++      /*
++       * If the first email address from the subject DN is also present
++       * in the subjectAltName extension, GetEmailAddresses() will return
++       * it twice (as received from NSS). Remember the first address so that
++       * we can filter out duplicates later on.
++       */
++      PRUnichar *firstEmail = *emailAddr;
++      emailAddr++;
++      num--;
++
++      /* append remaining addresses */
++      while (num > 0) {
++        if (!nsDependentString(firstEmail).Equals(nsDependentString(*emailAddr))) {
++          details.AppendLiteral(", ");
++          details.Append(*emailAddr);
++        }
++        nsMemory::Free(*emailAddr);
++        *emailAddr = nsnull;
++        emailAddr++;
++        num--;
++      }
++
++      details.Append(PRUnichar('\n'));
++      nsMemory::Free(firstEmail);
++    }
++    nsMemory::Free(emailAddr);
++    emailAddr = nsnull;
++
+     if (NS_SUCCEEDED(nssComponent->GetPIPNSSBundleString("CertInfoIssuedBy", info))) {
+       details.Append(info);
+       details.Append(PRUnichar(' '));
+ 
+       if (NS_SUCCEEDED(x509Proxy->GetIssuerName(temp1)) && !temp1.IsEmpty()) {
+         details.Append(temp1);
+       }
+ 
+@@ -458,22 +496,24 @@ nsNSSCertificate::FormatUIStrings(const 
+       details.Append(PRUnichar(' '));
+ 
+       if (NS_SUCCEEDED(x509Proxy->GetTokenName(temp1)) && !temp1.IsEmpty()) {
+         details.Append(temp1);
+       }
+     }
+ 
+     /*
+-      the above produces output the following output:
++      the above produces the following output:
+ 
+       Issued to: $subjectName
+         Serial number: $serialNumber
+         Valid from: $starting_date to $expiration_date
+         Purposes: $purposes
++        Certificate Key usage: $usages
++        Email: $address(es)
+       Issued by: $issuerName
+       Stored in: $token
+     */
+   }
+   
+   return rv;
+ }
+ 
+Index: security/manager/locales/en-US/chrome/pipnss/pipnss.properties
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/locales/en-US/chrome/pipnss/pipnss.properties,v
+retrieving revision 1.26
+diff -u -8 -p -r1.26 pipnss.properties
+--- security/manager/locales/en-US/chrome/pipnss/pipnss.properties	3 Oct 2007 11:46:09 -0000	1.26
++++ security/manager/locales/en-US/chrome/pipnss/pipnss.properties	10 Oct 2007 08:19:23 -0000
+@@ -343,16 +343,17 @@ certErrorExpired=The certificate has exp
+ certErrorNotYetValid=The certificate will not be valid until %S.
+ 
+ CertInfoIssuedFor=Issued to:
+ CertInfoIssuedBy=Issued by:
+ CertInfoValid=Valid
+ CertInfoFrom=from
+ CertInfoTo=to
+ CertInfoPurposes=Purposes
++CertInfoEmail=Email
+ CertInfoStoredIn=Stored in:
+ P12DefaultNickname=Imported Certificate
+ CrlImportFailure1x=The application cannot import the Certificate Revocation List (CRL).
+ CrlImportFailureExpired=A more recent version of this CRL is available.
+ CrlImportFailureBadSignature=CRL has an invalid Signature.
+ CrlImportFailureInvalid=New CRL has an invalid format.
+ CrlImportFailureOld=New CRL is older than the current one.
+ CrlImportFailureNotYetValid=The CRL is not yet valid. You might want to check your system clock.

@@ -1,0 +1,882 @@
+Index: mozilla/security/manager/boot/src/nsSecureBrowserUIImpl.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/boot/src/nsSecureBrowserUIImpl.cpp,v
+retrieving revision 1.73
+diff -u -u -1 -0 -p -r1.73 nsSecureBrowserUIImpl.cpp
+--- mozilla/security/manager/boot/src/nsSecureBrowserUIImpl.cpp	2 Apr 2008 06:36:17 -0000	1.73
++++ mozilla/security/manager/boot/src/nsSecureBrowserUIImpl.cpp	10 Apr 2008 08:27:41 -0000
+@@ -159,20 +159,24 @@ nsSecureBrowserUIImpl::nsSecureBrowserUI
+     mNotifiedToplevelIsEV(PR_FALSE),
+     mIsViewSource(PR_FALSE)
+ {
+   mMonitor = PR_NewMonitor();
+   mOnStateLocationChangeReentranceDetection = 0;
+   mTransferringRequests.ops = nsnull;
+   mNewToplevelSecurityState = STATE_IS_INSECURE;
+   mNewToplevelIsEV = PR_FALSE;
+   mNewToplevelSecurityStateKnown = PR_TRUE;
+   ResetStateTracking();
++  mSubRequestsHighSecurity = 0;
++  mSubRequestsLowSecurity = 0;
++  mSubRequestsBrokenSecurity = 0;
++  mSubRequestsNoSecurity = 0;
+   
+ #if defined(PR_LOGGING)
+   if (!gSecureDocLog)
+     gSecureDocLog = PR_NewLogModule("nsSecureBrowserUI");
+ #endif /* PR_LOGGING */
+ }
+ 
+ nsSecureBrowserUIImpl::~nsSecureBrowserUIImpl()
+ {
+   if (mTransferringRequests.ops) {
+@@ -352,45 +356,42 @@ static nsresult IsChildOfDomWindow(nsIDO
+   
+   nsCOMPtr<nsIDOMWindow> childsParent;
+   child->GetParent(getter_AddRefs(childsParent));
+   
+   if (childsParent && childsParent.get() != child)
+     IsChildOfDomWindow(parent, childsParent, value);
+   
+   return NS_OK;
+ }
+ 
+-static PRUint32 GetSecurityStateFromChannel(nsIChannel* aChannel)
++static PRUint32 GetSecurityStateFromSecurityInfo(nsISupports *info)
+ {
+   nsresult res;
+   PRUint32 securityState;
+ 
+-  // qi for the psm information about this channel load.
+-  nsCOMPtr<nsISupports> info;
+-  aChannel->GetSecurityInfo(getter_AddRefs(info));
+   nsCOMPtr<nsITransportSecurityInfo> psmInfo(do_QueryInterface(info));
+   if (!psmInfo) {
+-    PR_LOG(gSecureDocLog, PR_LOG_DEBUG, ("SecureUI: GetSecurityState:%p - no nsITransportSecurityInfo for %p\n",
+-                                         aChannel, (nsISupports *)info));
++    PR_LOG(gSecureDocLog, PR_LOG_DEBUG, ("SecureUI: GetSecurityState: - no nsITransportSecurityInfo for %p\n",
++                                         (nsISupports *)info));
+     return nsIWebProgressListener::STATE_IS_INSECURE;
+   }
+-  PR_LOG(gSecureDocLog, PR_LOG_DEBUG, ("SecureUI: GetSecurityState:%p - info is %p\n", aChannel,
++  PR_LOG(gSecureDocLog, PR_LOG_DEBUG, ("SecureUI: GetSecurityState: - info is %p\n", 
+                                        (nsISupports *)info));
+   
+   res = psmInfo->GetSecurityState(&securityState);
+   if (NS_FAILED(res)) {
+-    PR_LOG(gSecureDocLog, PR_LOG_DEBUG, ("SecureUI: GetSecurityState:%p - GetSecurityState failed: %d\n",
+-                                         aChannel, res));
++    PR_LOG(gSecureDocLog, PR_LOG_DEBUG, ("SecureUI: GetSecurityState: - GetSecurityState failed: %d\n",
++                                         res));
+     securityState = nsIWebProgressListener::STATE_IS_BROKEN;
+   }
+   
+-  PR_LOG(gSecureDocLog, PR_LOG_DEBUG, ("SecureUI: GetSecurityState:%p - Returning %d\n", aChannel,
++  PR_LOG(gSecureDocLog, PR_LOG_DEBUG, ("SecureUI: GetSecurityState: - Returning %d\n", 
+                                        securityState));
+   return securityState;
+ }
+ 
+ 
+ NS_IMETHODIMP
+ nsSecureBrowserUIImpl::Notify(nsIDOMHTMLFormElement* aDOMForm,
+                               nsIDOMWindowInternal* aWindow, nsIURI* actionURL,
+                               PRBool* cancelSubmit)
+ {
+@@ -464,60 +465,50 @@ nsSecureBrowserUIImpl::OnProgressChange(
+   NS_NOTREACHED("notification excluded in AddProgressListener(...)");
+   return NS_OK;
+ }
+ 
+ void nsSecureBrowserUIImpl::ResetStateTracking()
+ {
+   nsAutoMonitor lock(mMonitor);
+ 
+   mInfoTooltip.Truncate();
+   mDocumentRequestsInProgress = 0;
+-  mSubRequestsHighSecurity = 0;
+-  mSubRequestsLowSecurity = 0;
+-  mSubRequestsBrokenSecurity = 0;
+-  mSubRequestsNoSecurity = 0;
+   if (mTransferringRequests.ops) {
+     PL_DHashTableFinish(&mTransferringRequests);
+     mTransferringRequests.ops = nsnull;
+   }
+   PL_DHashTableInit(&mTransferringRequests, &gMapOps, nsnull,
+                     sizeof(RequestHashEntry), 16);
+ }
+ 
+ nsresult
+-nsSecureBrowserUIImpl::EvaluateAndUpdateSecurityState(nsIRequest *aRequest)
++nsSecureBrowserUIImpl::EvaluateAndUpdateSecurityState(nsIRequest* aRequest, nsISupports *info)
+ {
+-  nsCOMPtr<nsIChannel> channel(do_QueryInterface(aRequest));
+-
+   /* I explicitly ignore the camelCase variable naming style here,
+      I want to make it clear these are temp variables that relate to the 
+      member variables with the same suffix.*/
+ 
+   PRUint32 temp_NewToplevelSecurityState = nsIWebProgressListener::STATE_IS_INSECURE;
+   PRBool temp_NewToplevelIsEV = PR_FALSE;
+ 
+   PRBool updateStatus = PR_FALSE;
+   nsCOMPtr<nsISupports> temp_SSLStatus;
+ 
+   PRBool updateTooltip = PR_FALSE;
+   nsXPIDLString temp_InfoTooltip;
+ 
+-  if (channel) {
+-    temp_NewToplevelSecurityState = GetSecurityStateFromChannel(channel);
++    temp_NewToplevelSecurityState = GetSecurityStateFromSecurityInfo(info);
+ 
+     PR_LOG(gSecureDocLog, PR_LOG_DEBUG,
+            ("SecureUI:%p: OnStateChange: remember mNewToplevelSecurityState => %x\n", this,
+             temp_NewToplevelSecurityState));
+ 
+-    // Get SSL Status information if possible
+-    nsCOMPtr<nsISupports> info;
+-    channel->GetSecurityInfo(getter_AddRefs(info));
+     nsCOMPtr<nsISSLStatusProvider> sp = do_QueryInterface(info);
+     if (sp) {
+       // Ignore result
+       updateStatus = PR_TRUE;
+       sp->GetSSLStatus(getter_AddRefs(temp_SSLStatus));
+     }
+ 
+     if (info) {
+       nsCOMPtr<nsITransportSecurityInfo> secInfo(do_QueryInterface(info));
+       if (secInfo) {
+@@ -526,52 +517,50 @@ nsSecureBrowserUIImpl::EvaluateAndUpdate
+       }
+ 
+       nsCOMPtr<nsIIdentityInfo> idinfo = do_QueryInterface(info);
+       if (idinfo) {
+         PRBool aTemp;
+         if (NS_SUCCEEDED(idinfo->GetIsExtendedValidation(&aTemp))) {
+           temp_NewToplevelIsEV = aTemp;
+         }
+       }
+     }
+-  }
+ 
+   // assume temp_NewToplevelSecurityState was set in this scope!
+   // see code that is directly above
+ 
+   {
+     nsAutoMonitor lock(mMonitor);
+     mNewToplevelSecurityStateKnown = PR_TRUE;
+     mNewToplevelSecurityState = temp_NewToplevelSecurityState;
+     mNewToplevelIsEV = temp_NewToplevelIsEV;
+     if (updateStatus) {
+       mSSLStatus = temp_SSLStatus;
+     }
+     if (updateTooltip) {
+       mInfoTooltip = temp_InfoTooltip;
+     }
++    PR_LOG(gSecureDocLog, PR_LOG_DEBUG,
++           ("SecureUI:%p: remember securityInfo %p\n", this,
++            info));
++    mCurrentToplevelSecurityInfo = info;
+   }
+ 
+   return UpdateSecurityState(aRequest);
+ }
+ 
+ void
+-nsSecureBrowserUIImpl::UpdateSubrequestMembers(nsIRequest *aRequest)
++nsSecureBrowserUIImpl::UpdateSubrequestMembers(nsISupports *securityInfo)
+ {
+   // For wyciwyg channels in subdocuments we only update our
+   // subrequest state members.
+-  PRUint32 reqState = nsIWebProgressListener::STATE_IS_INSECURE;
+-  nsCOMPtr<nsIChannel> channel(do_QueryInterface(aRequest));
+-
+-  if (channel) {
+-    reqState = GetSecurityStateFromChannel(channel);
+-  }
++  PRUint32 reqState = GetSecurityStateFromSecurityInfo(securityInfo);
+ 
+   // the code above this line should run without a lock
+   nsAutoMonitor lock(mMonitor);
+ 
+   if (reqState & STATE_IS_SECURE) {
+     if (reqState & STATE_SECURE_LOW || reqState & STATE_SECURE_MED) {
+       PR_LOG(gSecureDocLog, PR_LOG_DEBUG,
+              ("SecureUI:%p: OnStateChange: subreq LOW\n", this));
+       ++mSubRequestsLowSecurity;
+     } else {
+@@ -742,24 +731,27 @@ nsSecureBrowserUIImpl::OnStateChange(nsI
+ #ifdef PR_LOGGING
+   if (PR_LOG_TEST(gSecureDocLog, PR_LOG_DEBUG)) {
+     nsXPIDLCString reqname;
+     aRequest->GetName(reqname);
+     PR_LOG(gSecureDocLog, PR_LOG_DEBUG,
+            ("SecureUI:%p: %p %p OnStateChange %x %s\n", this, aWebProgress,
+             aRequest, aProgressStateFlags, reqname.get()));
+   }
+ #endif
+ 
++  nsCOMPtr<nsISupports> securityInfo;
+   nsCOMPtr<nsIChannel> channel(do_QueryInterface(aRequest));
+ 
+   if (channel)
+   {
++    channel->GetSecurityInfo(getter_AddRefs(securityInfo));
++
+     nsCOMPtr<nsIURI> uri;
+     channel->GetURI(getter_AddRefs(uri));
+     if (uri)
+     {
+       PRBool vs;
+       if (NS_SUCCEEDED(uri->SchemeIs("javascript", &vs)) && vs)
+       {
+         // We ignore the progress events for javascript URLs.
+         // If a document loading gets triggered, we will see more events.
+         return NS_OK;
+@@ -907,37 +899,42 @@ nsSecureBrowserUIImpl::OnStateChange(nsI
+   if (f & nsIWebProgressListener::STATE_SECURE_MED)
+   {
+     f -= nsIWebProgressListener::STATE_SECURE_MED;
+     info.Append("SECURE_MED ");
+   }
+   if (f & nsIWebProgressListener::STATE_SECURE_LOW)
+   {
+     f -= nsIWebProgressListener::STATE_SECURE_LOW;
+     info.Append("SECURE_LOW ");
+   }
++  if (f & nsIWebProgressListener::STATE_RESTORING)
++  {
++    f -= nsIWebProgressListener::STATE_RESTORING;
++    info.Append("STATE_RESTORING ");
++  }
+ 
+   if (f > 0)
+   {
+     info.Append("f contains unknown flag!");
+   }
+ 
+   PR_LOG(gSecureDocLog, PR_LOG_DEBUG,
+          ("SecureUI:%p: OnStateChange: %s %s -- %s\n", this, _status, 
+           info.get(), info2.get()));
+ 
+   if (aProgressStateFlags & STATE_STOP
+       &&
+       channel)
+   {
+     PR_LOG(gSecureDocLog, PR_LOG_DEBUG,
+            ("SecureUI:%p: OnStateChange: seeing STOP with security state: %d\n", this,
+-            GetSecurityStateFromChannel(channel)
++            GetSecurityStateFromSecurityInfo(securityInfo)
+             ));
+   }
+ #endif
+ 
+   if (aProgressStateFlags & STATE_TRANSFERRING
+       &&
+       aProgressStateFlags & STATE_IS_REQUEST)
+   {
+     // The listing of a request in mTransferringRequests
+     // means, there has already been data transfered.
+@@ -973,41 +970,113 @@ nsSecureBrowserUIImpl::OnStateChange(nsI
+   }
+ 
+   if (aProgressStateFlags & STATE_START
+       &&
+       aProgressStateFlags & STATE_IS_REQUEST
+       &&
+       isToplevelProgress
+       &&
+       loadFlags & nsIChannel::LOAD_DOCUMENT_URI)
+   {
+-    nsAutoMonitor lock(mMonitor);
+-    if (!mDocumentRequestsInProgress)
++    PRBool inProgress;
++
++    PRInt32 saveSubHigh;
++    PRInt32 saveSubLow;
++    PRInt32 saveSubBroken;
++    PRInt32 saveSubNo;
++    nsCOMPtr<nsIAssociatedContentSecurity> prevContentSecurity;
++
++    PRInt32 newSubHigh = 0;
++    PRInt32 newSubLow = 0;
++    PRInt32 newSubBroken = 0;
++    PRInt32 newSubNo = 0;
++
++    {
++      nsAutoMonitor lock(mMonitor);
++      inProgress = (mDocumentRequestsInProgress!=0);
++
++      if (!inProgress)
++      {
++        saveSubHigh = mSubRequestsHighSecurity;
++        saveSubLow = mSubRequestsLowSecurity;
++        saveSubBroken = mSubRequestsBrokenSecurity;
++        saveSubNo = mSubRequestsNoSecurity;
++        prevContentSecurity = do_QueryInterface(mCurrentToplevelSecurityInfo);
++      }
++    }
++
++    if (!inProgress)
+     {
+       PR_LOG(gSecureDocLog, PR_LOG_DEBUG,
+              ("SecureUI:%p: OnStateChange: start for toplevel document\n", this
+               ));
+ 
+-      ResetStateTracking();
+-      mNewToplevelSecurityStateKnown = PR_FALSE;
++      if (prevContentSecurity)
++      {
++        PR_LOG(gSecureDocLog, PR_LOG_DEBUG,
++               ("SecureUI:%p: OnStateChange: start, saving current sub state\n", this
++                ));
++  
++        // before resetting our state, let's save information about
++        // sub element loads, so we can restore it later
++        prevContentSecurity->SetSubRequestsHighSecurity(saveSubHigh);
++        prevContentSecurity->SetSubRequestsLowSecurity(saveSubLow);
++        prevContentSecurity->SetSubRequestsBrokenSecurity(saveSubBroken);
++        prevContentSecurity->SetSubRequestsNoSecurity(saveSubNo);
++      }
++  
++      if (securityInfo &&
++          (aProgressStateFlags & nsIWebProgressListener::STATE_RESTORING) != 0)
++      {
++        // When restoring from bfcache, we will not get events for the 
++        // page's sub elements, so let's load the state of sub elements
++        // from the cache.
++    
++        nsCOMPtr<nsIAssociatedContentSecurity> 
++          newContentSecurity(do_QueryInterface(securityInfo));
++    
++        if (newContentSecurity)
++        {
++          PR_LOG(gSecureDocLog, PR_LOG_DEBUG,
++                 ("SecureUI:%p: OnStateChange: start, loading old sub state\n", this
++                  ));
++    
++          newContentSecurity->GetSubRequestsHighSecurity(&newSubHigh);
++          newContentSecurity->GetSubRequestsLowSecurity(&newSubLow);
++          newContentSecurity->GetSubRequestsBrokenSecurity(&newSubBroken);
++          newContentSecurity->GetSubRequestsNoSecurity(&newSubNo);
++        }
++      }
+     }
+ 
+-    // By using a counter, this code also works when the toplevel
+-    // document get's redirected, but the STOP request for the 
+-    // previous toplevel document has not yet have been received.
++    {
++      nsAutoMonitor lock(mMonitor);
+ 
+-    PR_LOG(gSecureDocLog, PR_LOG_DEBUG,
+-           ("SecureUI:%p: OnStateChange: ++mDocumentRequestsInProgress\n", this
+-            ));
++      if (!inProgress)
++      {
++        ResetStateTracking();
++        mSubRequestsHighSecurity = newSubHigh;
++        mSubRequestsLowSecurity = newSubLow;
++        mSubRequestsBrokenSecurity = newSubBroken;
++        mSubRequestsNoSecurity = newSubNo;
++        mNewToplevelSecurityStateKnown = PR_FALSE;
++      }
++
++      // By using a counter, this code also works when the toplevel
++      // document get's redirected, but the STOP request for the 
++      // previous toplevel document has not yet have been received.
++      PR_LOG(gSecureDocLog, PR_LOG_DEBUG,
++             ("SecureUI:%p: OnStateChange: ++mDocumentRequestsInProgress\n", this
++              ));
++      ++mDocumentRequestsInProgress;
++    }
+ 
+-    ++mDocumentRequestsInProgress;
+-    
+     return NS_OK;
+   }
+ 
+   if (aProgressStateFlags & STATE_STOP
+       &&
+       aProgressStateFlags & STATE_IS_REQUEST
+       &&
+       isToplevelProgress
+       &&
+       loadFlags & nsIChannel::LOAD_DOCUMENT_URI)
+@@ -1040,40 +1109,40 @@ nsSecureBrowserUIImpl::OnStateChange(nsI
+     {
+       nsAutoMonitor lock(mMonitor);
+       mToplevelEventSink = temp_ToplevelEventSink;
+       --mDocumentRequestsInProgress;
+     }
+ 
+     if (requestHasTransferedData) {
+       // Data has been transferred for the single toplevel
+       // request. Evaluate the security state.
+ 
+-      return EvaluateAndUpdateSecurityState(aRequest);
++      return EvaluateAndUpdateSecurityState(aRequest, securityInfo);
+     }
+     
+     return NS_OK;
+   }
+   
+   if (aProgressStateFlags & STATE_STOP
+       &&
+       aProgressStateFlags & STATE_IS_REQUEST)
+   {
+     if (!isSubDocumentRelevant)
+       return NS_OK;
+     
+     // if we arrive here, LOAD_DOCUMENT_URI is not set
+     
+     // We only care for the security state of sub requests which have actually transfered data.
+ 
+     if (requestHasTransferedData)
+     {  
+-      UpdateSubrequestMembers(aRequest);
++      UpdateSubrequestMembers(securityInfo);
+       
+       // Care for the following scenario:
+       // A new top level document load might have already started,
+       // but the security state of the new top level document might not yet been known.
+       // 
+       // At this point, we are learning about the security state of a sub-document.
+       // We must not update the security state based on the sub content,
+       // if the new top level state is not yet known.
+       //
+       // We skip updating the security state in this case.
+@@ -1315,20 +1384,23 @@ nsresult nsSecureBrowserUIImpl::TellTheW
+ 
+ NS_IMETHODIMP
+ nsSecureBrowserUIImpl::OnLocationChange(nsIWebProgress* aWebProgress,
+                                         nsIRequest* aRequest,
+                                         nsIURI* aLocation)
+ {
+   nsAutoAtomic atomic(mOnStateLocationChangeReentranceDetection);
+   NS_ASSERTION(mOnStateLocationChangeReentranceDetection == 1,
+                "unexpected parallel nsIWebProgress OnStateChange and/or OnLocationChange notification");
+ 
++  PR_LOG(gSecureDocLog, PR_LOG_DEBUG,
++         ("SecureUI:%p: OnLocationChange\n", this));
++
+   PRBool updateIsViewSource = PR_FALSE;
+   PRBool temp_IsViewSource = PR_FALSE;
+   nsCOMPtr<nsIDOMWindow> window;
+ 
+   if (aLocation)
+   {
+     PRBool vs;
+ 
+     nsresult rv = aLocation->SchemeIs("view-source", &vs);
+     NS_ENSURE_SUCCESS(rv, rv);
+@@ -1361,27 +1433,32 @@ nsSecureBrowserUIImpl::OnLocationChange(
+   // only concern with doing this here is that a page may transition from being
+   // reported as completely secure to being reported as partially secure
+   // (mixed).  This may be confusing for users, and it may bother users who
+   // like seeing security dialogs.  However, it seems prudent given that page
+   // loading may never end in some edge cases (perhaps by a site with malicious
+   // intent).
+ 
+   nsCOMPtr<nsIDOMWindow> windowForProgress;
+   aWebProgress->GetDOMWindow(getter_AddRefs(windowForProgress));
+ 
++  nsCOMPtr<nsISupports> securityInfo;
++  nsCOMPtr<nsIChannel> channel(do_QueryInterface(aRequest));
++  if (channel)
++    channel->GetSecurityInfo(getter_AddRefs(securityInfo));
++
+   if (windowForProgress.get() == window.get()) {
+     // For toplevel channels, update the security state right away.
+-    return EvaluateAndUpdateSecurityState(aRequest);
++    return EvaluateAndUpdateSecurityState(aRequest, securityInfo);
+   }
+ 
+   // For channels in subdocuments we only update our subrequest state members.
+-  UpdateSubrequestMembers(aRequest);
++  UpdateSubrequestMembers(securityInfo);
+ 
+   // Care for the following scenario:
+ 
+   // A new toplevel document load might have already started, but the security
+   // state of the new toplevel document might not yet be known.
+   // 
+   // At this point, we are learning about the security state of a sub-document.
+   // We must not update the security state based on the sub content, if the new
+   // top level state is not yet known.
+   //
+Index: mozilla/security/manager/boot/src/nsSecureBrowserUIImpl.h
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/boot/src/nsSecureBrowserUIImpl.h,v
+retrieving revision 1.25
+diff -u -u -1 -0 -p -r1.25 nsSecureBrowserUIImpl.h
+--- mozilla/security/manager/boot/src/nsSecureBrowserUIImpl.h	26 Mar 2008 03:06:52 -0000	1.25
++++ mozilla/security/manager/boot/src/nsSecureBrowserUIImpl.h	10 Apr 2008 08:27:41 -0000
+@@ -51,20 +51,21 @@
+ #include "nsIDOMHTMLFormElement.h"
+ #include "nsIStringBundle.h"
+ #include "nsISecureBrowserUI.h"
+ #include "nsIDocShell.h"
+ #include "nsIWebProgressListener.h"
+ #include "nsIFormSubmitObserver.h"
+ #include "nsIURI.h"
+ #include "nsISecurityEventSink.h"
+ #include "nsWeakReference.h"
+ #include "nsISSLStatusProvider.h"
++#include "nsIAssociatedContentSecurity.h"
+ #include "pldhash.h"
+ #include "prmon.h"
+ 
+ class nsITransportSecurityInfo;
+ class nsISecurityWarningDialogs;
+ class nsIChannel;
+ 
+ #define NS_SECURE_BROWSER_UI_CID \
+ { 0xcc75499a, 0x1dd1, 0x11b2, {0x8a, 0x82, 0xca, 0x41, 0x0a, 0xc9, 0x07, 0xb8}}
+ 
+@@ -126,27 +127,28 @@ protected:
+   PRInt32 mSubRequestsBrokenSecurity;
+   PRInt32 mSubRequestsNoSecurity;
+ 
+   static nsresult MapInternalToExternalState(PRUint32* aState, lockIconState lock, PRBool ev);
+   nsresult UpdateSecurityState(nsIRequest* aRequest);
+   void UpdateMyFlags(PRBool &showWarning, lockIconState &warnSecurityState);
+   nsresult TellTheWorld(PRBool &showWarning, 
+                         lockIconState &warnSecurityState, 
+                         nsIRequest* aRequest);
+ 
+-  nsresult EvaluateAndUpdateSecurityState(nsIRequest *aRequest);
+-  void UpdateSubrequestMembers(nsIRequest *aRequest);
++  nsresult EvaluateAndUpdateSecurityState(nsIRequest* aRequest, nsISupports *info);
++  void UpdateSubrequestMembers(nsISupports *securityInfo);
+ 
+   void ObtainEventSink(nsIChannel *channel, 
+                        nsCOMPtr<nsISecurityEventSink> &sink);
+-  
++
+   nsCOMPtr<nsISupports> mSSLStatus;
++  nsCOMPtr<nsISupports> mCurrentToplevelSecurityInfo;
+ 
+   void GetBundleString(const PRUnichar* name, nsAString &outString);
+   
+   nsresult CheckPost(nsIURI *formURI, nsIURI *actionURL, PRBool *okayToPost);
+   nsresult IsURLHTTPS(nsIURI* aURL, PRBool *value);
+   nsresult IsURLJavaScript(nsIURI* aURL, PRBool *value);
+ 
+   PRBool ConfirmEnteringSecure();
+   PRBool ConfirmEnteringWeak();
+   PRBool ConfirmLeavingSecure();
+Index: mozilla/security/manager/ssl/public/Makefile.in
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/public/Makefile.in,v
+retrieving revision 1.40
+diff -u -u -1 -0 -p -r1.40 Makefile.in
+--- mozilla/security/manager/ssl/public/Makefile.in	5 Mar 2008 22:08:22 -0000	1.40
++++ mozilla/security/manager/ssl/public/Makefile.in	10 Apr 2008 08:27:41 -0000
+@@ -55,20 +55,21 @@ SDK_XPIDLSRCS = \
+     nsICRLInfo.idl \
+     nsIX509Cert.idl \
+     nsIX509CertDB.idl \
+     nsIX509CertValidity.idl \
+     $(NULL)
+ 
+ XPIDLSRCS = \
+     nsIBadCertListener2.idl \
+     nsISSLErrorListener.idl \
+     nsIIdentityInfo.idl \
++    nsIAssociatedContentSecurity.idl \
+     nsICertOverrideService.idl \
+     nsIRecentBadCertsService.idl \
+     nsIFormSigningDialog.idl \
+     nsIX509Cert2.idl \
+     nsIX509Cert3.idl \
+     nsIX509CertDB2.idl \
+     nsIX509CertList.idl \
+     nsIPKCS11Slot.idl \
+     nsIPK11TokenDB.idl \
+     nsICertPickDialogs.idl \
+Index: mozilla/security/manager/ssl/public/nsIAssociatedContentSecurity.idl
+===================================================================
+RCS file: mozilla/security/manager/ssl/public/nsIAssociatedContentSecurity.idl
+diff -N mozilla/security/manager/ssl/public/nsIAssociatedContentSecurity.idl
+--- /dev/null	1 Jan 1970 00:00:00 -0000
++++ mozilla/security/manager/ssl/public/nsIAssociatedContentSecurity.idl	10 Apr 2008 08:27:41 -0000
+@@ -0,0 +1,56 @@
++/* ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is mozilla.org code.
++ *
++ * The Initial Developer of the Original Code is Google Inc.
++ * Portions created by the Initial Developer are Copyright (C) 2006
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *   Honza Bambas <honzab@allpeers.com>
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either the GNU General Public License Version 2 or later (the "GPL"), or
++ * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++/**
++ * This interface is used to cache associated (sub) content security
++ * state. That is determined asynchronously based on callback notification
++ * while loading the content and its sub content particles. 
++ *
++ * Some optimizations like bfcaching removes these callback notifications
++ * and therefor the subcontent state could not be determined. In such
++ * a case it is loaded from this object stored in nsIChannel.securityInfo.
++ */
++
++#include "nsISupports.idl"
++
++[scriptable, uuid(8DB92DDE-799F-4d33-80F7-459CAC800DC9)]
++interface nsIAssociatedContentSecurity : nsISupports
++{
++  attribute long subRequestsHighSecurity;
++  attribute long subRequestsLowSecurity;
++  attribute long subRequestsBrokenSecurity;
++  attribute long subRequestsNoSecurity;
++};
+Index: mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp,v
+retrieving revision 1.157
+diff -u -u -1 -0 -p -r1.157 nsNSSIOLayer.cpp
+--- mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp	5 Apr 2008 00:02:31 -0000	1.157
++++ mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp	10 Apr 2008 08:27:41 -0000
+@@ -197,20 +197,24 @@ PRBool nsSSLSocketThreadData::ensure_buf
+     mSSLDataBufferAllocatedSize = amount;
+   }
+   
+   return PR_TRUE;
+ }
+ 
+ nsNSSSocketInfo::nsNSSSocketInfo()
+   : mFd(nsnull),
+     mBlockingState(blocking_state_unknown),
+     mSecurityState(nsIWebProgressListener::STATE_IS_INSECURE),
++    mSubRequestsHighSecurity(0),
++    mSubRequestsLowSecurity(0),
++    mSubRequestsBrokenSecurity(0),
++    mSubRequestsNoSecurity(0),
+     mExternalErrorReporting(PR_FALSE),
+     mForSTARTTLS(PR_FALSE),
+     mHandshakePending(PR_TRUE),
+     mCanceled(PR_FALSE),
+     mHasCleartextPhase(PR_FALSE),
+     mHandshakeInProgress(PR_FALSE),
+     mAllowTLSIntoleranceTimeout(PR_TRUE),
+     mHandshakeStartTime(0),
+     mPort(0)
+ {
+@@ -225,26 +229,27 @@ nsNSSSocketInfo::~nsNSSSocketInfo()
+   if (isAlreadyShutDown())
+     return;
+ 
+   shutdown(calledFromObject);
+ }
+ 
+ void nsNSSSocketInfo::virtualDestroyNSSReference()
+ {
+ }
+ 
+-NS_IMPL_THREADSAFE_ISUPPORTS7(nsNSSSocketInfo,
++NS_IMPL_THREADSAFE_ISUPPORTS8(nsNSSSocketInfo,
+                               nsITransportSecurityInfo,
+                               nsISSLSocketControl,
+                               nsIInterfaceRequestor,
+                               nsISSLStatusProvider,
+                               nsIIdentityInfo,
++                              nsIAssociatedContentSecurity,
+                               nsISerializable,
+                               nsIClassInfo)
+ 
+ nsresult
+ nsNSSSocketInfo::GetHandshakePending(PRBool *aHandshakePending)
+ {
+   *aHandshakePending = mHandshakePending;
+   return NS_OK;
+ }
+ 
+@@ -413,20 +418,68 @@ nsNSSSocketInfo::GetSecurityState(PRUint
+   return NS_OK;
+ }
+ 
+ nsresult
+ nsNSSSocketInfo::SetSecurityState(PRUint32 aState)
+ {
+   mSecurityState = aState;
+   return NS_OK;
+ }
+ 
++/* attribute unsigned long subRequestsHighSecurity; */
++NS_IMETHODIMP nsNSSSocketInfo::GetSubRequestsHighSecurity(PRInt32 *aSubRequestsHighSecurity)
++{
++  *aSubRequestsHighSecurity = mSubRequestsHighSecurity;
++  return NS_OK;
++}
++NS_IMETHODIMP nsNSSSocketInfo::SetSubRequestsHighSecurity(PRInt32 aSubRequestsHighSecurity)
++{
++  mSubRequestsHighSecurity = aSubRequestsHighSecurity;
++  return NS_ERROR_NOT_IMPLEMENTED;
++}
++
++/* attribute unsigned long subRequestsLowSecurity; */
++NS_IMETHODIMP nsNSSSocketInfo::GetSubRequestsLowSecurity(PRInt32 *aSubRequestsLowSecurity)
++{
++  *aSubRequestsLowSecurity = mSubRequestsLowSecurity;
++  return NS_OK;
++}
++NS_IMETHODIMP nsNSSSocketInfo::SetSubRequestsLowSecurity(PRInt32 aSubRequestsLowSecurity)
++{
++  mSubRequestsLowSecurity = aSubRequestsLowSecurity;
++  return NS_OK;
++}
++
++/* attribute unsigned long subRequestsBrokenSecurity; */
++NS_IMETHODIMP nsNSSSocketInfo::GetSubRequestsBrokenSecurity(PRInt32 *aSubRequestsBrokenSecurity)
++{
++  *aSubRequestsBrokenSecurity = mSubRequestsBrokenSecurity;
++  return NS_OK;
++}
++NS_IMETHODIMP nsNSSSocketInfo::SetSubRequestsBrokenSecurity(PRInt32 aSubRequestsBrokenSecurity)
++{
++  mSubRequestsBrokenSecurity = aSubRequestsBrokenSecurity;
++  return NS_OK;
++}
++
++/* attribute unsigned long subRequestsNoSecurity; */
++NS_IMETHODIMP nsNSSSocketInfo::GetSubRequestsNoSecurity(PRInt32 *aSubRequestsNoSecurity)
++{
++  *aSubRequestsNoSecurity = mSubRequestsNoSecurity;
++  return NS_OK;
++}
++NS_IMETHODIMP nsNSSSocketInfo::SetSubRequestsNoSecurity(PRInt32 aSubRequestsNoSecurity)
++{
++  mSubRequestsNoSecurity = aSubRequestsNoSecurity;
++  return NS_OK;
++}
++
+ NS_IMETHODIMP
+ nsNSSSocketInfo::GetShortSecurityDescription(PRUnichar** aText) {
+   if (mShortDesc.IsEmpty())
+     *aText = nsnull;
+   else {
+     *aText = ToNewUnicode(mShortDesc);
+     NS_ENSURE_TRUE(*aText, NS_ERROR_OUT_OF_MEMORY);
+   }
+   return NS_OK;
+ }
+Index: mozilla/security/manager/ssl/src/nsNSSIOLayer.h
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSIOLayer.h,v
+retrieving revision 1.43
+diff -u -u -1 -0 -p -r1.43 nsNSSIOLayer.h
+--- mozilla/security/manager/ssl/src/nsNSSIOLayer.h	26 Mar 2008 03:06:56 -0000	1.43
++++ mozilla/security/manager/ssl/src/nsNSSIOLayer.h	10 Apr 2008 08:27:41 -0000
+@@ -45,20 +45,21 @@
+ #include "prio.h"
+ #include "certt.h"
+ #include "nsString.h"
+ #include "nsIInterfaceRequestor.h"
+ #include "nsIInterfaceRequestorUtils.h"
+ #include "nsITransportSecurityInfo.h"
+ #include "nsISSLSocketControl.h"
+ #include "nsSSLStatus.h"
+ #include "nsISSLStatusProvider.h"
+ #include "nsIIdentityInfo.h"
++#include "nsIAssociatedContentSecurity.h"
+ #include "nsXPIDLString.h"
+ #include "nsNSSShutDown.h"
+ #include "nsAutoPtr.h"
+ #include "nsNSSCertificate.h"
+ 
+ class nsIChannel;
+ class nsSSLThread;
+ 
+ /*
+  * This class is used to store SSL socket I/O state information,
+@@ -121,35 +122,37 @@ public:
+   PRBool mOneBytePendingFromEarlierWrite;
+   unsigned char mThePendingByte;
+   PRInt32 mOriginalRequestedTransferAmount;
+ };
+ 
+ class nsNSSSocketInfo : public nsITransportSecurityInfo,
+                         public nsISSLSocketControl,
+                         public nsIInterfaceRequestor,
+                         public nsISSLStatusProvider,
+                         public nsIIdentityInfo,
++                        public nsIAssociatedContentSecurity,
+                         public nsISerializable,
+                         public nsIClassInfo,
+                         public nsNSSShutDownObject,
+                         public nsOnPK11LogoutCancelObject
+ {
+ public:
+   nsNSSSocketInfo();
+   virtual ~nsNSSSocketInfo();
+   
+   NS_DECL_ISUPPORTS
+   NS_DECL_NSITRANSPORTSECURITYINFO
+   NS_DECL_NSISSLSOCKETCONTROL
+   NS_DECL_NSIINTERFACEREQUESTOR
+   NS_DECL_NSISSLSTATUSPROVIDER
+   NS_DECL_NSIIDENTITYINFO
++  NS_DECL_NSIASSOCIATEDCONTENTSECURITY
+   NS_DECL_NSISERIALIZABLE
+   NS_DECL_NSICLASSINFO
+ 
+   nsresult SetSecurityState(PRUint32 aState);
+   nsresult SetShortSecurityDescription(const PRUnichar *aText);
+   nsresult SetErrorMessage(const PRUnichar *aText);
+ 
+   nsresult SetForSTARTTLS(PRBool aForSTARTTLS);
+   nsresult GetForSTARTTLS(PRBool *aForSTARTTLS);
+ 
+@@ -196,20 +199,24 @@ public:
+   
+ protected:
+   nsCOMPtr<nsIInterfaceRequestor> mCallbacks;
+   PRFileDesc* mFd;
+   nsCOMPtr<nsIX509Cert> mCert;
+   nsCOMPtr<nsIX509Cert> mPreviousCert;
+   enum { 
+     blocking_state_unknown, is_nonblocking_socket, is_blocking_socket 
+   } mBlockingState;
+   PRUint32 mSecurityState;
++  PRInt32 mSubRequestsHighSecurity;
++  PRInt32 mSubRequestsLowSecurity;
++  PRInt32 mSubRequestsBrokenSecurity;
++  PRInt32 mSubRequestsNoSecurity;
+   nsString mShortDesc;
+   nsString mErrorMessage;
+   PRPackedBool mExternalErrorReporting;
+   PRPackedBool mForSTARTTLS;
+   PRPackedBool mHandshakePending;
+   PRPackedBool mCanceled;
+   PRPackedBool mHasCleartextPhase;
+   PRPackedBool mHandshakeInProgress;
+   PRPackedBool mAllowTLSIntoleranceTimeout;
+   PRIntervalTime mHandshakeStartTime;

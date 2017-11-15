@@ -1,0 +1,180 @@
+Index: modules/oji/src/nsCSecurityContext.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/modules/oji/src/nsCSecurityContext.cpp,v
+retrieving revision 1.27
+diff -p -u -d -8 -r1.27 nsCSecurityContext.cpp
+--- modules/oji/src/nsCSecurityContext.cpp	24 Jul 2003 05:15:13 -0000	1.27
++++ modules/oji/src/nsCSecurityContext.cpp	26 Jul 2003 04:44:26 -0000
+@@ -48,22 +48,20 @@
+ #include "jscntxt.h"
+ #include "jsdbgapi.h"
+ #include "nsCSecurityContext.h"
+ #include "nsIScriptContext.h"
+ #include "jvmmgr.h"
+ 
+ // For GetOrigin()
+ 
+-#include "nsCOMPtr.h"
+ #include "nsIScriptSecurityManager.h"
+ #include "nsIScriptGlobalObject.h"
+ #include "nsIServiceManager.h"
+ #include "nsIScriptObjectPrincipal.h"
+-#include "nsIPrincipal.h"
+ #include "nsCRT.h"
+ 
+ #include "nsTraceRefcnt.h"
+ 
+ static NS_DEFINE_IID(kISecurityContextIID, NS_ISECURITYCONTEXT_IID);
+ static NS_DEFINE_IID(kISupportsIID, NS_ISUPPORTS_IID);
+ 
+ 
+@@ -119,62 +117,34 @@ nsCSecurityContext::GetOrigin(char* buf,
+ {
+     // Get the Script Security Manager.
+ 
+     nsresult rv      = NS_OK;
+     nsCOMPtr<nsIScriptSecurityManager> secMan = 
+              do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID, &rv);
+     if (NS_FAILED(rv) || !secMan) return NS_ERROR_FAILURE;
+ 
+-
+-    // First, try to get the principal from the security manager.
+-    // Next, try to get it from the dom.
+-    // If neither of those work, the qi for codebase will fail.
+-
+     if (!m_pPrincipal) {
+-        if (NS_FAILED(secMan->GetSubjectPrincipal(&m_pPrincipal))) 
+-        // return NS_ERROR_FAILURE;
+-        ; // Don't return here because the security manager returns 
+-          // NS_ERROR_FAILURE when there is no subject principal. In
+-          // that case we are not done.
+-        
+-        if (!m_pPrincipal && m_pJSCX ) {
+-            nsCOMPtr<nsIScriptContext> scriptContext;
+-            GetScriptContextFromJSContext(m_pJSCX,
+-                                          getter_AddRefs(scriptContext));
+-
+-            if (scriptContext) {
+-                nsCOMPtr<nsIScriptGlobalObject> global;
+-                scriptContext->GetGlobalObject(getter_AddRefs(global));
+-                NS_ASSERTION(global, "script context has no global object");
+-
+-                if (global) {
+-                    nsCOMPtr<nsIScriptObjectPrincipal> globalData = do_QueryInterface(global);
+-                    if (globalData) {
+-                        // ISSUE: proper ref counting.
+-                        if (NS_FAILED(globalData->GetPrincipal(&m_pPrincipal)))
+-                            return NS_ERROR_FAILURE; 
+-                       
+-                   }
+-                }
+-            }
++        secMan->GetSubjectPrincipal(getter_AddRefs(m_pPrincipal));
++        if (!m_pPrincipal) {
++            return NS_ERROR_FAILURE;
+         }
+     }
+ 
+     nsXPIDLCString origin;
+     m_pPrincipal->GetOrigin(getter_Copies(origin));
+ 
+-    if (origin.IsEmpty()) {
++    PRInt32 originlen = origin.Length();
++    if (origin.IsEmpty() || originlen > buflen - 1) {
+         return NS_ERROR_FAILURE;
+     }
+ 
+     // Copy the string into to user supplied buffer. Is there a better
+     // way to do this?
+ 
+-    PRInt32 originlen = origin.Length();
+     memcpy(buf, origin, originlen);
+     buf[originlen] = nsnull; // Gotta terminate it.
+ 
+     return NS_OK;
+ }
+ 
+ NS_METHOD 
+ nsCSecurityContext::GetCertificateID(char* buf, int buflen)
+@@ -184,16 +154,19 @@ nsCSecurityContext::GetCertificateID(cha
+     // Get the Script Security Manager.
+ 
+     nsresult rv      = NS_OK;
+     nsCOMPtr<nsIScriptSecurityManager> secMan = 
+              do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID, &rv);
+     if (NS_FAILED(rv) || !secMan) return NS_ERROR_FAILURE;
+ 
+     secMan->GetSubjectPrincipal(getter_AddRefs(principal));
++    if (!principal) {
++        return NS_ERROR_FAILURE;
++    }
+ 
+     nsXPIDLCString certificate;
+     principal->GetCertificateID(getter_Copies(certificate));
+ 
+     PRInt32 certlen = certificate.Length();
+     if (buflen <= certlen) {
+         return NS_ERROR_FAILURE;
+     }
+@@ -269,19 +242,17 @@ nsCSecurityContext::nsCSecurityContext(n
+     if (NS_FAILED(rv) || !secMan) return;
+ 
+     nsCOMPtr<nsIPrincipal> sysprincipal;
+     if (NS_FAILED(secMan->GetSystemPrincipal(getter_AddRefs(sysprincipal))))
+         return;
+ 
+     // Do early evaluation of "UniversalJavaPermission" capability.
+ 
+-    PRBool equals;
+-    if (!m_pPrincipal || 
+-        NS_SUCCEEDED(m_pPrincipal->Equals(sysprincipal, &equals)) && equals) {
++    if (!m_pPrincipal || m_pPrincipal == sysprincipal) {
+         // We have native code or the system principal: just allow general access
+         m_HasUniversalBrowserReadCapability = PR_TRUE;
+         m_HasUniversalJavaCapability = PR_TRUE;
+     }
+     else {
+         // Otherwise, check with the js security manager.
+         secMan->IsCapabilityEnabled("UniversalBrowserRead",&m_HasUniversalBrowserReadCapability);
+         secMan->IsCapabilityEnabled("UniversalJavaPermission",&m_HasUniversalJavaCapability);
+Index: modules/oji/src/nsCSecurityContext.h
+===================================================================
+RCS file: /cvsroot/mozilla/modules/oji/src/nsCSecurityContext.h,v
+retrieving revision 1.8
+diff -p -u -d -8 -r1.8 nsCSecurityContext.h
+--- modules/oji/src/nsCSecurityContext.h	28 Sep 2001 20:08:29 -0000	1.8
++++ modules/oji/src/nsCSecurityContext.h	26 Jul 2003 04:44:26 -0000
+@@ -44,16 +44,17 @@
+ 
+ #ifndef nsCSecurityContext_h___
+ #define nsCSecurityContext_h___
+ 
+ #include "jscntxt.h"
+ #include "jsdbgapi.h"
+ #include "nsISecurityContext.h"
+ #include "nsIPrincipal.h"
++#include "nsCOMPtr.h"
+ 
+ struct JSContext;
+ 
+ /**
+  * nsCSecurityContext implements nsISecurityContext interface for navigator.
+  * This is used by a JVM to implement netscape.javascript.JSObject functionality.
+  */
+ class nsCSecurityContext :public nsISecurityContext {
+@@ -103,14 +104,14 @@ public:
+     nsCSecurityContext(JSContext* cx);
+     nsCSecurityContext(nsIPrincipal* principal);
+     virtual ~nsCSecurityContext(void);
+ 
+ protected:
+     JSStackFrame *m_pJStoJavaFrame;
+     JSContext    *m_pJSCX;
+ private:
+-    nsIPrincipal *m_pPrincipal;
++    nsCOMPtr<nsIPrincipal> m_pPrincipal;
+     PRBool        m_HasUniversalJavaCapability;
+     PRBool        m_HasUniversalBrowserReadCapability;
+ };
+ 
+ #endif // nsCSecurityContext_h___

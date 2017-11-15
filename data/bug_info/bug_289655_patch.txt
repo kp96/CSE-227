@@ -1,0 +1,472 @@
+Index: js/src/xpconnect/idl/nsIXPConnect.idl
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/js/src/xpconnect/idl/nsIXPConnect.idl,v
+retrieving revision 1.38
+diff -u -p -d -8 -r1.38 nsIXPConnect.idl
+--- js/src/xpconnect/idl/nsIXPConnect.idl	1 Sep 2005 23:02:56 -0000	1.38
++++ js/src/xpconnect/idl/nsIXPConnect.idl	7 Oct 2005 03:30:22 -0000
+@@ -142,24 +142,30 @@
+ 
+ // forward declarations...
+ interface nsIXPCScriptable;
+ interface nsIXPConnect;
+ interface nsIXPConnectWrappedNative;
+ interface nsIInterfaceInfo;
+ interface nsIXPCSecurityManager;
+ 
++%{C++
++#ifndef XPCONNECT_STANDALONE
++class nsIPrincipal;
++#endif
++%}
++
+ /***************************************************************************/
+ [uuid(8916a320-d118-11d3-8f3a-0010a4e73d9a)]
+ interface nsIXPConnectJSObjectHolder : nsISupports
+ {
+     readonly attribute JSObjectPtr      JSObject;
+ };
+ 
+-[uuid(215DBE02-94A7-11d2-BA58-00805F8A5DD7)]
++[uuid(7021D99D-6344-4CC0-96E7-943ED58792B8)]
+ interface nsIXPConnectWrappedNative : nsIXPConnectJSObjectHolder
+ {
+     /* attribute 'JSObject' inherited from nsIXPConnectJSObjectHolder */
+     readonly attribute nsISupports      Native;
+     readonly attribute JSObjectPtr      JSObjectPrototype;
+ 
+     /**
+      * These are here as an aid to nsIXPCScriptable implementors
+@@ -180,16 +186,26 @@ interface nsIXPConnectWrappedNative : ns
+     voidPtrPtr GetSecurityInfoAddress();
+ 
+ %{C++
+     /**
+      * Faster access to the native object from C++.  Will never return null.
+      */
+     nsISupports* Native() const { return mIdentity; }
+ 
++#ifndef XPCONNECT_STANDALONE
++    /**
++     * Get the object principal for this wrapper.  Note that this may well end
++     * up being null; in that case one should seek principals elsewhere.  Null
++     * here does NOT indicate system principal or no principals at all, just
++     * that this wrapper doesn't have an intrinsic one.
++     */
++    virtual nsIPrincipal* GetObjectPrincipal() const = 0;   
++#endif
++    
+ protected:
+     nsISupports *mIdentity;
+ public:
+ %}
+ };
+ 
+ %{C++
+ inline
+Index: js/src/xpconnect/src/xpccomponents.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/js/src/xpconnect/src/xpccomponents.cpp,v
+retrieving revision 1.80
+diff -u -p -d -8 -r1.80 xpccomponents.cpp
+--- js/src/xpconnect/src/xpccomponents.cpp	13 Sep 2005 21:42:04 -0000	1.80
++++ js/src/xpconnect/src/xpccomponents.cpp	6 Oct 2005 15:52:59 -0000
+@@ -2243,26 +2243,18 @@ nsXPCComponents_utils_Sandbox::CallOrCon
+     nsCOMPtr<nsIXPConnect> xpc(do_GetService(nsIXPConnect::GetCID(), &rv));
+     if(NS_FAILED(rv))
+         return ThrowAndFail(NS_ERROR_XPC_UNEXPECTED, cx, _retval);
+ 
+     JSObject *sandbox = JS_NewObject(cx, &SandboxClass, nsnull, nsnull);
+     if (!sandbox)
+         return ThrowAndFail(NS_ERROR_XPC_UNEXPECTED, cx, _retval);
+ 
+-    rv = xpc->InitClasses(cx, sandbox);
+-    if (NS_SUCCEEDED(rv) &&
+-        !JS_DefineFunctions(cx, sandbox, SandboxFunctions)) {
+-        rv = NS_ERROR_FAILURE;
+-    }
+-    if (NS_FAILED(rv))
+-        return ThrowAndFail(NS_ERROR_XPC_UNEXPECTED, cx, _retval);
+-
++    // Make sure to set up principals on the sandbox before initing classes
+     nsIScriptObjectPrincipal *sop = nsnull;
+-
+     if (JSVAL_IS_STRING(argv[0])) {
+         JSString *codebasestr = JSVAL_TO_STRING(argv[0]);
+         nsCAutoString codebase(JS_GetStringBytes(codebasestr),
+                                JS_GetStringLength(codebasestr));
+         nsCOMPtr<nsIURL> iURL;
+         nsCOMPtr<nsIStandardURL> stdUrl =
+             do_CreateInstance(kStandardURLContractID, &rv);
+         if (!stdUrl ||
+@@ -2308,16 +2300,27 @@ nsXPCComponents_utils_Sandbox::CallOrCon
+ 
+         // Note: if we're here, then sop has been AddRef'd by CallQueryInterface
+     }
+ 
+     if (!JS_SetPrivate(cx, sandbox, sop)) {
+         NS_RELEASE(sop);
+         return ThrowAndFail(NS_ERROR_XPC_UNEXPECTED, cx, _retval);
+     }
++
++    // After this point |sop| will be released when |sandbox| is
++    // finalized, so no need to worry about it from now on.
++
++    rv = xpc->InitClasses(cx, sandbox);
++    if (NS_SUCCEEDED(rv) &&
++        !JS_DefineFunctions(cx, sandbox, SandboxFunctions)) {
++        rv = NS_ERROR_FAILURE;
++    }
++    if (NS_FAILED(rv))
++        return ThrowAndFail(NS_ERROR_XPC_UNEXPECTED, cx, _retval);
+ 
+     if (vp)
+         *vp = OBJECT_TO_JSVAL(sandbox);
+ 
+     *_retval = JS_TRUE;
+     return NS_OK;
+ #endif
+ }
+Index: js/src/xpconnect/src/xpcprivate.h
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/js/src/xpconnect/src/xpcprivate.h,v
+retrieving revision 1.167
+diff -u -p -d -8 -r1.167 xpcprivate.h
+--- js/src/xpconnect/src/xpcprivate.h	8 Oct 2005 00:28:45 -0000	1.167
++++ js/src/xpconnect/src/xpcprivate.h	8 Oct 2005 04:59:40 -0000
+@@ -102,18 +102,21 @@
+ #include "nsIExceptionService.h"
+ 
+ #include "nsVariant.h"
+ #include "nsIPropertyBag.h"
+ #include "nsIProperty.h"
+ #include "nsSupportsArray.h"
+ 
+ #include "nsIXPCScriptNotify.h"  // used to notify: ScriptEvaluated
++
+ #ifndef XPCONNECT_STANDALONE
+ #define XPC_USE_SECURITY_CHECKED_COMPONENT
++#include "nsIScriptObjectPrincipal.h"
++#include "nsIPrincipal.h"
+ #endif
+ 
+ #ifdef XPC_USE_SECURITY_CHECKED_COMPONENT
+ #include "nsISecurityCheckedComponent.h"
+ #endif
+ 
+ #ifdef XPC_TOOLS_SUPPORT
+ #include "nsIXPCToolsProfiler.h"
+@@ -1018,16 +1021,23 @@ public:
+     GetComponents() const {return mComponents;}
+ 
+     JSObject*
+     GetGlobalJSObject() const {return mGlobalJSObject;}
+ 
+     JSObject*
+     GetPrototypeJSObject() const {return mPrototypeJSObject;}
+ 
++#ifndef XPCONNECT_STANDALONE
++    nsIPrincipal*
++    GetPrincipal() const
++    {return mScriptObjectPrincipal ?
++         mScriptObjectPrincipal->GetPrincipal() : nsnull;}
++#endif
++    
+     JSObject*
+     GetPrototypeJSFunction() const {return mPrototypeJSFunction;}
+ 
+     void RemoveWrappedNativeProtos();
+ 
+     static XPCWrappedNativeScope*
+     FindInJSObjectScope(XPCCallContext& ccx, JSObject* obj,
+                         JSBool OKIfNotInitialized = JS_FALSE);
+@@ -1081,19 +1091,32 @@ private:
+     static XPCWrappedNativeScope* gScopes;
+     static XPCWrappedNativeScope* gDyingScopes;
+ 
+     XPCJSRuntime*                    mRuntime;
+     Native2WrappedNativeMap*         mWrappedNativeMap;
+     ClassInfo2WrappedNativeProtoMap* mWrappedNativeProtoMap;
+     nsXPCComponents*                 mComponents;
+     XPCWrappedNativeScope*           mNext;
++    // The JS global object for this scope.  If non-null, this will be the
++    // default parent for the XPCWrappedNatives that have us as the scope,
++    // unless a PreCreate hook overrides it.  Note that this _may_ be null (see
++    // constructor).
+     JSObject*                        mGlobalJSObject;
+     JSObject*                        mPrototypeJSObject;
+     JSObject*                        mPrototypeJSFunction;
++
++#ifndef XPCONNECT_STANDALONE
++    // The script object principal instance corresponding to our current global
++    // JS object.
++    // XXXbz what happens if someone calls JS_SetPrivate on mGlobalJSObject.
++    // How do we deal?  Do we need to?  I suspect this isn't worth worrying
++    // about, since all of our scope objects are verified as not doing that.
++    nsCOMPtr<nsIScriptObjectPrincipal> mScriptObjectPrincipal;
++#endif
+ };
+ 
+ /***************************************************************************/
+ // XPCNativeMember represents a single idl declared method, attribute or
+ // constant.
+ 
+ // Tight. No virtual methods. Can be bitwise copied (until any resolution done).
+ 
+@@ -1780,16 +1803,20 @@ private:
+ 
+ class XPCWrappedNative : public nsIXPConnectWrappedNative
+ {
+ public:
+     NS_DECL_ISUPPORTS
+     NS_DECL_NSIXPCONNECTJSOBJECTHOLDER
+     NS_DECL_NSIXPCONNECTWRAPPEDNATIVE
+ 
++#ifndef XPCONNECT_STANDALONE
++    virtual nsIPrincipal* GetObjectPrincipal() const;
++#endif
++
+     JSBool
+     IsValid() const {return nsnull != mFlatJSObject;}
+ 
+ #define XPC_SCOPE_TAG     ((jsword)0x1)
+ #define XPC_SCOPE_WORD(s) ((jsword)(s))
+ 
+     static inline JSBool
+     IsTaggedScope(XPCWrappedNativeScope* s)
+@@ -2836,18 +2863,16 @@ private:
+ 
+ /***************************************************************************/
+ #define NS_JS_RUNTIME_SERVICE_CID \
+ {0xb5e65b52, 0x1dd1, 0x11b2, \
+     { 0xae, 0x8f, 0xf0, 0x92, 0x8e, 0xd8, 0x84, 0x82 }}
+ 
+ #ifndef XPCONNECT_STANDALONE
+ #include "nsIScriptSecurityManager.h"
+-#include "nsIPrincipal.h"
+-#include "nsIScriptObjectPrincipal.h"
+ 
+ class BackstagePass : public nsIScriptObjectPrincipal, public nsIXPCScriptable
+ {
+ public:
+   NS_DECL_ISUPPORTS
+   NS_DECL_NSIXPCSCRIPTABLE
+   
+   virtual nsIPrincipal* GetPrincipal() {
+Index: js/src/xpconnect/src/xpcwrappednative.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/js/src/xpconnect/src/xpcwrappednative.cpp,v
+retrieving revision 1.103
+diff -u -p -d -8 -r1.103 xpcwrappednative.cpp
+--- js/src/xpconnect/src/xpcwrappednative.cpp	1 Sep 2005 23:08:57 -0000	1.103
++++ js/src/xpconnect/src/xpcwrappednative.cpp	8 Oct 2005 01:55:53 -0000
+@@ -2355,16 +2355,30 @@ NS_IMETHODIMP XPCWrappedNative::GetNativ
+ /* readonly attribute JSObjectPtr JSObjectPrototype; */
+ NS_IMETHODIMP XPCWrappedNative::GetJSObjectPrototype(JSObject * *aJSObjectPrototype)
+ {
+     *aJSObjectPrototype = HasProto() ?
+                 GetProto()->GetJSProtoObject() : GetFlatJSObject();
+     return NS_OK;
+ }
+ 
++#ifndef XPCONNECT_STANDALONE
++nsIPrincipal*
++XPCWrappedNative::GetObjectPrincipal() const
++{
++    nsIPrincipal* principal = GetScope()->GetPrincipal();
++#ifdef DEBUG
++    nsCOMPtr<nsIScriptObjectPrincipal> objPrin(do_QueryInterface(mIdentity));
++    NS_ASSERTION(!objPrin || objPrin->GetPrincipal() == principal,
++                 "Principal mismatch.  Expect bad things to happen");
++#endif
++    return principal;
++}
++#endif
++
+ /* readonly attribute nsIXPConnect XPConnect; */
+ NS_IMETHODIMP XPCWrappedNative::GetXPConnect(nsIXPConnect * *aXPConnect)
+ {
+     if(IsValid())
+     {
+         nsIXPConnect* temp = GetRuntime()->GetXPConnect();
+         NS_IF_ADDREF(temp);
+         *aXPConnect = temp;
+Index: js/src/xpconnect/src/xpcwrappednativescope.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/js/src/xpconnect/src/xpcwrappednativescope.cpp,v
+retrieving revision 1.23
+diff -u -p -d -8 -r1.23 xpcwrappednativescope.cpp
+--- js/src/xpconnect/src/xpcwrappednativescope.cpp	4 Sep 2005 17:35:20 -0000	1.23
++++ js/src/xpconnect/src/xpcwrappednativescope.cpp	6 Oct 2005 16:06:35 -0000
+@@ -171,16 +171,41 @@ XPCWrappedNativeScope::SetComponents(nsX
+ 
+ void
+ XPCWrappedNativeScope::SetGlobal(XPCCallContext& ccx, JSObject* aGlobal)
+ {
+     // We allow for calling this more than once. This feature is used by
+     // nsXPConnect::InitClassesWithNewWrappedGlobal.
+ 
+     mGlobalJSObject = aGlobal;
++#ifndef XPCONNECT_STANDALONE
++    mScriptObjectPrincipal = nsnull;
++    // Now init our script object principal, if the new global has one
++    if (aGlobal)
++    {
++        JSContext* cx = ccx.GetJSContext();
++        const JSClass* jsClass = JS_GetClass(cx, aGlobal);
++        if (jsClass && !(~jsClass->flags & (JSCLASS_HAS_PRIVATE |
++                                            JSCLASS_PRIVATE_IS_NSISUPPORTS)))
++        {
++            // Our global has an nsISupports native pointer.  Let's
++            // see whether it's what we want.
++            nsISupports* priv = (nsISupports*)JS_GetPrivate(cx, aGlobal);
++            nsCOMPtr<nsIXPConnectWrappedNative> native =
++                do_QueryInterface(priv);
++            if (native)
++            {
++                mScriptObjectPrincipal = do_QueryWrappedNative(native);
++            }
++            if (!mScriptObjectPrincipal) {
++                mScriptObjectPrincipal = do_QueryInterface(priv);
++            }
++        }
++    }
++#endif
+ 
+     // Lookup 'globalObject.Object.prototype' for our wrapper's proto
+     {
+         AutoJSErrorAndExceptionEater eater(ccx); // scoped error eater
+ 
+         jsval val;
+         jsid idObj = mRuntime->GetStringID(XPCJSRuntime::IDX_OBJECT);
+         jsid idFun = mRuntime->GetStringID(XPCJSRuntime::IDX_FUNCTION);
+Index: caps/include/nsScriptSecurityManager.h
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/caps/include/nsScriptSecurityManager.h,v
+retrieving revision 1.93
+diff -u -p -d -8 -r1.93 nsScriptSecurityManager.h
+--- caps/include/nsScriptSecurityManager.h	22 Jul 2005 20:49:11 -0000	1.93
++++ caps/include/nsScriptSecurityManager.h	6 Oct 2005 16:20:45 -0000
+@@ -377,17 +377,21 @@ private:
+     static JSBool JS_DLL_CALLBACK
+     CheckObjectAccess(JSContext *cx, JSObject *obj,
+                       jsval id, JSAccessMode mode,
+                       jsval *vp);
+ 
+     // Returns null if a principal cannot be found; generally callers
+     // should error out at that point.
+     static nsIPrincipal*
+-    doGetObjectPrincipal(JSContext *cx, JSObject *obj);
++    doGetObjectPrincipal(JSContext *cx, JSObject *obj
++#ifdef DEBUG
++                         , PRBool aAllowShortCircuit = PR_TRUE
++#endif
++                         );
+ 
+     // Returns null if a principal cannot be found.  Note that rv can be NS_OK
+     // when this happens -- this means that there was no JS running.
+     nsIPrincipal*
+     doGetSubjectPrincipal(nsresult* rv);
+     
+     static nsresult
+     GetBaseURIScheme(nsIURI* aURI, nsCString& aScheme);
+Index: caps/src/nsScriptSecurityManager.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/caps/src/nsScriptSecurityManager.cpp,v
+retrieving revision 1.275
+diff -u -p -d -8 -r1.275 nsScriptSecurityManager.cpp
+--- caps/src/nsScriptSecurityManager.cpp	30 Sep 2005 03:30:40 -0000	1.275
++++ caps/src/nsScriptSecurityManager.cpp	6 Oct 2005 17:59:05 -0000
+@@ -2074,58 +2074,87 @@ nsScriptSecurityManager::GetObjectPrinci
+     if (!*result)
+         return NS_ERROR_FAILURE;
+     NS_ADDREF(*result);
+     return NS_OK;
+ }
+ 
+ // static
+ nsIPrincipal*
+-nsScriptSecurityManager::doGetObjectPrincipal(JSContext *aCx, JSObject *aObj)
++nsScriptSecurityManager::doGetObjectPrincipal(JSContext *aCx, JSObject *aObj
++#ifdef DEBUG
++                                              , PRBool aAllowShortCircuit
++#endif
++                                              )
+ {
+     NS_ASSERTION(aCx && aObj, "Bad call to doGetObjectPrincipal()!");
+     nsIPrincipal* result = nsnull;
+ 
+     do
+     {
+         const JSClass *jsClass = JS_GetClass(aCx, aObj);
+ 
+         if (jsClass && !(~jsClass->flags & (JSCLASS_HAS_PRIVATE |
+                                             JSCLASS_PRIVATE_IS_NSISUPPORTS)))
+         {
+             // No need to refcount |priv| here.
+             nsISupports *priv = (nsISupports *)JS_GetPrivate(aCx, aObj);
+-            nsCOMPtr<nsIScriptObjectPrincipal> objPrin;
+ 
+             /*
+              * If it's a wrapped native (as most
+              * JSCLASS_PRIVATE_IS_NSISUPPORTS objects are in mozilla),
+              * check the underlying native instead.
+              */
+             nsCOMPtr<nsIXPConnectWrappedNative> xpcWrapper =
+                 do_QueryInterface(priv);
+ 
+-            if (xpcWrapper)
++            if (NS_LIKELY(xpcWrapper != nsnull))
+             {
+-                objPrin = do_QueryWrappedNative(xpcWrapper);
++#ifdef DEBUG
++                if (aAllowShortCircuit)
++                {
++#endif
++                    result = xpcWrapper->GetObjectPrincipal();
++                    if (!result) fprintf(stderr, "nnnnn\n");
++#ifdef DEBUG
++                }
++                else
++                {
++                    nsCOMPtr<nsIScriptObjectPrincipal> objPrin;
++                    objPrin = do_QueryWrappedNative(xpcWrapper);
++                    if (objPrin)
++                    {
++                        result = objPrin->GetPrincipal();
++                    }                    
++                }
++#endif
+             }
+             else
+             {
++                nsCOMPtr<nsIScriptObjectPrincipal> objPrin;
+                 objPrin = do_QueryInterface(priv);
++                if (objPrin)
++                {
++                    result = objPrin->GetPrincipal();
++                }
+             }
+ 
+-            if (objPrin && (result = objPrin->GetPrincipal()))
++            if (result)
+             {
+                 break;
+             }
+         }
+ 
+         aObj = JS_GetParent(aCx, aObj);
+     } while (aObj);
+ 
++    NS_ASSERTION(!aAllowShortCircuit ||
++                 result == doGetObjectPrincipal(aCx, aObj, PR_FALSE),
++                 "Principal mismatch.  Not good");
++    
+     return result;
+ }
+ 
+ nsresult
+ nsScriptSecurityManager::SavePrincipal(nsIPrincipal* aToSave)
+ {
+     //-- Save to mPrincipals
+     mPrincipals.Put(aToSave, aToSave);

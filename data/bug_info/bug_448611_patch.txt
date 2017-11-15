@@ -1,0 +1,1108 @@
+diff --git a/content/html/content/public/nsFormSubmission.h b/content/html/content/public/nsFormSubmission.h
+--- a/content/html/content/public/nsFormSubmission.h
++++ b/content/html/content/public/nsFormSubmission.h
+@@ -157,19 +157,22 @@ public:
+ 
+   virtual ~nsEncodingFormSubmission();
+ 
+   /**
+    * Encode a Unicode string to bytes using the encoder (or just copy the input
+    * if there is no encoder).
+    * @param aStr the string to encode
+    * @param aResult the encoded string [OUT]
++   * @param aHeaderEncode If true, turns all linebreaks into spaces and escapes
++   *                      all quotes
+    * @throws an error if UnicodeToNewBytes fails
+    */
+-  nsresult EncodeVal(const nsAString& aStr, nsACString& aResult);
++  nsresult EncodeVal(const nsAString& aStr, nsCString& aResult,
++                     bool aHeaderEncode);
+ 
+ private:
+   // The encoder that will encode Unicode names and values
+   nsCOMPtr<nsISaveAsCharset> mEncoder;
+ };
+ 
+ /**
+  * Handle multipart/form-data encoding, which does files as well as normal
+diff --git a/content/html/content/src/nsFormSubmission.cpp b/content/html/content/src/nsFormSubmission.cpp
+--- a/content/html/content/src/nsFormSubmission.cpp
++++ b/content/html/content/src/nsFormSubmission.cpp
+@@ -386,17 +386,17 @@ nsFSURLEncoded::URLEncode(const nsAStrin
+   // convert to CRLF breaks
+   PRUnichar* convertedBuf =
+     nsLinebreakConverter::ConvertUnicharLineBreaks(PromiseFlatString(aStr).get(),
+                                                    nsLinebreakConverter::eLinebreakAny,
+                                                    nsLinebreakConverter::eLinebreakNet);
+   NS_ENSURE_TRUE(convertedBuf, NS_ERROR_OUT_OF_MEMORY);
+ 
+   nsCAutoString encodedBuf;
+-  nsresult rv = EncodeVal(nsDependentString(convertedBuf), encodedBuf);
++  nsresult rv = EncodeVal(nsDependentString(convertedBuf), encodedBuf, false);
+   nsMemory::Free(convertedBuf);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   char* escapedBuf = nsEscape(encodedBuf.get(), url_XPAlphas);
+   NS_ENSURE_TRUE(escapedBuf, NS_ERROR_OUT_OF_MEMORY);
+   aEncoded.Adopt(escapedBuf);
+ 
+   return NS_OK;
+@@ -436,26 +436,26 @@ nsFSMultipartFormData::GetSubmissionBody
+ }
+ 
+ nsresult
+ nsFSMultipartFormData::AddNameValuePair(const nsAString& aName,
+                                         const nsAString& aValue)
+ {
+   nsCString valueStr;
+   nsCAutoString encodedVal;
+-  nsresult rv = EncodeVal(aValue, encodedVal);
++  nsresult rv = EncodeVal(aValue, encodedVal, false);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   valueStr.Adopt(nsLinebreakConverter::
+                  ConvertLineBreaks(encodedVal.get(),
+                                    nsLinebreakConverter::eLinebreakAny,
+                                    nsLinebreakConverter::eLinebreakNet));
+ 
+   nsCAutoString nameStr;
+-  rv = EncodeVal(aName, nameStr);
++  rv = EncodeVal(aName, nameStr, true);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   // Make MIME block for name/value pair
+ 
+   // XXX: name parameter should be encoded per RFC 2231
+   // RFC 2388 specifies that RFC 2047 be used, but I think it's not 
+   // consistent with MIME standard.
+   mPostDataChunk += NS_LITERAL_CSTRING("--") + mBoundary
+@@ -468,44 +468,42 @@ nsFSMultipartFormData::AddNameValuePair(
+ }
+ 
+ nsresult
+ nsFSMultipartFormData::AddNameFilePair(const nsAString& aName,
+                                        nsIDOMBlob* aBlob)
+ {
+   // Encode the control name
+   nsCAutoString nameStr;
+-  nsresult rv = EncodeVal(aName, nameStr);
++  nsresult rv = EncodeVal(aName, nameStr, true);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+-  nsCString filenameStr;
+-  nsAutoString contentType;
++  nsCString filename, contentType;
+   nsCOMPtr<nsIInputStream> fileStream;
+   if (aBlob) {
+     // Get and encode the filename
+-    nsAutoString filename;
++    nsAutoString filename16;
+     nsCOMPtr<nsIDOMFile> file = do_QueryInterface(aBlob);
+     if (file) {
+-      rv = file->GetName(filename);
++      rv = file->GetName(filename16);
+       NS_ENSURE_SUCCESS(rv, rv);
+     }
+-    nsCAutoString encodedFileName;
+-    rv = EncodeVal(filename, encodedFileName);
++    rv = EncodeVal(filename16, filename, true);
+     NS_ENSURE_SUCCESS(rv, rv);
+   
+-    filenameStr.Adopt(nsLinebreakConverter::
+-                      ConvertLineBreaks(encodedFileName.get(),
++    // Get content type
++    nsAutoString contentType16;
++    rv = aBlob->GetType(contentType16);
++    if (NS_FAILED(rv) || contentType16.IsEmpty()) {
++      contentType16.AssignLiteral("application/octet-stream");
++    }
++    contentType.Adopt(nsLinebreakConverter::
++                      ConvertLineBreaks(NS_ConvertUTF16toUTF8(contentType16).get(),
+                                         nsLinebreakConverter::eLinebreakAny,
+-                                        nsLinebreakConverter::eLinebreakNet));
+-  
+-    // Get content type
+-    rv = aBlob->GetType(contentType);
+-    if (NS_FAILED(rv) || contentType.IsEmpty()) {
+-      contentType.AssignLiteral("application/octet-stream");
+-    }
++                                        nsLinebreakConverter::eLinebreakSpace));
+   
+     // Get input stream
+     rv = aBlob->GetInternalStream(getter_AddRefs(fileStream));
+     NS_ENSURE_SUCCESS(rv, rv);
+     if (fileStream) {
+       // Create buffered stream (for efficiency)
+       nsCOMPtr<nsIInputStream> bufferedStream;
+       rv = NS_NewBufferedInputStream(getter_AddRefs(bufferedStream),
+@@ -526,20 +524,19 @@ nsFSMultipartFormData::AddNameFilePair(c
+   mPostDataChunk += NS_LITERAL_CSTRING("--") + mBoundary
+                  + NS_LITERAL_CSTRING(CRLF);
+   // XXX: name/filename parameter should be encoded per RFC 2231
+   // RFC 2388 specifies that RFC 2047 be used, but I think it's not 
+   // consistent with the MIME standard.
+   mPostDataChunk +=
+          NS_LITERAL_CSTRING("Content-Disposition: form-data; name=\"")
+        + nameStr + NS_LITERAL_CSTRING("\"; filename=\"")
+-       + filenameStr + NS_LITERAL_CSTRING("\"" CRLF)
+-       + NS_LITERAL_CSTRING("Content-Type: ");
+-  AppendUTF16toUTF8(contentType, mPostDataChunk);
+-  mPostDataChunk += NS_LITERAL_CSTRING(CRLF CRLF);
++       + filename + NS_LITERAL_CSTRING("\"" CRLF)
++       + NS_LITERAL_CSTRING("Content-Type: ")
++       + contentType + NS_LITERAL_CSTRING(CRLF CRLF);
+ 
+   // Add the file to the stream
+   if (fileStream) {
+     // We need to dump the data up to this point into the POST data stream here,
+     // since we're about to add the file input stream
+     AddPostDataStream();
+ 
+     mPostDataStream->AppendStream(fileStream);
+@@ -665,19 +662,24 @@ nsFSTextPlain::GetEncodedSubmission(nsIU
+     escapedBody.Adopt(escapedBuf);
+ 
+     path += NS_LITERAL_CSTRING("&force-plain-text=Y&body=") + escapedBody;
+ 
+     rv = aURI->SetPath(path);
+ 
+   } else {
+     // Create data stream
++    nsCString cbody;
++    EncodeVal(mBody, cbody, false);
++    cbody.Adopt(nsLinebreakConverter::
++                ConvertLineBreaks(cbody.get(),
++                                  nsLinebreakConverter::eLinebreakAny,
++                                  nsLinebreakConverter::eLinebreakNet));
+     nsCOMPtr<nsIInputStream> bodyStream;
+-    rv = NS_NewStringInputStream(getter_AddRefs(bodyStream),
+-                                          mBody);
++    rv = NS_NewCStringInputStream(getter_AddRefs(bodyStream), cbody);
+     if (!bodyStream) {
+       return NS_ERROR_OUT_OF_MEMORY;
+     }
+ 
+     // Create mime stream with headers and such
+     nsCOMPtr<nsIMIMEInputStream> mimeStream
+         = do_CreateInstance("@mozilla.org/network/mime-input-stream;1", &rv);
+     NS_ENSURE_SUCCESS(rv, rv);
+@@ -725,27 +727,40 @@ nsEncodingFormSubmission::nsEncodingForm
+ }
+ 
+ nsEncodingFormSubmission::~nsEncodingFormSubmission()
+ {
+ }
+ 
+ // i18n helper routines
+ nsresult
+-nsEncodingFormSubmission::EncodeVal(const nsAString& aStr, nsACString& aOut)
++nsEncodingFormSubmission::EncodeVal(const nsAString& aStr, nsCString& aOut,
++                                    bool aHeaderEncode)
+ {
+-  if (mEncoder) {
++  if (mEncoder && !aStr.IsEmpty()) {
+     aOut.Truncate();
+-    return aStr.IsEmpty() ? NS_OK :
+-           mEncoder->Convert(PromiseFlatString(aStr).get(),
+-                             getter_Copies(aOut));
++    nsresult rv = mEncoder->Convert(PromiseFlatString(aStr).get(),
++                                    getter_Copies(aOut));
++    NS_ENSURE_SUCCESS(rv, rv);
++  }
++  else {
++    // fall back to UTF-8
++    CopyUTF16toUTF8(aStr, aOut);
+   }
+ 
+-  // fall back to UTF-8
+-  CopyUTF16toUTF8(aStr, aOut);
++  if (aHeaderEncode) {
++    aOut.Adopt(nsLinebreakConverter::
++               ConvertLineBreaks(aOut.get(),
++                                 nsLinebreakConverter::eLinebreakAny,
++                                 nsLinebreakConverter::eLinebreakSpace));
++    aOut.ReplaceSubstring(NS_LITERAL_CSTRING("\""),
++                          NS_LITERAL_CSTRING("\\\""));
++  }
++
++
+   return NS_OK;
+ }
+ 
+ // --------------------------------------------------------------------------
+ 
+ static void
+ GetSubmitCharset(nsGenericHTMLElement* aForm,
+                  nsACString& oCharset)
+diff --git a/content/html/content/src/nsHTMLTextAreaElement.cpp b/content/html/content/src/nsHTMLTextAreaElement.cpp
+--- a/content/html/content/src/nsHTMLTextAreaElement.cpp
++++ b/content/html/content/src/nsHTMLTextAreaElement.cpp
+@@ -905,17 +905,18 @@ nsHTMLTextAreaElement::SubmitNamesValues
+   if (IsDisabled()) {
+     return NS_OK;
+   }
+ 
+   //
+   // Get the name (if no name, no submit)
+   //
+   nsAutoString name;
+-  if (!GetAttr(kNameSpaceID_None, nsGkAtoms::name, name)) {
++  GetAttr(kNameSpaceID_None, nsGkAtoms::name, name);
++  if (name.IsEmpty()) {
+     return NS_OK;
+   }
+ 
+   //
+   // Get the value
+   //
+   nsAutoString value;
+   GetValueInternal(value, PR_FALSE);
+diff --git a/content/html/content/test/form_submit_server.sjs b/content/html/content/test/form_submit_server.sjs
+--- a/content/html/content/test/form_submit_server.sjs
++++ b/content/html/content/test/form_submit_server.sjs
+@@ -9,23 +9,22 @@ function utf8decode(s) {
+ 
+ function utf8encode(s) {
+   return unescape(encodeURIComponent(s));
+ }
+ 
+ function handleRequest(request, response)
+ {
+   var bodyStream = new BinaryInputStream(request.bodyInputStream);
+-  var bodyBytes = [];
+   var result = [];
++  var requestBody = "";
+   while ((bodyAvail = bodyStream.available()) > 0)
+-    Array.prototype.push.apply(bodyBytes, bodyStream.readByteArray(bodyAvail));
++    requestBody += bodyStream.readBytes(bodyAvail);
+ 
+   if (request.method == "POST") {
+-    var requestBody = String.fromCharCode.apply(null, bodyBytes);
+ 
+     var contentTypeParams = {};
+     request.getHeader("Content-Type").split(/\s*\;\s*/).forEach(function(s) {
+       if (s.indexOf('=') >= 0) {
+         let [name, value] = s.split('=');
+         contentTypeParams[name] = value;
+       }
+       else {
+@@ -49,35 +48,23 @@ function handleRequest(request, response
+           // We're assuming UTF8 for now
+ 	  body = utf8decode(body);
+ 	}
+ 	result.push({ headers: headers, body: body});
+       });
+     }
+     if (contentTypeParams[''] == "text/plain" &&
+         request.queryString == "plain") {
+-      requestBody.split("\r\n").slice(0, -1).forEach(function (s) {
+-        let index = s.indexOf("=");
+-        result.push({ name: s.substr(0, index),
+-                      value: s.substr(index + 1) });
+-      });
++      result = requestBody;
+     }
+     if (contentTypeParams[''] == "application/x-www-form-urlencoded" &&
+         request.queryString == "url") {
+-      requestBody.split("&").forEach(function (s) {
+-        let index = s.indexOf("=");
+-        result.push({ name: unescape(s.substr(0, index)),
+-                      value: unescape(s.substr(index + 1)) });
+-      });
++      result = requestBody;
+     }
+   }
+   else if (request.method == "GET") {
+-    request.queryString.split("&").forEach(function (s) {
+-      let index = s.indexOf("=");
+-      result.push({ name: unescape(s.substr(0, index)),
+-                    value: unescape(s.substr(index + 1)) });
+-    });
++    result = request.queryString;
+   }
+ 
+   // Send response body
+   response.setHeader("Content-Type", "text/plain; charset=utf-8", false);
+   response.write(utf8encode(JSON.stringify(result)));
+ }
+diff --git a/content/html/content/test/test_formSubmission.html b/content/html/content/test/test_formSubmission.html
+--- a/content/html/content/test/test_formSubmission.html
++++ b/content/html/content/test/test_formSubmission.html
+@@ -19,178 +19,218 @@ https://bugzilla.mozilla.org/show_bug.cg
+     <tr>
+       <td>Control type</td>
+       <td>Name and value</td>
+       <td>Name, empty value</td>
+       <td>Name, no value</td>
+       <td>Empty name, with value</td>
+       <td>No name, with value</td>
+       <td>No name or value</td>
++      <td>Strange name/value</td>
+     </tr>
+     <tr>
+       <td>Default input</td>
+       <td><input name="n1_1" value="v1_1"></td>
+       <td><input name="n1_2" value=""></td>
+       <td><input name="n1_3"></td>
+       <td><input name="" value="v1_4"></td>
+       <td><input value="v1_5"></td>
+       <td><input></td>
++      <td><input name="n1_7_&#13;_&#10;_&#13;&#10;_ _&quot;"
++                 value="v1_7_&#13;_&#10;_&#13;&#10;_ _&quot;"></td>
+     </tr>
+     <tr>
+       <td>Text input</td>
+       <td><input type=text name="n2_1" value="v2_1"></td>
+       <td><input type=text name="n2_2" value=""></td>
+       <td><input type=text name="n2_3"></td>
+       <td><input type=text name="" value="v2_4"></td>
+       <td><input type=text value="v2_5"></td>
+       <td><input type=text></td>
++      <td><input type=text name="n2_7_&#13;_&#10;_&#13;&#10;_ _&quot;"
++                 value="v2_7_&#13;_&#10;_&#13;&#10;_ _&quot;"></td>
+     </tr>
+     <tr>
+       <td>Checkbox unchecked</td>
+       <td><input type=checkbox name="n3_1" value="v3_1"></td>
+       <td><input type=checkbox name="n3_2" value=""></td>
+       <td><input type=checkbox name="n3_3"></td>
+       <td><input type=checkbox name="" value="v3_4"></td>
+       <td><input type=checkbox value="v3_5"></td>
+       <td><input type=checkbox></td>
++      <td><input type=checkbox name="n3_7_&#13;_&#10;_&#13;&#10;_ _&quot;"
++                 value="v3_7_&#13;_&#10;_&#13;&#10;_ _&quot;"></td>
+     </tr>
+     <tr>
+       <td>Checkbox checked</td>
+       <td><input checked type=checkbox name="n4_1" value="v4_1"></td>
+       <td><input checked type=checkbox name="n4_2" value=""></td>
+       <td><input checked type=checkbox name="n4_3"></td>
+       <td><input checked type=checkbox name="" value="v4_4"></td>
+       <td><input checked type=checkbox value="v4_5"></td>
+       <td><input checked type=checkbox></td>
++      <td><input checked type=checkbox
++                 name="n4_7_&#13;_&#10;_&#13;&#10;_ _&quot;"
++                 value="v4_7_&#13;_&#10;_&#13;&#10;_ _&quot;"></td>
+     </tr>
+     <tr>
+       <td>Radio unchecked</td>
+       <td><input type=radio name="n5_1" value="v5_1"></td>
+       <td><input type=radio name="n5_2" value=""></td>
+       <td><input type=radio name="n5_3"></td>
+       <td><input type=radio name="" value="v5_4"></td>
+       <td><input type=radio value="v5_5"></td>
+       <td><input type=radio></td>
++      <td><input type=radio name="n5_7_&#13;_&#10;_&#13;&#10;_ _&quot;"
++                 value="v5_7_&#13;_&#10;_&#13;&#10;_ _&quot;"></td>
+     </tr>
+     <tr>
+       <td>Radio checked</td>
+       <td><input checked type=radio name="n6_1" value="v6_1"></td>
+       <td><input checked type=radio name="n6_2" value=""></td>
+       <td><input checked type=radio name="n6_3"></td>
+       <td><input checked type=radio name="" value="v6_4"></td>
+       <td><input checked type=radio value="v6_5"></td>
+       <td><input checked type=radio></td>
++      <td><input checked type=radio
++                 name="n6_7_&#13;_&#10;_&#13;&#10;_ _&quot;"
++                 value="v6_7_&#13;_&#10;_&#13;&#10;_ _&quot;"></td>
+     </tr>
+     <tr>
+       <td>Hidden input</td>
+       <td><input type=hidden name="n7_1" value="v7_1"></td>
+       <td><input type=hidden name="n7_2" value=""></td>
+       <td><input type=hidden name="n7_3"></td>
+       <td><input type=hidden nane="" value="v7_4"></td>
+       <td><input type=hidden value="v7_5"></td>
+       <td><input type=hidden></td>
++      <td><input type=hidden name="n7_7_&#13;_&#10;_&#13;&#10;_ _&quot;"
++                 value="v7_7_&#13;_&#10;_&#13;&#10;_ _&quot;"></td>
+     </tr>
+     <tr>
+       <td>Password input</td>
+       <td><input type=password name="n8_1" value="v8_1"></td>
+       <td><input type=password name="n8_2" value=""></td>
+       <td><input type=password name="n8_3"></td>
+       <td><input type=password name="" value="v8_4"></td>
+       <td><input type=password value="v8_5"></td>
+       <td><input type=password></td>
++      <td><input type=password name="n8_7_&#13;_&#10;_&#13;&#10;_ _&quot;"
++                 value="v8_7_&#13;_&#10;_&#13;&#10;_ _&quot;"></td>
+     </tr>
+     <tr>
+       <td>Submit input</td>
+       <td><input type=submit name="n9_1" value="v9_1"></td>
+       <td><input type=submit name="n9_2" value=""></td>
+       <td><input type=submit name="n9_3"></td>
+       <td><input type=submit name="" value="v9_4"></td>
+       <td><input type=submit value="v9_5"></td>
+       <td><input type=submit></td>
++      <td><input type=submit name="n9_7_&#13;_&#10;_&#13;&#10;_ _&quot;"
++                 value="v9_7_&#13;_&#10;_&#13;&#10;_ _&quot;"></td>
+     </tr>
+     <tr>
+       <td>Button input</td>
+       <td><input type=button name="n10_1" value="v10_1"></td>
+       <td><input type=button name="n10_2" value=""></td>
+       <td><input type=button name="n10_3"></td>
+       <td><input type=button name="" value="v10_4"></td>
+       <td><input type=button value="v10_5"></td>
+       <td><input type=button></td>
++      <td><input type=button name="n10_7_&#13;_&#10;_&#13;&#10;_ _&quot;"
++                 value="v10_7_&#13;_&#10;_&#13;&#10;_ _&quot;"></td>
+     </tr>
+     <tr>
+       <td>Image input</td>
+       <td><input type=image src="file_formSubmission_img.jpg" name="n11_1" value="v11_1"></td>
+       <td><input type=image src="file_formSubmission_img.jpg" name="n11_2" value=""></td>
+       <td><input type=image src="file_formSubmission_img.jpg" name="n11_3"></td>
+       <td><input type=image src="file_formSubmission_img.jpg" name="" value="v11_4"></td>
+       <td><input type=image src="file_formSubmission_img.jpg" value="v11_5"></td>
+       <td><input type=image src="file_formSubmission_img.jpg"></td>
++      <td><input type=image src="file_formSubmission_img.jpg"
++                 name="n11_7_&#13;_&#10;_&#13;&#10;_ _&quot;"
++                 value="v11_7_&#13;_&#10;_&#13;&#10;_ _&quot;"></td>
+     </tr>
+     <tr>
+       <td>Reset input</td>
+       <td><input type=reset name="n12_1" value="v12_1"></td>
+       <td><input type=reset name="n12_2" value=""></td>
+       <td><input type=reset name="n12_3"></td>
+       <td><input type=reset name="" value="v12_4"></td>
+       <td><input type=reset value="v12_5"></td>
+       <td><input type=reset></td>
++      <td><input type=reset name="n12_7_&#13;_&#10;_&#13;&#10;_ _&quot;"
++                 value="v12_7_&#13;_&#10;_&#13;&#10;_ _&quot;"></td>
+     </tr>
+     <tr>
+       <td>Unknown input</td>
+       <td><input type=foobar name="n13_1" value="v13_1"></td>
+       <td><input type=foobar name="n13_2" value=""></td>
+       <td><input type=foobar name="n13_3"></td>
+       <td><input type=foobar name="" value="v13_4"></td>
+       <td><input type=foobar value="v13_5"></td>
+       <td><input type=foobar></td>
++      <td><input type=foobar name="n13_7_&#13;_&#10;_&#13;&#10;_ _&quot;"
++                 value="v13_7_&#13;_&#10;_&#13;&#10;_ _&quot;"></td>
+     </tr>
+     <tr>
+       <td>Default button</td>
+       <td><button name="n14_1" value="v14_1"></button></td>
+       <td><button name="n14_2" value=""></button></td>
+       <td><button name="n14_3"></button></td>
+       <td><button name="" value="v14_4"></button></td>
+       <td><button value="v14_5"></button></td>
+       <td><button></button></td>
++      <td><button name="n14_7_&#13;_&#10;_&#13;&#10;_ _&quot;"
++                  value="v14_7_&#13;_&#10;_&#13;&#10;_ _&quot;"></button></td>
+     </tr>
+     <tr>
+       <td>Submit button</td>
+       <td><button type=submit name="n15_1" value="v15_1"></button></td>
+       <td><button type=submit name="n15_2" value=""></button></td>
+       <td><button type=submit name="n15_3"></button></td>
+       <td><button type=submit name="" value="v15_4"></button></td>
+       <td><button type=submit value="v15_5"></button></td>
+       <td><button type=submit></button></td>
++      <td><button type=submit name="n15_7_&#13;_&#10;_&#13;&#10;_ _&quot;"
++                  value="v15_7_&#13;_&#10;_&#13;&#10;_ _&quot;"></button></td>
+     </tr>
+     <tr>
+       <td>Button button</td>
+       <td><button type=button name="n16_1" value="v16_1"></button></td>
+       <td><button type=button name="n16_2" value=""></button></td>
+       <td><button type=button name="n16_3"></button></td>
+       <td><button type=button name="" value="v16_4"></button></td>
+       <td><button type=button value="v16_5"></button></td>
+       <td><button type=button></button></td>
++      <td><button type=button name="n16_7_&#13;_&#10;_&#13;&#10;_ _&quot;"
++                  value="v16_7_&#13;_&#10;_&#13;&#10;_ _&quot;"></button></td>
+     </tr>
+     <tr>
+       <td>Reset button</td>
+       <td><button type=reset name="n17_1" value="v17_1"></button></td>
+       <td><button type=reset name="n17_2" value=""></button></td>
+       <td><button type=reset name="n17_3"></button></td>
+       <td><button type=reset name="" value="v17_4"></button></td>
+       <td><button type=reset value="v17_5"></button></td>
+       <td><button type=reset></button></td>
++      <td><button type=reset name="n17_7_&#13;_&#10;_&#13;&#10;_ _&quot;"
++                  value="v17_7_&#13;_&#10;_&#13;&#10;_ _&quot;"></button></td>
+     </tr>
+     <tr>
+       <td>Unknown button</td>
+       <td><button type=foobar name="n18_1" value="v18_1"></button></td>
+       <td><button type=foobar name="n18_2" value=""></button></td>
+       <td><button type=foobar name="n18_3"></button></td>
+       <td><button type=foobar name="" value="v18_4"></button></td>
+       <td><button type=foobar value="v18_5"></button></td>
+       <td><button type=foobar ></button></td>
++      <td><button type=foobar name="n18_7_&#13;_&#10;_&#13;&#10;_ _&quot;"
++                  value="v18_7_&#13;_&#10;_&#13;&#10;_ _&quot;"></button></td>
+     </tr>
+   </table>
+   
+   <p>
+     File input:
+     <input type=file name="file_1" class="setfile">
+     <input type=file name="file_2">
+     <input type=file name="" class="setfile">
+@@ -207,16 +247,35 @@ https://bugzilla.mozilla.org/show_bug.cg
+     <input multiple type=file name="" class="setfile multi">
+     <input multiple type=file name="">
+     <input multiple type=file class="setfile">
+     <input multiple type=file class="setfile multi">
+     <input multiple type=file>
+   </p>
+ 
+   <p>
++    Textarea:
++    <textarea name="t1">t_1_v</textarea>
++    <textarea name="t2"></textarea>
++    <textarea name="">t_3_v</textarea>
++    <textarea>t_4_v</textarea>
++    <textarea></textarea>
++    <textarea name="t6">
++t_6_v</textarea>
++    <textarea name="t7">t_7_v
++</textarea>
++    <textarea name="t8">
++
++ t_8_v 
++</textarea>
++    <textarea name="t9_&#13;_&#10;_&#13;&#10;_ _&quot;">t_9_&#13;_&#10;_&#13;&#10;_ _&quot;_v</textarea>
++    <textarea name="t10" value="t_10_bogus">t_10_v</textarea>
++  </p>
++
++  <p>
+     Select one:
+   
+     <select name="sel_1"></select>
+     <select name="sel_1b"><option></option></select>
+     <select name="sel_1c"><option selected></option></select>
+ 
+     <select name="sel_2"><option value="sel_2_v"></option></select>
+     <select name="sel_3"><option selected value="sel_3_v"></option></select>
+@@ -352,59 +411,75 @@ var myFile1, myFile2, emptyFile;
+ })();
+ 
+ 
+ var expectedSub = [
+   // Default input
+   { name: "n1_1", value: "v1_1" },
+   { name: "n1_2", value: "" },
+   { name: "n1_3", value: "" },
++  { name: "n1_7_\r\n_\r\n_\r\n_ _\"", value: "v1_7____ _\"" },
+   // Text input
+   { name: "n2_1", value: "v2_1" },
+   { name: "n2_2", value: "" },
+   { name: "n2_3", value: "" },
++  { name: "n2_7_\r\n_\r\n_\r\n_ _\"", value: "v2_7____ _\"" },
+   // Checkbox unchecked
+   // Checkbox checked
+   { name: "n4_1", value: "v4_1" },
+   { name: "n4_2", value: "" },
+   { name: "n4_3", value: "on" },
++  { name: "n4_7_\r\n_\r\n_\r\n_ _\"", value: "v4_7_\r\n_\r\n_\r\n_ _\"" },
+   // Radio unchecked
+   // Radio checked
+   { name: "n6_1", value: "v6_1" },
+   { name: "n6_2", value: "" },
+   { name: "n6_3", value: "on" },
++  { name: "n6_7_\r\n_\r\n_\r\n_ _\"", value: "v6_7_\r\n_\r\n_\r\n_ _\"" },
+   // Hidden input
+   { name: "n7_1", value: "v7_1" },
+   { name: "n7_2", value: "" },
+   { name: "n7_3", value: "" },
++  { name: "n7_7_\r\n_\r\n_\r\n_ _\"", value: "v7_7_\r\n_\r\n_\r\n_ _\"" },
+   // Password input
+   { name: "n8_1", value: "v8_1" },
+   { name: "n8_2", value: "" },
+   { name: "n8_3", value: "" },
++  { name: "n8_7_\r\n_\r\n_\r\n_ _\"", value: "v8_7____ _\"" },
+   // Submit input
+   // Button input
+   // Image input
+   // Reset input
+   // Unknown input
+   { name: "n13_1", value: "v13_1" },
+   { name: "n13_2", value: "" },
+   { name: "n13_3", value: "" },
++  { name: "n13_7_\r\n_\r\n_\r\n_ _\"", value: "v13_7____ _\"" },
+   // Default button
+   // Submit button
+   // Button button
+   // Reset button
+   // Unknown button
+   // File
+   { name: "file_1", value: myFile1 },
+   { name: "file_2", value: emptyFile },
+   // Multiple file
+   { name: "file_3", value: myFile1 },
+   { name: "file_4", value: myFile1 },
+   { name: "file_4", value: myFile2 },
+   { name: "file_5", value: emptyFile },
++  // Textarea
++  { name: "t1", value: "t_1_v" },
++  { name: "t2", value: "" },
++  { name: "t6", value: "t_6_v" },
++  { name: "t7", value: "t_7_v\r\n" },
++  { name: "t8", value: "\r\n t_8_v \r\n" },
++  { name: "t9_\r\n_\r\n_\r\n_ _\"", value: "t_9_\r\n_\r\n_\r\n_ _\"_v" },
++  { name: "t10", value: "t_10_v" },
++
+   // Select one
+   { name: "sel_1b", value: "" },
+   { name: "sel_1c", value: "" },
+   { name: "sel_2", value: "sel_2_v" },
+   { name: "sel_3", value: "sel_3_v" },
+   { name: "sel_4", value: "sel_4_v1" },
+   { name: "sel_5", value: "sel_5_v1" },
+   { name: "sel_6", value: "sel_6_v2" },
+@@ -457,64 +532,90 @@ expectedAugment = [
+   { name: "aNameNum", value: "9.2" },
+   { name: "aNameFile1", value: myFile1 },
+   { name: "aNameFile2", value: myFile2 },
+   //{ name: "aNameObj", value: "[object XMLHttpRequest]" },
+   //{ name: "aNameNull", value: "null" },
+   //{ name: "aNameUndef", value: "undefined" },
+ ];
+ 
+-function checkMPSubmission(sub, expected) {
++function checkMPSubmission(sub, expected, test) {
+   function getPropCount(o) {
+     var x, l = 0;
+     for (x in o) ++l;
+     return l;
+   }
++  function mpquote(s) {
++    return s.replace("\r\n", " ", "g")
++            .replace("\r", " ", "g")
++            .replace("\n", " ", "g")
++            .replace("\"", "\\\"", "g");
++  }
+ 
+   is(sub.length, expected.length,
+-     "Correct number of items");
++     "Correct number of multipart items in " + test);
++  
++  if (sub.length != expected.length) {
++    alert(JSON.stringify(sub));
++  }
++  
+   var i;
+   for (i = 0; i < expected.length; ++i) {
+     if (!("fileName" in expected[i])) {
+       is(sub[i].headers["Content-Disposition"],
+-         "form-data; name=\"" + expected[i].name + "\"",
+-         "Correct name");
++         "form-data; name=\"" + mpquote(expected[i].name) + "\"",
++         "Correct name in " + test);
+       is (getPropCount(sub[i].headers), 1,
+-          "Wrong number of headers");
++          "Wrong number of headers in " + test);
++      is(sub[i].body,
++         expected[i].value.replace(/\r\n|\r|\n/, "\r\n"),
++         "Correct value in " + test);
+     }
+     else {
+       is(sub[i].headers["Content-Disposition"],
+-         "form-data; name=\"" + expected[i].name + "\"; filename=\"" +
+-           expected[i].fileName + "\"",
+-         "Correct name");
++         "form-data; name=\"" + mpquote(expected[i].name) + "\"; filename=\"" +
++           mpquote(expected[i].fileName) + "\"",
++         "Correct name in " + test);
+       is(sub[i].headers["Content-Type"],
+          expected[i].contentType,
+-         "Correct content type");
++         "Correct content type in " + test);
+       is (getPropCount(sub[i].headers), 2,
+-          "Wrong number of headers");
++          "Wrong number of headers in " + test);
++      is(sub[i].body,
++         expected[i].value,
++         "Correct value in " + test);
+     }
+-    is(sub[i].body,
+-       expected[i].value,
+-       "Correct value");
++  }
++}
++
++function checkURLSubmission(sub, expected) {
++  function urlEscape(s) {
++    return escape(s).replace("%20", "+", "g");
++  }
++
++  subItems = sub.split("&");
++  is(subItems.length, expected.length,
++     "Correct number of url items");
++  var i;
++  for (i = 0; i < expected.length; ++i) {
++    let expect = urlEscape(expected[i].name) + "=" +
++        urlEscape(("fileName" in expected[i]) ? expected[i].fileName : expected[i].value);
++    is (subItems[i], expect, "expected URL part");
+   }
+ }
+ 
+ function checkPlainSubmission(sub, expected) {
+-  is(sub.length, expected.length,
+-     "Correct number of items");
+-  var i;
+-  for (i = 0; i < expected.length; ++i) {
+-    is(sub[i].name, expected[i].name, "Correct name");
+-    if (!("fileName" in expected[i])) {
+-      is(sub[i].value, expected[i].value, "Correct value");
+-    }
+-    else {
+-      is(sub[i].value, expected[i].fileName, "Correct value");
+-    }
+-  }
++  
++  is(sub,
++     expected.map(function(v) {
++       return v.name + "=" +
++              (("fileName" in v) ? v.fileName : v.value) +
++              "\r\n";
++     }).join(""),
++     "Correct submission");
+ }
+ 
+ function setDisabled(list, state) {
+   Array.prototype.forEach.call(list, function(e) {
+     e.disabled = state;
+   });
+ }
+ 
+@@ -547,108 +648,114 @@ function runTest() {
+       o.value = "";
+       o.fileName = emptyFile.name;
+       o.contentType = emptyFile.type;
+     }
+   };
+   expectedSub.forEach(fileFixup);
+   expectedAugment.forEach(fileFixup);
+ 
++  var form = $("form");
++
+   // multipart/form-data
+ 
+   // Make normal submission
+-  var form = $("form");
+   var iframe = $("target_iframe");
+   iframe.onload = function() { gen.next(); };
+   form.submit();
+   yield; // Wait for iframe to load as a result of the submission
+   var submission = JSON.parse(iframe.contentDocument.documentElement.textContent);
+-  checkMPSubmission(submission, expectedSub);
++  checkMPSubmission(submission, expectedSub, "normal submission");
+ 
+   // Disabled controls
+-  setDisabled(document.getElementsByTagName("input"), true);
+-  setDisabled(document.getElementsByTagName("select"), true);
++  setDisabled(document.querySelectorAll("input, select, textarea"), true);
+   form.submit();
+   yield;
+   submission = JSON.parse(iframe.contentDocument.documentElement.textContent);
+-  checkMPSubmission(submission, []);
++  checkMPSubmission(submission, [], "disabled controls");
+ 
+   // Reenabled controls
+-  setDisabled(document.getElementsByTagName("input"), false);
+-  setDisabled(document.getElementsByTagName("select"), false);
++  setDisabled(document.querySelectorAll("input, select, textarea"), false);
+   form.submit();
+   yield;
+   submission = JSON.parse(iframe.contentDocument.documentElement.textContent);
+-  checkMPSubmission(submission, expectedSub);
++  checkMPSubmission(submission, expectedSub, "reenabled controls");
+ 
+   // text/plain
+   form.action = "form_submit_server.sjs?plain";
+   form.enctype = "text/plain";
+   form.submit();
+   yield;
+   submission = JSON.parse(iframe.contentDocument.documentElement.textContent);
+   checkPlainSubmission(submission, expectedSub);
+ 
+   // application/x-www-form-urlencoded
+   form.action = "form_submit_server.sjs?url";
+   form.enctype = "application/x-www-form-urlencoded";
+   form.submit();
+   yield;
+   submission = JSON.parse(iframe.contentDocument.documentElement.textContent);
+-  checkPlainSubmission(submission, expectedSub);
++  checkURLSubmission(submission, expectedSub);
++
++  // application/x-www-form-urlencoded
++  form.action = "form_submit_server.sjs?xxyy";
++  form.method = "GET";
++  form.enctype = "";
++  form.submit();
++  yield;
++  submission = JSON.parse(iframe.contentDocument.documentElement.textContent);
++  checkURLSubmission(submission, expectedSub);
+ 
+   // application/x-www-form-urlencoded
+   form.action = "form_submit_server.sjs";
+   form.method = "";
+   form.enctype = "";
+   form.submit();
+   yield;
+   submission = JSON.parse(iframe.contentDocument.documentElement.textContent);
+-  checkPlainSubmission(submission, expectedSub);
++  checkURLSubmission(submission, expectedSub);
+ 
+   // Send form using XHR and FormData
+   xhr = new XMLHttpRequest();
+   xhr.onload = function() { gen.next(); };
+   xhr.open("POST", "form_submit_server.sjs");
+   xhr.send(new FormData(form));
+   yield; // Wait for XHR load
+-  checkMPSubmission(JSON.parse(xhr.responseText), expectedSub);
++  checkMPSubmission(JSON.parse(xhr.responseText), expectedSub, "send form using XHR and FormData");
+   
+   // Send disabled form using XHR and FormData
+-  setDisabled(document.getElementsByTagName("input"), true);
+-  setDisabled(document.getElementsByTagName("select"), true);
++  setDisabled(document.querySelectorAll("input, select, textarea"), true);
+   xhr.open("POST", "form_submit_server.sjs");
+   xhr.send(new FormData(form));
+   yield;
+-  checkMPSubmission(JSON.parse(xhr.responseText), []);
+-  setDisabled(document.getElementsByTagName("input"), false);
+-  setDisabled(document.getElementsByTagName("select"), false);
++  checkMPSubmission(JSON.parse(xhr.responseText), [], "send disabled form using XHR and FormData");
++  setDisabled(document.querySelectorAll("input, select, textarea"), false);
+   
+   // Send FormData
+   function addToFormData(fd) {
+     fd.append("aName", "aValue");
+     fd.append("aNameNum", 9.2);
+     fd.append("aNameFile1", myFile1);
+     fd.append("aNameFile2", myFile2);
+   }
+   var fd = new FormData();
+   addToFormData(fd);
+   xhr.open("POST", "form_submit_server.sjs");
+   xhr.send(fd);
+   yield;
+-  checkMPSubmission(JSON.parse(xhr.responseText), expectedAugment);
++  checkMPSubmission(JSON.parse(xhr.responseText), expectedAugment, "send FormData");
+ 
+   // Augment <form> using FormData
+   fd = new FormData(form);
+   addToFormData(fd);
+   xhr.open("POST", "form_submit_server.sjs");
+   xhr.send(fd);
+   yield;
+   checkMPSubmission(JSON.parse(xhr.responseText),
+-                    expectedSub.concat(expectedAugment));
++                    expectedSub.concat(expectedAugment), "send augmented FormData");
+ 
+   SimpleTest.finish();
+   yield;
+ }
+ 
+ </script>
+ </pre>
+ </body>
+diff --git a/content/html/content/test/test_formSubmission2.html b/content/html/content/test/test_formSubmission2.html
+--- a/content/html/content/test/test_formSubmission2.html
++++ b/content/html/content/test/test_formSubmission2.html
+@@ -50,21 +50,21 @@ https://bugzilla.mozilla.org/show_bug.cg
+       <td><button type=submit name="n3_2" value=""></button></td>
+       <td><button type=submit name="n3_3"></button></td>
+       <td><button type=submit name="" value="v3_4"></button></td>
+       <td><button type=submit value="v3_5"></button></td>
+       <td><button type=submit ></button></td>
+     </tr>
+     <tr>
+       <td>Submit button with text</td>
+-      <td><button type=submit name="n3_1" value="v3_1">text here</button></td>
+-      <td><button type=submit name="n3_2" value="">text here</button></td>
+-      <td><button type=submit name="n3_3">text here</button></td>
+-      <td><button type=submit name="" value="v3_4">text here</button></td>
+-      <td><button type=submit value="v3_5">text here</button></td>
++      <td><button type=submit name="n4_1" value="v4_1">text here</button></td>
++      <td><button type=submit name="n4_2" value="">text here</button></td>
++      <td><button type=submit name="n4_3">text here</button></td>
++      <td><button type=submit name="" value="v4_4">text here</button></td>
++      <td><button type=submit value="v4_5">text here</button></td>
+       <td><button type=submit>text here</button></td>
+     </tr>
+   </table>
+ </form>
+ <pre id="test">
+ <script class="testbody" type="text/javascript;version=1.8">
+ 
+ SimpleTest.waitForExplicitFinish();
+@@ -95,19 +95,19 @@ var expectedSub = [
+   // Submit button
+   [{ name: "n3_1", value: "v3_1" }],
+   [{ name: "n3_2", value: "" }],
+   [{ name: "n3_3", value: "" }],
+   [],
+   [],
+   [],
+   // Submit button with text
+-  [{ name: "n3_1", value: "v3_1" }],
+-  [{ name: "n3_2", value: "" }],
+-  [{ name: "n3_3", value: "" }],
++  [{ name: "n4_1", value: "v4_1" }],
++  [{ name: "n4_2", value: "" }],
++  [{ name: "n4_3", value: "" }],
+   [],
+   [],
+   [],
+ ];
+ 
+ function checkSubmission(sub, expected) {
+   function getPropCount(o) {
+     var x, l = 0;
+diff --git a/xpcom/io/nsLinebreakConverter.cpp b/xpcom/io/nsLinebreakConverter.cpp
+--- a/xpcom/io/nsLinebreakConverter.cpp
++++ b/xpcom/io/nsLinebreakConverter.cpp
+@@ -59,16 +59,17 @@ static const char* GetLinebreakString(ns
+   static const char* const sLinebreaks[] = {
+     "",             // any
+     NS_LINEBREAK,   // platform
+     LFSTR,          // content
+     CRLF,           // net
+     CRSTR,          // Mac
+     LFSTR,          // Unix
+     CRLF,           // Windows
++    " ",            // space
+     nsnull  
+   };
+   
+   return sLinebreaks[aBreakType];
+ }
+ 
+ 
+ /*----------------------------------------------------------------------------
+@@ -333,17 +334,18 @@ static T* ConvertUnknownBreaks(const T* 
+ 
+ /*----------------------------------------------------------------------------
+ 	ConvertLineBreaks 
+ 	
+ ----------------------------------------------------------------------------*/
+ char* nsLinebreakConverter::ConvertLineBreaks(const char* aSrc,
+             ELinebreakType aSrcBreaks, ELinebreakType aDestBreaks, PRInt32 aSrcLen, PRInt32* outLen)
+ {
+-  NS_ASSERTION(aDestBreaks != eLinebreakAny, "Invalid parameter");
++  NS_ASSERTION(aDestBreaks != eLinebreakAny &&
++	       aSrcBreaks != eLinebreakSpace, "Invalid parameter");
+   if (!aSrc) return nsnull;
+   
+   PRInt32 sourceLen = (aSrcLen == kIgnoreLen) ? strlen(aSrc) + 1 : aSrcLen;
+ 
+   char* resultString;
+   if (aSrcBreaks == eLinebreakAny)
+     resultString = ConvertUnknownBreaks(LOSER_CHAR_CAST(aSrc), sourceLen, GetLinebreakString(aDestBreaks));
+   else
+@@ -360,17 +362,18 @@ char* nsLinebreakConverter::ConvertLineB
+ 	
+ ----------------------------------------------------------------------------*/
+ nsresult nsLinebreakConverter::ConvertLineBreaksInSitu(char **ioBuffer, ELinebreakType aSrcBreaks,
+             ELinebreakType aDestBreaks, PRInt32 aSrcLen, PRInt32* outLen)
+ {
+   NS_ASSERTION(ioBuffer && *ioBuffer, "Null pointer passed");
+   if (!ioBuffer || !*ioBuffer) return NS_ERROR_NULL_POINTER;
+   
+-  NS_ASSERTION(aDestBreaks != eLinebreakAny, "Invalid parameter");
++  NS_ASSERTION(aDestBreaks != eLinebreakAny &&
++	       aSrcBreaks != eLinebreakSpace, "Invalid parameter");
+ 
+   PRInt32 sourceLen = (aSrcLen == kIgnoreLen) ? strlen(*ioBuffer) + 1 : aSrcLen;
+   
+   // can we convert in-place?
+   const char* srcBreaks = GetLinebreakString(aSrcBreaks);
+   const char* dstBreaks = GetLinebreakString(aDestBreaks);
+   
+   if ( (aSrcBreaks != eLinebreakAny) &&
+@@ -402,17 +405,18 @@ nsresult nsLinebreakConverter::ConvertLi
+ 
+ /*----------------------------------------------------------------------------
+ 	ConvertUnicharLineBreaks 
+ 	
+ ----------------------------------------------------------------------------*/
+ PRUnichar* nsLinebreakConverter::ConvertUnicharLineBreaks(const PRUnichar* aSrc,
+             ELinebreakType aSrcBreaks, ELinebreakType aDestBreaks, PRInt32 aSrcLen, PRInt32* outLen)
+ {
+-  NS_ASSERTION(aDestBreaks != eLinebreakAny, "Invalid parameter");
++  NS_ASSERTION(aDestBreaks != eLinebreakAny &&
++	       aSrcBreaks != eLinebreakSpace, "Invalid parameter");
+   if (!aSrc) return nsnull;
+   
+   PRInt32 bufLen = (aSrcLen == kIgnoreLen) ? nsCRT::strlen(aSrc) + 1 : aSrcLen;
+ 
+   PRUnichar* resultString;
+   if (aSrcBreaks == eLinebreakAny)
+     resultString = ConvertUnknownBreaks(LOSER_UNICHAR_CAST(aSrc), bufLen, GetLinebreakString(aDestBreaks));
+   else
+@@ -428,17 +432,18 @@ PRUnichar* nsLinebreakConverter::Convert
+ 	ConvertStringLineBreaks 
+ 	
+ ----------------------------------------------------------------------------*/
+ nsresult nsLinebreakConverter::ConvertUnicharLineBreaksInSitu(PRUnichar **ioBuffer,
+             ELinebreakType aSrcBreaks, ELinebreakType aDestBreaks, PRInt32 aSrcLen, PRInt32* outLen)
+ {
+   NS_ASSERTION(ioBuffer && *ioBuffer, "Null pointer passed");
+   if (!ioBuffer || !*ioBuffer) return NS_ERROR_NULL_POINTER;
+-  NS_ASSERTION(aDestBreaks != eLinebreakAny, "Invalid parameter");
++  NS_ASSERTION(aDestBreaks != eLinebreakAny &&
++	       aSrcBreaks != eLinebreakSpace, "Invalid parameter");
+ 
+   PRInt32 sourceLen = (aSrcLen == kIgnoreLen) ? nsCRT::strlen(*ioBuffer) + 1 : aSrcLen;
+ 
+   // can we convert in-place?
+   const char* srcBreaks = GetLinebreakString(aSrcBreaks);
+   const char* dstBreaks = GetLinebreakString(aDestBreaks);
+   
+   if ( (aSrcBreaks != eLinebreakAny) &&
+@@ -470,17 +475,18 @@ nsresult nsLinebreakConverter::ConvertUn
+ /*----------------------------------------------------------------------------
+ 	ConvertStringLineBreaks 
+ 	
+ ----------------------------------------------------------------------------*/
+ nsresult nsLinebreakConverter::ConvertStringLineBreaks(nsString& ioString,
+           ELinebreakType aSrcBreaks, ELinebreakType aDestBreaks)
+ {
+ 
+-  NS_ASSERTION(aDestBreaks != eLinebreakAny, "Invalid parameter");
++  NS_ASSERTION(aDestBreaks != eLinebreakAny &&
++	       aSrcBreaks != eLinebreakSpace, "Invalid parameter");
+ 
+   // nothing to do
+   if (ioString.IsEmpty()) return NS_OK;
+   
+   nsresult rv;
+   
+   // remember the old buffer in case
+   // we blow it away later
+diff --git a/xpcom/io/nsLinebreakConverter.h b/xpcom/io/nsLinebreakConverter.h
+--- a/xpcom/io/nsLinebreakConverter.h
++++ b/xpcom/io/nsLinebreakConverter.h
+@@ -53,17 +53,19 @@ public:
+     eLinebreakAny,          // any kind of linebreak (i.e. "don't care" source)
+     
+     eLinebreakPlatform,     // platform linebreak
+     eLinebreakContent,      // Content model linebreak (LF)
+     eLinebreakNet,          // Form submission linebreak (CRLF)
+   
+     eLinebreakMac,          // CR
+     eLinebreakUnix,         // LF
+-    eLinebreakWindows       // CRLF
++    eLinebreakWindows,      // CRLF
++
++    eLinebreakSpace         // space characters. Only valid as destination type
+   
+   } ELinebreakType;
+ 
+   enum {
+     kIgnoreLen = -1
+   };
+   
+   /* ConvertLineBreaks

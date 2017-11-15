@@ -1,0 +1,237 @@
+Index: caps/include/nsScriptSecurityManager.h
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/caps/include/nsScriptSecurityManager.h,v
+retrieving revision 1.93
+diff -u -p -d -1 -0 -r1.93 nsScriptSecurityManager.h
+--- caps/include/nsScriptSecurityManager.h	22 Jul 2005 20:49:11 -0000	1.93
++++ caps/include/nsScriptSecurityManager.h	20 Oct 2005 16:15:25 -0000
+@@ -58,20 +58,21 @@
+ #include "plstr.h"
+ 
+ class nsIDocShell;
+ class nsString;
+ class nsIClassInfo;
+ class nsIIOService;
+ class nsIXPConnect;
+ class nsIStringBundle;
+ class nsSystemPrincipal;
+ struct ClassPolicy;
++class ClassInfoData;
+ 
+ #if defined(DEBUG_mstoltz) || defined(DEBUG_caillon)
+ #define DEBUG_CAPS_HACKER
+ #endif
+ 
+ #ifdef DEBUG_CAPS_HACKER
+ #define DEBUG_CAPS_CheckPropertyAccessImpl
+ #define DEBUG_CAPS_LookupPolicy
+ #define DEBUG_CAPS_CheckComponentPermissions
+ #endif
+@@ -414,21 +419,21 @@ private:
+                                      PRBool aIsCheckConnect);
+ 
+     nsresult
+     CheckSameOriginDOMProp(nsIPrincipal* aSubject, 
+                            nsIPrincipal* aObject,
+                            PRUint32 aAction,
+                            PRBool aIsCheckConnect);
+ 
+     nsresult
+     LookupPolicy(nsIPrincipal* principal,
+-                 const char* aClassName, jsval aProperty,
++                 ClassInfoData& aClassData, jsval aProperty,
+                  PRUint32 aAction,
+                  ClassPolicy** aCachedClassPolicy,
+                  SecurityLevel* result);
+ 
+     nsresult
+     CreateCodebasePrincipal(nsIURI* aURI, nsIPrincipal** result);
+ 
+     // This is just like the API method, but it doesn't check that the subject
+     // name is non-empty or aCertificate is non-null, and it doesn't change the
+     // certificate in the table (if any) in any way if aModifyTable is false.
+Index: caps/src/nsScriptSecurityManager.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/caps/src/nsScriptSecurityManager.cpp,v
+retrieving revision 1.275
+diff -u -p -d -1 -0 -r1.275 nsScriptSecurityManager.cpp
+--- caps/src/nsScriptSecurityManager.cpp	30 Sep 2005 03:30:40 -0000	1.275
++++ caps/src/nsScriptSecurityManager.cpp	20 Oct 2005 16:22:00 -0000
+@@ -617,21 +617,21 @@ nsScriptSecurityManager::CheckPropertyAc
+     ClassInfoData classInfoData(aClassInfo, aClassName);
+ #ifdef DEBUG_CAPS_CheckPropertyAccessImpl
+     nsCAutoString propertyName;
+     propertyName.AssignWithConversion((PRUnichar*)JSValIDToString(cx, aProperty));
+     printf("### CanAccess(%s.%s, %i) ", classInfoData.GetName(), 
+            propertyName.get(), aAction);
+ #endif
+ 
+     //-- Look up the security policy for this class and subject domain
+     SecurityLevel securityLevel;
+-    rv = LookupPolicy(subjectPrincipal, classInfoData.GetName(), aProperty, aAction, 
++    rv = LookupPolicy(subjectPrincipal, classInfoData, aProperty, aAction, 
+                       (ClassPolicy**)aCachedClassPolicy, &securityLevel);
+     if (NS_FAILED(rv))
+         return rv;
+ 
+     if (securityLevel.level == SCRIPT_SECURITY_UNDEFINED_ACCESS)
+     {   
+         // No policy found for this property so use the default of last resort.
+         // If we were called from somewhere other than XPConnect
+         // (no XPC call context), assume this is a DOM class. Otherwise,
+         // ask the ClassInfo.
+@@ -916,24 +916,25 @@ nsScriptSecurityManager::CheckSameOrigin
+         return NS_OK;
+ 
+     /*
+     ** Access tests failed, so now report error.
+     */
+     return NS_ERROR_DOM_PROP_ACCESS_DENIED;
+ }
+ 
+ nsresult
+ nsScriptSecurityManager::LookupPolicy(nsIPrincipal* aPrincipal,
+-                                     const char* aClassName, jsval aProperty,
+-                                     PRUint32 aAction,
+-                                     ClassPolicy** aCachedClassPolicy,
+-                                     SecurityLevel* result)
++                                      ClassInfoData& aClassData,
++                                      jsval aProperty,
++                                      PRUint32 aAction,
++                                      ClassPolicy** aCachedClassPolicy,
++                                      SecurityLevel* result)
+ {
+     nsresult rv;
+     result->level = SCRIPT_SECURITY_UNDEFINED_ACCESS;
+ 
+     DomainPolicy* dpolicy = nsnull;
+     //-- Initialize policies if necessary
+     if (mPolicyPrefsChanged)
+     {
+         rv = InitPolicies();
+         if (NS_FAILED(rv))
+@@ -1017,21 +1018,21 @@ nsScriptSecurityManager::LookupPolicy(ns
+     }
+ 
+     if (!cpolicy)
+     { //-- No cached policy for this class, need to look it up
+ #ifdef DEBUG_CAPS_LookupPolicy
+         printf("ClassLookup ");
+ #endif
+ 
+         cpolicy = NS_STATIC_CAST(ClassPolicy*,
+                                  PL_DHashTableOperate(dpolicy,
+-                                                      aClassName,
++                                                      aClassData.GetName(),
+                                                       PL_DHASH_LOOKUP));
+ 
+         if (PL_DHASH_ENTRY_IS_FREE(cpolicy))
+             cpolicy = NO_POLICY_FOR_CLASS;
+ 
+         if ((dpolicy == mDefaultPolicy) && aCachedClassPolicy)
+             *aCachedClassPolicy = cpolicy;
+     }
+ 
+     // We look for a PropertyPolicy in the following places:
+@@ -1061,21 +1062,21 @@ nsScriptSecurityManager::LookupPolicy(ns
+     }
+ 
+     // If dpolicy is not the defauly policy and there's no class or wildcard
+     // policy for this property, check the default policy for this class and
+     // the default wildcard policy
+     if (dpolicy != mDefaultPolicy &&
+         (!ppolicy || PL_DHASH_ENTRY_IS_FREE(ppolicy)))
+     {
+         cpolicy = NS_STATIC_CAST(ClassPolicy*,
+                                  PL_DHashTableOperate(mDefaultPolicy,
+-                                                      aClassName,
++                                                      aClassData.GetName(),
+                                                       PL_DHASH_LOOKUP));
+ 
+         if (PL_DHASH_ENTRY_IS_BUSY(cpolicy))
+         {
+             ppolicy =
+                 NS_STATIC_CAST(PropertyPolicy*,
+                                PL_DHashTableOperate(cpolicy->mPolicy,
+                                                     (void*)aProperty,
+                                                     PL_DHASH_LOOKUP));
+         }
+@@ -1334,25 +1335,24 @@ nsScriptSecurityManager::CheckLoadURIWit
+                 return NS_OK;
+             case PrefControlled:
+                 {
+                     // resource: and chrome: are equivalent, securitywise
+                     if (sourceScheme.EqualsLiteral("chrome") ||
+                         sourceScheme.EqualsLiteral("resource"))
+                         return NS_OK;
+ 
+                     // Now check capability policies
+                     static const char loadURIPrefGroup[] = "checkloaduri";
++                    ClassInfoData nameData(nsnull, loadURIPrefGroup);
+ 
+                     SecurityLevel secLevel;
+-                    rv = LookupPolicy(aPrincipal,
+-                                      (char*)loadURIPrefGroup,
+-                                      sEnabledID,
++                    rv = LookupPolicy(aPrincipal, nameData, sEnabledID,
+                                       nsIXPCSecurityManager::ACCESS_GET_PROPERTY, 
+                                       nsnull, &secLevel);
+                     if (NS_SUCCEEDED(rv) && secLevel.level == SCRIPT_SECURITY_ALL_ACCESS)
+                     {
+                         // OK for this site!
+                         return NS_OK;
+                     }
+ 
+                     ReportError(nsnull, errorTag, sourceURI, aTargetURI);
+                     return NS_ERROR_DOM_BAD_URI;
+@@ -1617,23 +1617,24 @@ nsScriptSecurityManager::CanExecuteScrip
+                 *result = mIsMailJavaScriptEnabled;
+             }
+         }
+     }
+ 
+     if (!*result)
+         return NS_OK; // Do not run scripts
+ 
+     //-- Check for a per-site policy
+     static const char jsPrefGroupName[] = "javascript";
++    ClassInfoData nameData(nsnull, jsPrefGroupName);
+ 
+     SecurityLevel secLevel;
+-    rv = LookupPolicy(aPrincipal, (char*)jsPrefGroupName, sEnabledID,
++    rv = LookupPolicy(aPrincipal, nameData, sEnabledID,
+                       nsIXPCSecurityManager::ACCESS_GET_PROPERTY, 
+                       nsnull, &secLevel);
+     if (NS_FAILED(rv) || secLevel.level == SCRIPT_SECURITY_NO_ACCESS)
+     {
+         *result = PR_FALSE;
+         return rv;
+     }
+ 
+     //-- Nobody vetoed, so allow the JS to run.
+     *result = PR_TRUE;
+@@ -2691,22 +2721,23 @@ nsScriptSecurityManager::CheckComponentP
+     ToUpperCase(cid);
+ 
+ #ifdef DEBUG_CAPS_CheckComponentPermissions
+     printf("### CheckComponentPermissions(ClassID.%s) ",cid.get());
+ #endif
+ 
+     // Look up the policy for this class.
+     // while this isn't a property we'll treat it as such, using ACCESS_CALL_METHOD
+     jsval cidVal = STRING_TO_JSVAL(::JS_InternString(cx, cid.get()));
+ 
++    ClassInfoData nameData(nsnull, "ClassID");
+     SecurityLevel securityLevel;
+-    rv = LookupPolicy(subjectPrincipal, "ClassID", cidVal,
++    rv = LookupPolicy(subjectPrincipal, nameData, cidVal,
+                       nsIXPCSecurityManager::ACCESS_CALL_METHOD, 
+                       nsnull, &securityLevel);
+     if (NS_FAILED(rv))
+         return rv;
+ 
+     // If there's no policy stored, use the "security.classID.allowByDefault" pref 
+     if (securityLevel.level == SCRIPT_SECURITY_UNDEFINED_ACCESS)
+         securityLevel.level = mXPCDefaultGrantAll ? SCRIPT_SECURITY_ALL_ACCESS :
+                                                     SCRIPT_SECURITY_NO_ACCESS;
+ 

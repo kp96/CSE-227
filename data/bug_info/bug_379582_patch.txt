@@ -1,0 +1,277 @@
+Index: security/manager/ssl/src/nsNSSComponent.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSComponent.cpp,v
+retrieving revision 1.146
+diff -u -p -d -8 -r1.146 nsNSSComponent.cpp
+--- security/manager/ssl/src/nsNSSComponent.cpp	20 Feb 2007 16:26:07 -0000	1.146
++++ security/manager/ssl/src/nsNSSComponent.cpp	8 May 2007 18:32:35 -0000
+@@ -1858,79 +1858,42 @@ nsNSSComponent::RandomUpdate(void *entro
+ #define PROFILE_AFTER_CHANGE_TOPIC "profile-after-change"
+ #define SESSION_LOGOUT_TOPIC "session-logout"
+ 
+ NS_IMETHODIMP
+ nsNSSComponent::Observe(nsISupports *aSubject, const char *aTopic, 
+                         const PRUnichar *someData)
+ {
+   if (nsCRT::strcmp(aTopic, PROFILE_APPROVE_CHANGE_TOPIC) == 0) {
+-    if (mShutdownObjectList->isUIActive()) {
+-      ShowAlert(ai_crypto_ui_active);
+-      nsCOMPtr<nsIProfileChangeStatus> status = do_QueryInterface(aSubject);
+-      if (status) {
+-        status->VetoChange();
+-      }
+-    }
++    DoProfileApproveChange(aSubject);
+   }
+   else if (nsCRT::strcmp(aTopic, PROFILE_CHANGE_TEARDOWN_TOPIC) == 0) {
+     PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("in PSM code, receiving change-teardown\n"));
+-
+-    PRBool callVeto = PR_FALSE;
+-
+-    if (!mShutdownObjectList->ifPossibleDisallowUI()) {
+-      callVeto = PR_TRUE;
+-      ShowAlert(ai_crypto_ui_active);
+-    }
+-    else if (mShutdownObjectList->areSSLSocketsActive()) {
+-      callVeto = PR_TRUE;
+-      ShowAlert(ai_sockets_still_active);
+-    }
+-
+-    if (callVeto) {
+-      nsCOMPtr<nsIProfileChangeStatus> status = do_QueryInterface(aSubject);
+-      if (status) {
+-        status->VetoChange();
+-      }
+-    }
++    DoProfileChangeTeardown(aSubject);
+   }
+   else if (nsCRT::strcmp(aTopic, PROFILE_CHANGE_TEARDOWN_VETO_TOPIC) == 0) {
+     mShutdownObjectList->allowUI();
+   }
+   else if (nsCRT::strcmp(aTopic, PROFILE_BEFORE_CHANGE_TOPIC) == 0) {
+     PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("receiving profile change topic\n"));
+-    NS_ASSERTION(mIsNetworkDown, "nsNSSComponent relies on profile manager to wait for synchronous shutdown of all network activity");
+-
+-    PRBool needsCleanup = PR_TRUE;
+-
+-    {
+-      nsAutoLock lock(mutex);
+-
+-      if (!mNSSInitialized) {
+-        // Make sure we don't try to cleanup if we have already done so.
+-        // This makes sure we behave safely, in case we are notified
+-        // multiple times.
+-        needsCleanup = PR_FALSE;
+-      }
+-    }
+-    
+-    StopCRLUpdateTimer();
+-
+-    if (needsCleanup) {
+-      if (NS_FAILED(ShutdownNSS())) {
+-        nsCOMPtr<nsIProfileChangeStatus> status = do_QueryInterface(aSubject);
+-        if (status) {
+-          status->ChangeFailed();
+-        }
+-      }
+-    }
+-    mShutdownObjectList->allowUI();
+-
++    DoProfileBeforeChange(aSubject);
+   }
+   else if (nsCRT::strcmp(aTopic, PROFILE_AFTER_CHANGE_TOPIC) == 0) {
++    if (someData && NS_LITERAL_STRING("startup").Equals(someData)) {
++      // We're starting up the application, so there was no
++      // PROFILE_BEFORE_CHANGE_TOPIC notification (we had no profile until
++      // now).  Handle shutting down NSS here, so we can restart it with the
++      // right profile.  We need to mimic the net-teardown and net-restore
++      // notifications we would normally get around profile-before-change.
++      DoProfileApproveChange(aSubject);
++      DoProfileChangeNetTeardown();
++      DoProfileChangeTeardown(aSubject);
++      DoProfileBeforeChange(aSubject);
++      DoProfileChangeNetRestore();
++    }
+   
+     PRBool needsInit = PR_TRUE;
+ 
+     {
+       nsAutoLock lock(mutex);
+ 
+       if (mNSSInitialized) {
+         // We have already initialized NSS before the profile came up,
+@@ -2016,33 +1979,21 @@ nsNSSComponent::Observe(nsISupports *aSu
+         }
+       }
+     }
+     if (clearSessionCache)
+       SSL_ClearSessionCache();
+   }
+   else if (nsCRT::strcmp(aTopic, PROFILE_CHANGE_NET_TEARDOWN_TOPIC) == 0) {
+     PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("receiving network teardown topic\n"));
+-    if (mSSLThread)
+-      mSSLThread->requestExit();
+-    if (mCertVerificationThread)
+-      mCertVerificationThread->requestExit();
+-    mIsNetworkDown = PR_TRUE;
++    DoProfileChangeNetTeardown();
+   }
+   else if (nsCRT::strcmp(aTopic, PROFILE_CHANGE_NET_RESTORE_TOPIC) == 0) {
+     PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("receiving network restore topic\n"));
+-    delete mSSLThread;
+-    mSSLThread = new nsSSLThread();
+-    if (mSSLThread)
+-      mSSLThread->startThread();
+-    delete mCertVerificationThread;
+-    mCertVerificationThread = new nsCertVerificationThread();
+-    if (mCertVerificationThread)
+-      mCertVerificationThread->startThread();
+-    mIsNetworkDown = PR_FALSE;
++    DoProfileChangeNetRestore();
+   }
+ 
+   return NS_OK;
+ }
+ 
+ void nsNSSComponent::ShowAlert(AlertIdentifier ai)
+ {
+   nsString message;
+@@ -2227,16 +2178,105 @@ nsNSSComponent::GetErrorMessage(nsresult
+     mPIPNSSBundle->GetStringFromName(NS_ConvertASCIItoUTF16(id_str).get(),
+                                      getter_Copies(msg));
+   if (NS_SUCCEEDED(rv)) {
+     aErrorMessage = msg;
+   }
+   return rv;
+ }
+ 
++void
++nsNSSComponent::DoProfileApproveChange(nsISupports* aSubject)
++{
++  if (mShutdownObjectList->isUIActive()) {
++    ShowAlert(ai_crypto_ui_active);
++    nsCOMPtr<nsIProfileChangeStatus> status = do_QueryInterface(aSubject);
++    if (status) {
++      status->VetoChange();
++    }
++  }
++}
++
++void
++nsNSSComponent::DoProfileChangeNetTeardown()
++{
++  if (mSSLThread)
++    mSSLThread->requestExit();
++  if (mCertVerificationThread)
++    mCertVerificationThread->requestExit();
++  mIsNetworkDown = PR_TRUE;
++}
++
++void
++nsNSSComponent::DoProfileChangeTeardown(nsISupports* aSubject)
++{
++  PRBool callVeto = PR_FALSE;
++
++  if (!mShutdownObjectList->ifPossibleDisallowUI()) {
++    callVeto = PR_TRUE;
++    ShowAlert(ai_crypto_ui_active);
++  }
++  else if (mShutdownObjectList->areSSLSocketsActive()) {
++    callVeto = PR_TRUE;
++    ShowAlert(ai_sockets_still_active);
++  }
++
++  if (callVeto) {
++    nsCOMPtr<nsIProfileChangeStatus> status = do_QueryInterface(aSubject);
++    if (status) {
++      status->VetoChange();
++    }
++  }
++}
++
++void
++nsNSSComponent::DoProfileBeforeChange(nsISupports* aSubject)
++{
++  NS_ASSERTION(mIsNetworkDown, "nsNSSComponent relies on profile manager to wait for synchronous shutdown of all network activity");
++
++  PRBool needsCleanup = PR_TRUE;
++
++  {
++    nsAutoLock lock(mutex);
++
++    if (!mNSSInitialized) {
++      // Make sure we don't try to cleanup if we have already done so.
++      // This makes sure we behave safely, in case we are notified
++      // multiple times.
++      needsCleanup = PR_FALSE;
++    }
++  }
++    
++  StopCRLUpdateTimer();
++
++  if (needsCleanup) {
++    if (NS_FAILED(ShutdownNSS())) {
++      nsCOMPtr<nsIProfileChangeStatus> status = do_QueryInterface(aSubject);
++      if (status) {
++        status->ChangeFailed();
++      }
++    }
++  }
++  mShutdownObjectList->allowUI();
++}
++
++void
++nsNSSComponent::DoProfileChangeNetRestore()
++{
++  delete mSSLThread;
++  mSSLThread = new nsSSLThread();
++  if (mSSLThread)
++    mSSLThread->startThread();
++  delete mCertVerificationThread;
++  mCertVerificationThread = new nsCertVerificationThread();
++  if (mCertVerificationThread)
++    mCertVerificationThread->startThread();
++  mIsNetworkDown = PR_FALSE;
++}
++
+ //---------------------------------------------
+ // Implementing nsICryptoHash
+ //---------------------------------------------
+ 
+ nsCryptoHash::nsCryptoHash()
+   : mHashContext(nsnull)
+ {
+ }
+Index: security/manager/ssl/src/nsNSSComponent.h
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSComponent.h,v
+retrieving revision 1.47
+diff -u -p -d -8 -r1.47 nsNSSComponent.h
+--- security/manager/ssl/src/nsNSSComponent.h	23 Apr 2007 14:22:02 -0000	1.47
++++ security/manager/ssl/src/nsNSSComponent.h	8 May 2007 18:30:10 -0000
+@@ -252,16 +252,25 @@ private:
+   nsresult InitializePIPNSSBundle();
+   nsresult ConfigureInternalPKCS11Token();
+   nsresult RegisterPSMContentListener();
+   nsresult RegisterObservers();
+   nsresult DownloadCrlSilently();
+   nsresult PostCRLImportEvent(const nsCSubstring &urlString, nsIStreamListener *psmDownloader);
+   nsresult getParamsForNextCrlToDownload(nsAutoString *url, PRTime *time, nsAutoString *key);
+   nsresult DispatchEventToWindow(nsIDOMWindow *domWin, const nsAString &eventType, const nsAString &token);
++
++  // Methods that we use to handle the profile change notifications (and to
++  // synthesize a full profile change when we're just doing a profile startup):
++  void DoProfileApproveChange(nsISupports* aSubject);
++  void DoProfileChangeNetTeardown();
++  void DoProfileChangeTeardown(nsISupports* aSubject);
++  void DoProfileBeforeChange(nsISupports* aSubject);
++  void DoProfileChangeNetRestore();
++  
+   PRLock *mutex;
+   
+   nsCOMPtr<nsIScriptSecurityManager> mScriptSecurityManager;
+   nsCOMPtr<nsIStringBundle> mPIPNSSBundle;
+   nsCOMPtr<nsIURIContentListener> mPSMContentListener;
+   nsCOMPtr<nsIPrefBranch> mPrefBranch;
+   nsCOMPtr<nsITimer> mTimer;
+   PRBool mNSSInitialized;

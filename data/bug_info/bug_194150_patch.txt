@@ -1,0 +1,177 @@
+? .crlManager.xul.swp
+? pref-security.patch
+Index: certManager.xul
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/certManager.xul,v
+retrieving revision 1.24
+diff -u -r1.24 certManager.xul
+--- certManager.xul	23 Sep 2002 23:16:46 -0000	1.24
++++ certManager.xul	20 Feb 2003 01:25:25 -0000
+@@ -32,9 +32,11 @@
+ 
+ <!DOCTYPE window SYSTEM "chrome://pippki/locale/certManager.dtd">
+ 
+-<window id="certmanager" 
++<dialog id="certmanager" 
++	buttons="accept,help"
+ 	xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul" 
+         title="&certmgr.title;"
++	ondialoghelp="doHelpButton();"
+         onload="LoadCerts();">
+ 
+   <script type="application/x-javascript" src="chrome://help/content/contextHelp.js"/>
+@@ -42,29 +44,19 @@
+   <script type="application/x-javascript" src="chrome://pippki/content/pippki.js"/>
+   <script type="application/x-javascript" src="chrome://pippki/content/certManager.js"/>
+ 
+-  <vbox flex="1">
+-    <tabbox flex="1">
+-      <tabs id="certMgrTabbox">
+-        <tab id="mine_tab" label="&certmgr.tab.mine;"/>
+-        <tab id="others_tab" label="&certmgr.tab.others;"/>
+-        <tab id="websites_tab" label="&certmgr.tab.websites;"/>
+-        <tab id="ca_tab" label="&certmgr.tab.ca;" selected="true"/>
+-      </tabs>
+-      <tabpanels flex="1">
+-        <vbox id="myCerts" flex="1"/>
+-        <vbox id="othersCerts" flex="1"/>
+-        <vbox id="webCerts" flex="1"/>
+-        <vbox id="CACerts" flex="1"/>
+-      </tabpanels>
+-    </tabbox>
++  <tabbox flex="1">
++    <tabs id="certMgrTabbox">
++      <tab id="mine_tab" label="&certmgr.tab.mine;"/>
++      <tab id="others_tab" label="&certmgr.tab.others;"/>
++      <tab id="websites_tab" label="&certmgr.tab.websites;"/>
++      <tab id="ca_tab" label="&certmgr.tab.ca;" selected="true"/>
++    </tabs>
++    <tabpanels flex="1">
++      <vbox id="myCerts" flex="1"/>
++      <vbox id="othersCerts" flex="1"/>
++      <vbox id="webCerts" flex="1"/>
++      <vbox id="CACerts" flex="1"/>
++    </tabpanels>
++  </tabbox>
+ 
+-    <hbox align="center">
+-      <button id="HelpButton"
+-              label="&certmgr.help.label;" 
+-              accesskey="&certmgr.helpButtonAccessKey;"
+-              oncommand="doHelpButton();"/>
+-      <description id="ocsp_info" hidden="true">&certmgr.ocsp_info;</description>
+-    </hbox>
+-  </vbox>
+-
+-</window>
++</dialog>
+Index: crlManager.xul
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/crlManager.xul,v
+retrieving revision 1.12
+diff -u -r1.12 crlManager.xul
+--- crlManager.xul	15 Apr 2002 12:18:13 -0000	1.12
++++ crlManager.xul	20 Feb 2003 01:25:25 -0000
+@@ -34,11 +34,12 @@
+     %prefCertMgrDTD;
+ ]>
+ 
+-<window id="crlviewer"
+-        class="dialog"
++<dialog id="crlviewer"
++	buttons="accept,help"
+         title="&validation.crlmanager.label;"
+         xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+         style="width: 30em;"
++	ondialoghelp="openHelp('validation-crl-manage');"
+         onload="onLoad();">
+ 
+   <script type="application/x-javascript" src="chrome://global/content/strres.js"/>
+@@ -75,10 +76,6 @@
+     <button id="updateCRL" class="dialog push" disabled="true"
+             label="&validation.updatecrl.label;"
+             oncommand="UpdateCRL();"/>
+-    <spacer flex="2" />
+-    <button id="help-button" label="&help.button;"
+-            oncommand="openHelp('validation-crl-manage');"/> 
+-
+   </hbox>
+   <separator class="thin"/>
+-</window>
++</dialog>
+Index: device_manager.xul
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/device_manager.xul,v
+retrieving revision 1.12
+diff -u -r1.12 device_manager.xul
+--- device_manager.xul	29 Mar 2002 02:44:57 -0000	1.12
++++ device_manager.xul	20 Feb 2003 01:25:25 -0000
+@@ -31,10 +31,12 @@
+ %pippkiDTD;
+ ]>
+ 
+-<window id="devicemanager"
++<dialog id="devicemanager"
++	buttons="accept,help"
+         xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul" 
+         title="&devmgr.title;"
+         persist="screenX screenY width height"
++	ondialoghelp="openHelp('sec_devices');"
+         onload="LoadModules();">
+ 
+ <script type="application/x-javascript" src="chrome://global/content/strres.js"/>
+@@ -93,13 +95,4 @@
+   </rows>
+ </grid>
+ 
+-<hbox>
+-  <button id="help_button" 
+-          label="&help.label;" 
+-          oncommand="openHelp('sec_devices');"/> 
+-  <button id="ok_button" 
+-          label="&ok.label;" 
+-          oncommand="window.close();"/> 
+-</hbox>
+-
+-</window>
++</dialog>
+Index: pref-security.js
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/pref-security.js,v
+retrieving revision 1.6
+diff -u -r1.6 pref-security.js
+--- pref-security.js	24 Jul 2001 23:55:27 -0000	1.6
++++ pref-security.js	20 Feb 2003 01:25:25 -0000
+@@ -35,12 +35,12 @@
+ 
+ function openCertManager()
+ {
+-    window.open('chrome://pippki/content/certManager.xul',  "",
+-                'chrome,width=500,height=400,resizable=yes,dialog=no');
++    window.openDialog('chrome://pippki/content/certManager.xul',  "_blank",
++                'chrome,height=400,resizable=yes');
+ }
+ 
+ function openDeviceManager()
+ {
+-    window.open('chrome://pippki/content/device_manager.xul',  "devmgr",
+-                'chrome,width=540,height=360,resizable=yes');
++    window.openDialog('chrome://pippki/content/device_manager.xul',  "devmgr",
++                'chrome,height=360,resizable=yes');
+ }
+Index: pref-validation.js
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/pref-validation.js,v
+retrieving revision 1.4
+diff -u -r1.4 pref-validation.js
+--- pref-validation.js	14 Oct 2002 14:48:42 -0000	1.4
++++ pref-validation.js	20 Feb 2003 01:25:25 -0000
+@@ -89,7 +89,7 @@
+ 
+ function openCrlManager()
+ {
+-    window.open('chrome://pippki/content/crlManager.xul',  "",
++    window.openDialog('chrome://pippki/content/crlManager.xul',  "",
+                 'chrome,width=500,height=400,resizable=1');
+ }
+ 

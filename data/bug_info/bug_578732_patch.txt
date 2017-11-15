@@ -1,0 +1,220 @@
+diff --git a/firetorrent/3rdparty/Makefile.in b/firetorrent/3rdparty/Makefile.in
+--- a/firetorrent/3rdparty/Makefile.in
++++ b/firetorrent/3rdparty/Makefile.in
+@@ -17,6 +17,7 @@
+ 
+ ifeq ($(OS_ARCH),WINNT)
+ BJAM_INCLUDE="$(INCLUDE);$(MOZILLABUILD)msys\include"
++BJAM_FLAGS= toolset=msvc-8.0
+ else
+ BJAM_INCLUDE=$(INCLUDE)
+ endif
+diff --git a/firetorrent/Makefile.in b/firetorrent/Makefile.in
+--- a/firetorrent/Makefile.in
++++ b/firetorrent/Makefile.in
+@@ -5,7 +5,7 @@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+-EXTENSION_VERSION       = 2.0.1
++EXTENSION_VERSION       = 2.0.3
+ XPI_NAME                = firetorrent
+ USE_EXTENSION_MANIFEST  = 1
+ NO_JAR_AUTO_REG         = 1
+diff --git a/firetorrent/components/aboutTorrentProgressListener.js b/firetorrent/components/aboutTorrentProgressListener.js
+--- a/firetorrent/components/aboutTorrentProgressListener.js
++++ b/firetorrent/components/aboutTorrentProgressListener.js
+@@ -71,49 +71,49 @@
+       return;
+     }
+ 
+-    tTotalDone.innerHTML = Math.round(1000*(ft.currentByte/ft.size))/10;
++    tTotalDone.textContent = Math.round(1000*(ft.currentByte/ft.size))/10;
+ 
+-    aTab.contentDocument.getElementById('downloadedPieces').innerHTML = ft.downloadedPieces;
+-    aTab.contentDocument.getElementById('activeTime').innerHTML = ft.activeTime;
+-    aTab.contentDocument.getElementById('seedingTime').innerHTML = ft.seedingTime;
++    aTab.contentDocument.getElementById('downloadedPieces').textContent = ft.downloadedPieces;
++    aTab.contentDocument.getElementById('activeTime').textContent = ft.activeTime;
++    aTab.contentDocument.getElementById('seedingTime').textContent = ft.seedingTime;
+     [size, unit] = DownloadUtils.convertByteUnits(ft.downloadRate);
+-    aTab.contentDocument.getElementById('downloadRate').innerHTML = size + ' ' + unit + '/s';
++    aTab.contentDocument.getElementById('downloadRate').textContent = size + ' ' + unit + '/s';
+ 
+ 
+     [size, unit] = DownloadUtils.convertByteUnits(ft.uploadRate);
+-    aTab.contentDocument.getElementById('uploadRate').innerHTML = size + ' ' + unit + '/s';
++    aTab.contentDocument.getElementById('uploadRate').textContent = size + ' ' + unit + '/s';
+ 
+     [size, unit] = DownloadUtils.convertByteUnits(ft.totalUploaded);
+-    aTab.contentDocument.getElementById('totalUploaded').innerHTML = size + ' ' + unit;
+-    aTab.contentDocument.getElementById('distributedCopies').innerHTML = ft.distributedCopies;
++    aTab.contentDocument.getElementById('totalUploaded').textContent = size + ' ' + unit;
++    aTab.contentDocument.getElementById('distributedCopies').textContent = ft.distributedCopies;
+ 
+     var torrentStatus = ft.torrentStatus;
+     var statusDescList = ['Queued for checking', 'Checking files', 'Downloading metadata', 'Downloading', 'Finished', 'Seeding', 'Allocating'];
+     var statusDesc = statusDescList[ft.torrentStatus];
+ 
+-    aTab.contentDocument.getElementById('torrentStatus').innerHTML = statusDesc;
++    aTab.contentDocument.getElementById('torrentStatus').textContent = statusDesc;
+ 
+     // Then update the info which gets updated only from time to time
+     if (Date.now() - this.lastUpdateTime(aTab, torrentSpec) > TORRENT_INFO_UPDATE_INTERVAL) {
+       var tName = aTab.contentDocument.getElementById('torrentName');
+       if (ft.filename && tName) {
+-        tName.innerHTML = ft.filename;
++        tName.textContent = ft.filename;
+       }
+ 
+       var tTotalSize = aTab.contentDocument.getElementById('totalSize');
+ 
+       [size, unit] = DownloadUtils.convertByteUnits(ft.size);
+-      tTotalSize.innerHTML = size + ' ' + unit;
++      tTotalSize.textContent = size + ' ' + unit;
+ 
+-      aTab.contentDocument.getElementById('totalPieces').innerHTML = ft.totalPieces;
++      aTab.contentDocument.getElementById('totalPieces').textContent = ft.totalPieces;
+ 
+       var creationDate = new Date(ft.creationDate);
+-      aTab.contentDocument.getElementById('creationDate').innerHTML = creationDate.toString();
++      aTab.contentDocument.getElementById('creationDate').textContent = creationDate.toString();
+ 
+-      aTab.contentDocument.getElementById('torrentComment').innerHTML = ft.torrentComment;
++      aTab.contentDocument.getElementById('torrentComment').textContent = ft.torrentComment;
+ 
+-      aTab.contentDocument.getElementById('hash').innerHTML = ft.hash.toString();
+-      aTab.contentDocument.getElementById('isPrivate').innerHTML = ft.isPrivate.toString();
++      aTab.contentDocument.getElementById('hash').textContent = ft.hash.toString();
++      aTab.contentDocument.getElementById('isPrivate').textContent = ft.isPrivate.toString();
+ 
+       // Fill the table with the files
+       var filesEnumerator = ft.files.enumerate();
+@@ -131,7 +131,7 @@
+         
+         filesHtml += '<td><input id="checkboxFile' + fileNum + '" type="checkbox"/></td>';
+ 
+-        filesHtml += '<td>' + file.path + '</td><td>' + fileSize + ' ' + fileSizeUnits + '</td><td>' + totalDone + ' ' + totalDoneUnits + '</td></tr>';
++        filesHtml += '<td>' + this.escapeHTML(file.path) + '</td><td>' + fileSize + ' ' + fileSizeUnits + '</td><td>' + totalDone + ' ' + totalDoneUnits + '</td></tr>';
+         
+         fileNum++;
+       }
+@@ -174,9 +174,9 @@
+       var trackersHtml = '<tr id="trackersHeader">' + aTab.contentDocument.getElementById('trackersHeader').innerHTML + '</tr>';
+ 
+       while (trackersEnumerator.hasMoreElements()) {
+-        var tracker = trackersEnumerator.getNext().QueryInterface(Ci.nsISupportsString);
++        var tracker = trackersEnumerator.getNext().QueryInterface(Ci.nsISupportsString).data;
+ 
+-        trackersHtml += '<tr><td>' + tracker + '</td></tr>';
++        trackersHtml += '<tr><td>' + this.escapeHTML(tracker) + '</td></tr>';
+       }
+ 
+       trackersTable.innerHTML = trackersHtml;
+@@ -191,7 +191,7 @@
+         piecesString += (hasPiece.data ? ' 1' : ' 0');
+       }
+ 
+-      piecesElem.innerHTML = piecesString;
++      piecesElem.textContent = piecesString;
+ 
+       var peersEnumerator = ft.peers.enumerate();
+       var peersTable = aTab.contentDocument.getElementById('peers');
+@@ -209,7 +209,7 @@
+ 
+         peersHtml += '<tr><td>' + peer.ip + '</td><td>' + uSpeed + ' ' + uSpeedUnits + '/s</td><td>' + dSpeed + ' ' + dSpeedUnits + '/s</td><td>' + dTotal + ' ' + dTotalUnits + '</td><td>' +
+             uTotal + ' ' + uTotalUnits + '</td><td>' + peer.uploadLimit + '</td><td>' + peer.downloadLimit + '</td><td>' + peer.lastRequestTime + '</td><td>' + 
+-            peer.lastActiveTime + '</td><td>' + peer.requestTimeout + '</td><td>' + peer.country + '</td><td>' + peer.client + '</td></tr>';
++            peer.lastActiveTime + '</td><td>' + peer.requestTimeout + '</td><td>' + this.escapeHTML(peer.country) + '</td><td>' + this.escapeHTML(peer.client) + '</td></tr>';
+         i++;
+       }
+ 
+@@ -260,6 +260,10 @@
+         ++i;
+       }
+     }
++  },
++  
++  escapeHTML: function (s) {
++    return s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+   }
+ };
+ 
+diff --git a/firetorrent/firetorrent-prefs.js b/firetorrent/firetorrent-prefs.js
+--- a/firetorrent/firetorrent-prefs.js
++++ b/firetorrent/firetorrent-prefs.js
+@@ -11,4 +11,3 @@
+ pref("firetorrent.options.useProxy", false);
+ pref("firetorrent.options.proxyIp", "127.0.0.1");
+ pref("firetorrent.options.proxyPort", 3128);
+-pref("general.useragent.extra.firetorrent", "FireTorrent/@EXTENSION_VERSION@");
+\ No newline at end of file
+diff --git a/firetorrent/globals.mk b/firetorrent/globals.mk
+--- a/firetorrent/globals.mk
++++ b/firetorrent/globals.mk
+@@ -1,4 +1,4 @@
+-BOOST_VERSION = 1_40
++BOOST_VERSION = 1_43
+ BOOST_VERSION_MINOR = 0
+ BOOST_HOME = boost_$(BOOST_VERSION)_$(BOOST_VERSION_MINOR)
+ 
+diff --git a/firetorrent/src/Makefile.in b/firetorrent/src/Makefile.in
+--- a/firetorrent/src/Makefile.in
++++ b/firetorrent/src/Makefile.in
+@@ -22,8 +22,6 @@
+   uriloader \
+ 	$(NULL)
+ 
+-BOOST_VERSION=1_40
+-
+ ifeq ($(OS_ARCH),WINNT)
+ REQUIRES        += zlib
+ ADDITIONAL_TORRENT_LIBS = \
+diff --git a/firetorrent/src/mozTracingListener.cpp b/firetorrent/src/mozTracingListener.cpp
+--- a/firetorrent/src/mozTracingListener.cpp
++++ b/firetorrent/src/mozTracingListener.cpp
+@@ -71,8 +71,10 @@
+   }
+ 
+   nsCOMPtr<nsIRequestObserver> observer = do_QueryInterface(mOriginalListener);
+-  if (observer)
+-    observer->OnStartRequest(aRequest, aCtxt);
++  if (observer) {
++    rv = observer->OnStartRequest(aRequest, aCtxt);
++    NS_ENSURE_SUCCESS(rv, rv);
++  }
+ 
+   return NS_OK;
+ }
+@@ -81,20 +83,25 @@
+ mozTracingListener::OnStopRequest(nsIRequest* aRequest, nsISupports* aCtxt,
+                                   nsresult aStatus)
+ {
++  nsresult rv;
+   nsCOMPtr<nsIRequestObserver> observer = do_QueryInterface(mOriginalListener);
+-  if (observer)
+-    observer->OnStopRequest(aRequest, aCtxt, aStatus);
++  if (observer) {
++    rv = observer->OnStopRequest(aRequest, aCtxt, aStatus);
++    NS_ENSURE_SUCCESS(rv, rv);
++  }
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ mozTracingListener::OnDataAvailable(nsIRequest* aRequest, nsISupports* aCtxt,
+-                                    nsIInputStream* aInput,
+-				    PRUint32 aOffset, PRUint32 aCount)
++  nsIInputStream* aInput, PRUint32 aOffset, PRUint32 aCount)
+ {
+-  if (mOriginalListener)
+-    mOriginalListener->OnDataAvailable(aRequest, aCtxt, aInput, aOffset, aCount);
++  nsresult rv;
++  if (mOriginalListener) {
++    rv = mOriginalListener->OnDataAvailable(aRequest, aCtxt, aInput, aOffset, aCount);
++    NS_ENSURE_SUCCESS(rv, rv);
++  }
+ 
+   return NS_OK;
+ }

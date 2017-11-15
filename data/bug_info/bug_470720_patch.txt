@@ -1,0 +1,41 @@
+Bug 470720 - Don't automatically unwrap XOWs or SJOWs in XPCNativeWrappers.
+
+diff --git a/js/src/xpconnect/src/XPCNativeWrapper.cpp b/js/src/xpconnect/src/XPCNativeWrapper.cpp
+--- a/js/src/xpconnect/src/XPCNativeWrapper.cpp
++++ b/js/src/xpconnect/src/XPCNativeWrapper.cpp
+@@ -798,32 +798,19 @@ XPCNativeWrapperCtor(JSContext *cx, JSOb
+ 
+   if (JSVAL_IS_PRIMITIVE(native)) {
+     return ThrowException(NS_ERROR_XPC_BAD_CONVERT_JS, cx);
+   }
+ 
+   JSObject *nativeObj = JSVAL_TO_OBJECT(native);
+ 
+   // Unwrap a cross origin wrapper, since we're more restrictive than it is.
+-  if (STOBJ_GET_CLASS(nativeObj) == &sXPC_XOW_JSClass.base) {
+-    jsval v;
+-    if (!::JS_GetReservedSlot(cx, nativeObj, XPCWrapper::sWrappedObjSlot, &v)) {
+-      return JS_FALSE;
+-    }
+-    // If v is primitive, allow nativeObj to remain a cross origin wrapper,
+-    // which will fail below (since it isn't a wrapped native).
+-    if (!JSVAL_IS_PRIMITIVE(v)) {
+-      nativeObj = JSVAL_TO_OBJECT(v);
+-    }
+-  } else if (STOBJ_GET_CLASS(nativeObj) == &sXPC_SJOW_JSClass.base) {
+-    // Also unwrap SJOWs.
+-    nativeObj = JS_GetParent(cx, nativeObj);
+-    if (!nativeObj) {
+-      return ThrowException(NS_ERROR_XPC_BAD_CONVERT_JS, cx);
+-    }
++  if (STOBJ_GET_CLASS(nativeObj) == &sXPC_XOW_JSClass.base ||
++      STOBJ_GET_CLASS(nativeObj) == &sXPC_SJOW_JSClass.base) {
++    return ThrowException(NS_ERROR_XPC_BAD_CONVERT_JS, cx);
+   }
+ 
+   XPCWrappedNative *wrappedNative;
+ 
+   if (XPCNativeWrapper::IsNativeWrapper(nativeObj)) {
+     // We're asked to wrap an already wrapped object. Re-wrap the
+     // object wrapped by the given wrapper.
+ 

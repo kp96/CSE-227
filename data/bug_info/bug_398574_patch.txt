@@ -1,0 +1,51 @@
+Index: caps/src/nsScriptSecurityManager.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/caps/src/nsScriptSecurityManager.cpp,v
+retrieving revision 1.323
+diff -u -p -8 -r1.323 nsScriptSecurityManager.cpp
+--- caps/src/nsScriptSecurityManager.cpp	6 Sep 2007 07:02:57 -0000	1.323
++++ caps/src/nsScriptSecurityManager.cpp	4 Oct 2007 17:59:38 -0000
+@@ -178,22 +178,22 @@ public:
+             mDidGetFlags = PR_TRUE;
+         }
+ 
+         return mFlags;
+     }
+ 
+     PRBool IsDOMClass()
+     {
+-        return GetFlags() & nsIClassInfo::DOM_OBJECT;
++        return !!(GetFlags() & nsIClassInfo::DOM_OBJECT);
+     }
+ 
+     PRBool IsContentNode()
+     {
+-        return GetFlags() & nsIClassInfo::CONTENT_NODE;
++        return !!(GetFlags() & nsIClassInfo::CONTENT_NODE);
+     }
+ 
+     const char* GetName()
+     {
+         if (!mName) {
+             if (mClassInfo) {
+                 mClassInfo->GetClassDescription(&mName);
+             }
+@@ -322,17 +322,17 @@ nsScriptSecurityManager::SecurityCompare
+         rv = sourceBaseURI->GetPort(&sourcePort);
+     PRBool result = NS_SUCCEEDED(rv) && targetPort == sourcePort;
+     // If the port comparison failed, see if either URL has a
+     // port of -1. If so, replace -1 with the default port
+     // for that scheme.
+     if (NS_SUCCEEDED(rv) && !result &&
+         (sourcePort == -1 || targetPort == -1))
+     {
+-        NS_ENSURE_STATE(sIOService);
++        NS_ENSURE_TRUE(sIOService, PR_FALSE);
+ 
+         PRInt32 defaultPort;
+         nsCOMPtr<nsIProtocolHandler> protocolHandler;
+         rv = sIOService->GetProtocolHandler(targetScheme.get(),
+                                             getter_AddRefs(protocolHandler));
+         if (NS_FAILED(rv))
+         {
+             return PR_FALSE;

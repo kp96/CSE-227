@@ -1,0 +1,265 @@
+# HG changeset patch
+# User Matthew Noorenberghe <mozilla@noorenberghe.ca>
+Bug 583175 - Add a security delay to popup notifications.
+
+diff --git a/browser/base/content/test/browser_popupNotification.js b/browser/base/content/test/browser_popupNotification.js
+--- a/browser/base/content/test/browser_popupNotification.js
++++ b/browser/base/content/test/browser_popupNotification.js
+@@ -13,18 +13,21 @@ function test() {
+   runNextTest();
+ }
+ 
+ function cleanUp() {
+   for (var topic in gActiveObservers)
+     Services.obs.removeObserver(gActiveObservers[topic], topic);
+   for (var eventName in gActiveListeners)
+     PopupNotifications.panel.removeEventListener(eventName, gActiveListeners[eventName], false);
++  PopupNotifications.buttonDelay = PREF_SECURITY_DELAY_INITIAL;
+ }
+ 
++const PREF_SECURITY_DELAY_INITIAL = Services.prefs.getIntPref("security.notification_enable_delay");
++
+ var gActiveListeners = {};
+ var gActiveObservers = {};
+ var gShownState = {};
+ 
+ function runNextTest() {
+   let nextTest = tests[gTestIndex];
+ 
+   function goNext() {
+@@ -670,16 +673,62 @@ var tests = [
+       function (popup) {
+         this.notificationNew.remove();
+         gBrowser.removeTab(gBrowser.selectedTab);
+ 
+         gBrowser.selectedTab = this.oldSelectedTab;
+         this.notificationOld.remove();
+       }
+     ]
++  },
++  { // Test #23 - test security delay - too early
++    run: function () {
++      // Set the security delay to 100s
++      PopupNotifications.buttonDelay = 100000;
++
++      this.notifyObj = new basicNotification();
++      showNotification(this.notifyObj);
++    },
++    onShown: function (popup) {
++      checkPopup(popup, this.notifyObj);
++      triggerMainCommand(popup);
++
++      // Wait to see if the main command worked
++      executeSoon(function delayedDismissal() {
++        dismissNotification(popup);
++      });
++
++    },
++    onHidden: function (popup) {
++      ok(!this.notifyObj.mainActionClicked, "mainAction was not clicked because it was too soon");
++      ok(this.notifyObj.dismissalCallbackTriggered, "dismissal callback was triggered");
++    },
++  },
++  { // Test #24  - test security delay - after delay
++    run: function () {
++      // Set the security delay to 10ms
++      PopupNotifications.buttonDelay = 10;
++
++      this.notifyObj = new basicNotification();
++      showNotification(this.notifyObj);
++    },
++    onShown: function (popup) {
++      checkPopup(popup, this.notifyObj);
++
++      // Wait until after the delay to trigger the main action
++      setTimeout(function delayedDismissal() {
++        triggerMainCommand(popup);
++      }, 500);
++
++    },
++    onHidden: function (popup) {
++      ok(this.notifyObj.mainActionClicked, "mainAction was clicked after the delay");
++      ok(!this.notifyObj.dismissalCallbackTriggered, "dismissal callback was not triggered");
++      PopupNotifications.buttonDelay = PREF_SECURITY_DELAY_INITIAL;
++    },
+   }
+ ];
+ 
+ function showNotification(notifyObj) {
+   return PopupNotifications.show(notifyObj.browser,
+                                  notifyObj.id,
+                                  notifyObj.message,
+                                  notifyObj.anchorID,
+diff --git a/build/automation.py.in b/build/automation.py.in
+--- a/build/automation.py.in
++++ b/build/automation.py.in
+@@ -512,16 +512,19 @@ user_pref("extensions.webservice.discove
+ user_pref("extensions.getAddons.maxResults", 0);
+ user_pref("extensions.getAddons.get.url", "http://%(server)s/extensions-dummy/repositoryGetURL");
+ user_pref("extensions.getAddons.getWithPerformance.url", "http://%(server)s/extensions-dummy/repositoryGetWithPerformanceURL");
+ user_pref("extensions.getAddons.search.browseURL", "http://%(server)s/extensions-dummy/repositoryBrowseURL");
+ user_pref("extensions.getAddons.search.url", "http://%(server)s/extensions-dummy/repositorySearchURL");
+ // Make sure that opening the plugins check page won't hit the network
+ user_pref("plugins.update.url", "http://%(server)s/plugins-dummy/updateCheckURL");
+ 
++// Existing tests don't wait for the notification button security delay
++user_pref("security.notification_enable_delay", 0);
++
+ // Make enablePrivilege continue to work for test code. :-(
+ user_pref("security.turn_off_all_security_so_that_viruses_can_take_over_this_computer", true);
+ 
+ // Get network events.
+ user_pref("network.activity.blipIntervalMilliseconds", 250);
+ 
+ // Don't allow the Data Reporting service to prompt for policy acceptance.
+ user_pref("datareporting.policy.dataSubmissionPolicyBypassAcceptance", true);
+diff --git a/modules/libpref/src/init/all.js b/modules/libpref/src/init/all.js
+--- a/modules/libpref/src/init/all.js
++++ b/modules/libpref/src/init/all.js
+@@ -1381,16 +1381,17 @@ pref("font.blacklist.underline_offset", 
+ pref("images.dither", "auto");
+ pref("security.directory",              "");
+ 
+ pref("signed.applets.codebase_principal_support", false);
+ pref("security.checkloaduri", true);
+ pref("security.xpconnect.plugin.unrestricted", true);
+ // security-sensitive dialogs should delay button enabling. In milliseconds.
+ pref("security.dialog_enable_delay", 2000);
++pref("security.notification_enable_delay", 500);
+ 
+ pref("security.csp.enable", true);
+ pref("security.csp.debug", false);
+ 
+ // Mixed content blocking
+ pref("security.mixed_content.block_active_content", false);
+ pref("security.mixed_content.block_display_content", false);
+ 
+diff --git a/toolkit/components/telemetry/Histograms.json b/toolkit/components/telemetry/Histograms.json
+--- a/toolkit/components/telemetry/Histograms.json
++++ b/toolkit/components/telemetry/Histograms.json
+@@ -2565,10 +2565,17 @@
+     "n_buckets": 50,
+     "description": "Time spent on an initially failed cert verification in libpix mode (ms)"
+   },
+   "SSL_INITIAL_FAILED_CERT_VALIDATION_TIME_CLASSIC" : {
+     "kind": "exponential",
+     "high": "60000",
+     "n_buckets": 50,
+     "description": "Time spent on an initially failed cert  verification in classic mode (ms)"
++  },
++  "POPUP_NOTIFICATION_MAINACTION_TRIGGERED_MS": {
++    "kind": "linear",
++    "low": 25,
++    "high": "80 * 25",
++    "n_buckets": "80 + 1",
++    "description": "The time (in milliseconds) after showing a PopupNotification that the mainAction was first triggered"
+   }
+ }
+diff --git a/toolkit/content/PopupNotifications.jsm b/toolkit/content/PopupNotifications.jsm
+--- a/toolkit/content/PopupNotifications.jsm
++++ b/toolkit/content/PopupNotifications.jsm
+@@ -10,16 +10,18 @@ Components.utils.import("resource://gre/
+ 
+ const NOTIFICATION_EVENT_DISMISSED = "dismissed";
+ const NOTIFICATION_EVENT_REMOVED = "removed";
+ const NOTIFICATION_EVENT_SHOWN = "shown";
+ 
+ const ICON_SELECTOR = ".notification-anchor-icon";
+ const ICON_ATTRIBUTE_SHOWING = "showing";
+ 
++const PREF_SECURITY_DELAY = "security.notification_enable_delay";
++
+ let popupNotificationsMap = new WeakMap();
+ let gNotificationParents = new WeakMap;
+ 
+ /**
+  * Notification object describes a single popup notification.
+  *
+  * @see PopupNotifications.show()
+  */
+@@ -28,16 +30,17 @@ function Notification(id, message, ancho
+   this.id = id;
+   this.message = message;
+   this.anchorID = anchorID;
+   this.mainAction = mainAction;
+   this.secondaryActions = secondaryActions || [];
+   this.browser = browser;
+   this.owner = owner;
+   this.options = options || {};
++  this.timeShown = null;
+ }
+ 
+ Notification.prototype = {
+ 
+   id: null,
+   message: null,
+   anchorID: null,
+   mainAction: null,
+@@ -99,16 +102,17 @@ this.PopupNotifications = function Popup
+     throw "Invalid iconBox";
+   if (!(panel instanceof Ci.nsIDOMXULElement))
+     throw "Invalid panel";
+ 
+   this.window = tabbrowser.ownerDocument.defaultView;
+   this.panel = panel;
+   this.tabbrowser = tabbrowser;
+   this.iconBox = iconBox;
++  this.buttonDelay = Services.prefs.getIntPref(PREF_SECURITY_DELAY);
+ 
+   this.panel.addEventListener("popuphidden", this, true);
+ 
+   this.window.addEventListener("activate", this, true);
+   this.tabbrowser.tabContainer.addEventListener("TabSelect", this, true);
+ }
+ 
+ PopupNotifications.prototype = {
+@@ -520,16 +524,17 @@ PopupNotifications.prototype = {
+ 
+     this._currentAnchorElement = anchorElement;
+ 
+     // On OS X and Linux we need a different panel arrow color for
+     // click-to-play plugins, so copy the popupid and use css.
+     this.panel.setAttribute("popupid", this.panel.firstChild.getAttribute("popupid"));
+     this.panel.openPopup(anchorElement, "bottomcenter topleft");
+     notificationsToShow.forEach(function (n) {
++      n.timeShown = Date.now();
+       this._fireCallback(n, NOTIFICATION_EVENT_SHOWN);
+     }, this);
+   },
+ 
+   /**
+    * Updates the notification state in response to window activation or tab
+    * selection changes.
+    */
+@@ -693,16 +698,31 @@ PopupNotifications.prototype = {
+ 
+     if (!notificationEl)
+       throw "PopupNotifications_onButtonCommand: couldn't find notification element";
+ 
+     if (!notificationEl.notification)
+       throw "PopupNotifications_onButtonCommand: couldn't find notification";
+ 
+     let notification = notificationEl.notification;
++    let timeSinceShown = Date.now() - notification.timeShown;
++
++    // Only report the first time mainAction is triggered and remember that this occurred.
++    if (!notification.timeMainActionFirstTriggered) {
++      notification.timeMainActionFirstTriggered = timeSinceShown;
++      Services.telemetry.getHistogramById("POPUP_NOTIFICATION_MAINACTION_TRIGGERED_MS").
++                         add(timeSinceShown);
++    }
++
++    if (timeSinceShown < this.buttonDelay) {
++      Services.console.logStringMessage("PopupNotifications_onButtonCommand: " +
++                                        "Button click happened before the security delay: " +
++                                        timeSinceShown + "ms");
++      return;
++    }
+     notification.mainAction.callback.call();
+ 
+     this._remove(notification);
+     this._update();
+   },
+ 
+   _onMenuCommand: function PopupNotifications_onMenuCommand(event) {
+     let target = event.originalTarget;

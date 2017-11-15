@@ -1,0 +1,27 @@
+# HG changeset patch
+# Parent 0b66f32f672bf2e78c91d80fde50e6c9ffc7f508
+# User Brian Smith <bsmith@mozilla.com>
+[NOT FOR CHECKIN] force cert validation to take a very long time so we can reliably reproduce this
+
+diff --git a/security/manager/ssl/src/SSLServerCertVerification.cpp b/security/manager/ssl/src/SSLServerCertVerification.cpp
+--- a/security/manager/ssl/src/SSLServerCertVerification.cpp
++++ b/security/manager/ssl/src/SSLServerCertVerification.cpp
+@@ -1027,16 +1027,18 @@ SSLServerCertVerificationJob::Run()
+ {
+   // Runs on a cert verification thread
+ 
+   PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
+           ("[%p] SSLServerCertVerificationJob::Run\n", mSocketInfo.get()));
+ 
+   PRErrorCode error;
+ 
++  PR_Sleep(PR_SecondsToInterval(60 * 100));
++
+   nsNSSShutDownPreventionLock nssShutdownPrevention;
+   if (mSocketInfo->isAlreadyShutDown()) {
+     error = SEC_ERROR_USER_CANCELLED;
+   } else {
+     // Reset the error code here so we can detect if AuthCertificate fails to
+     // set the error code if/when it fails.
+     PR_SetError(0, 0); 
+     SECStatus rv = AuthCertificate(mSocketInfo, mCert);

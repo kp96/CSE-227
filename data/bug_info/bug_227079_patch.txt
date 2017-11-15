@@ -1,0 +1,65 @@
+Index: caps/src/nsPrincipal.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/caps/src/nsPrincipal.cpp,v
+retrieving revision 1.31
+diff -p -u -d -6 -r1.31 nsPrincipal.cpp
+--- caps/src/nsPrincipal.cpp	3 Nov 2003 04:26:50 -0000	1.31
++++ caps/src/nsPrincipal.cpp	3 Dec 2003 07:31:36 -0000
+@@ -46,12 +46,14 @@
+ #include "nsNetUtil.h"
+ #include "nsJSPrincipals.h"
+ #include "nsVoidArray.h"
+ #include "nsHashtable.h"
+ #include "nsIObjectInputStream.h"
+ #include "nsIObjectOutputStream.h"
++#include "nsIPrefBranch.h"
++#include "nsIPrefService.h"
+ 
+ #include "nsPrincipal.h"
+ 
+ 
+ // Static member variables
+ PRInt32 nsPrincipal::sCapabilitiesOrdinal = 0;
+@@ -252,12 +254,42 @@ nsPrincipal::CanEnableCapability(const c
+   // If this principal is marked invalid, can't enable any capabilities
+   nsCStringKey invalidKey(sInvalid);
+   if (mCapabilities.Exists(&invalidKey)) {
+     *result = nsIPrincipal::ENABLE_DENIED;
+ 
+     return NS_OK;
++  }
++
++  if (!mCert && !mTrusted) {
++    NS_ASSERTION(mInitialized, "Trying to enable a capability on an "
++                               "uninitialized principal");
++
++    // If we are a non-trusted codebase principal, capabilities can not
++    // be enabled if the user has not set the pref allowing scripts to
++    // request enhanced capabilities; however, the file: and resource:
++    // schemes are special and may be able to get extra capabilities
++    // even with the pref disabled.
++
++    static const char pref[] = "signed.applets.codebase_principal_support";
++    nsCOMPtr<nsIPrefBranch> prefBranch =
++      do_GetService(NS_PREFSERVICE_CONTRACTID);
++    if (prefBranch) {
++      PRBool truth;
++      nsresult rv = prefBranch->GetBoolPref(pref, &truth);
++      if (NS_FAILED(rv) || !truth) {
++        rv = mCodebase->SchemeIs("file", &truth);
++        if (NS_FAILED(rv) || !truth) {
++          rv = mCodebase->SchemeIs("resource", &truth);
++          if (NS_FAILED(rv) || !truth) {
++            *result = nsIPrincipal::ENABLE_DENIED;
++
++            return NS_OK;
++          }
++        }
++      }
++    }
+   }
+ 
+   const char *start = capability;
+   *result = nsIPrincipal::ENABLE_GRANTED;
+   for(;;) {
+     const char *space = PL_strchr(start, ' ');

@@ -1,0 +1,510 @@
+# HG changeset patch
+# Parent a80438019d254db615f819349aa6a17ab9b12029
+# User Cykesiopka <cykesiopka.bmo@gmail.com>
+Example certs for the sections in the Cert Manager that typically don't contain anything, and a script for generating and importing them.
+
+diff --git a/security/manager/ssl/tests/unit/exampleCerts/exampleEmailCert0.0.der b/security/manager/ssl/tests/unit/exampleCerts/exampleEmailCert0.0.der
+new file mode 100644
+index e69de29bb2d1d6434b8b29ae775ad8c2e48c5391..49f094b35599d0f96820064899064881deb5cb7a
+GIT binary patch
+literal 707
+zc$_n6V%l%e#JGF`GZP~d6AQy3nbQWmY@Awc9&O)w85y}*84RQiB@M*cm_u2Zc?41`
+z5_1c3QiJmIOPo`SN(>C-#CZ)(4GfJ;3{6Z;jSQm1d5u6^Lnzlk!%)pY1#TWEqnLO~
+zzF&SxXmP56o`D0@IKAZjT%aSAkZopUWngY%<Yxeib1^kBGBWIaJd>fir$kjzOy=N~
+zpsJsLA4S}JbbR`DCj}dx=2?cycDikPkDcn%8aVFAO;L_{>F}=g;lti{ziS#9&nA~@
+z*XEUI{P^@wPBkRUWofhtv-GnH7u&!U8z=hv%NLd#E1jy}sJhA9U|y(q{La1g9H*Hz
+zqh`*Q?2LGC5tC_VwsVG(>y3;jCw{G*VOzM%bxA`TdxUy+yTB9~x03an-|sg+t=N;+
+z_pois6WQI#Ozq59Z_f=5{j_JE=R1=+dC&f>`Z9YJE`GQ26r1P%XKu!UR<WaE?Y!wv
+z+QZ5MIF3Yj9a#N(r%&G6$%o=o{~gHl{{5v~gJ+%FzI&C+OW#!&%$Z>S;=V8wGa~~d
+zTHG*$0%lUJ^oE%Uok{N<{j^uT-gQj*FYoQ(-=F3j(Y;x_S<OY^+Ya|l;afjP9cI58
+zw8A2MUu1jVAxoo{BhN|_if345xH37nw3pVgY_XVNy+C#Dms=@|Rrhu?J<VI@Y&><#
+z>gQ(ntk!o&mpsooV{v|7&_Uk#1qSXWGb(+`Br}(VRI73@R<_Qv&Dm(%Uh4HmQMi8h
+znXD&8;uBw9(#g>|yY1BDI|rrJI;El)`tGk0|N8pyuis~NxNjRQU^=w;g(kDU?9}wn
+zT`B?nCK9VGXIZ5_(XY~4c6rN;fBmyUm&|!|fmKN*&7y3=y0gMLuQx}zZBcw*x4x@<
+Up1bC?qHQPCwt0pBR#>wQ04>BNegFUf
+
+diff --git a/security/manager/ssl/tests/unit/exampleCerts/exampleEmailCert0.1.der b/security/manager/ssl/tests/unit/exampleCerts/exampleEmailCert0.1.der
+new file mode 100644
+index e69de29bb2d1d6434b8b29ae775ad8c2e48c5391..e320e57f21991c9cdfd9b2d282edfe5e92cd0211
+GIT binary patch
+literal 706
+zc$_n6V%lfW#JFq$GZP~d6LZMLR0Cc%POUbNw(q=*jNGgY2GWL-2I6eYp)AZi0;v^=
+zxdl0?LHYS5&Z$Ku1_pBCyoRO*hDIiaCZ?uFhEd|YMj);slxv`2sAix7H;<E1Ogtsu
+zFTW(TIMqPU&;e?kUUGge&<#q+HZ!s^FgG#sGXTZ8n3@<F8E(w=3KdUQSsb@pI`mOw
+zc4+GvMVo|X#WS5#E=XTVl1o1;xjm{}%HeT3uU}P+W_*j})u{}RbKlJUam#64NncY}
+zV(-(xK0QolmhHambMfyMH@~e6XW0wCKC?@RoN#)AQFn{h{^%>k{VDfPYaEXYvF+_E
+zklU?x_Oa3xpI167^Vlb*@QANj^080(dX{|djM=;Ee3f1{NS86(Y;UirYN&bU!E}J*
+z(ah9&%=rp&9-0TA%(LWU*gbLbZO?5y3tYGqo^3oC7c!6OrJ~E51-iCB)<^$+vFq!!
+zs~V<9|9<ET>psx7=1l%gDZXQ~4()r#m3nW=I=S!7+>+~07xR88{<lA6S_mf-Ga~~d
+zTHG*$0;c?}(;gw^1ZOkZ;3G_bV_jz#F?&0SD;5?Si<kVo`)chx`6q=Q;tn+jU$|6r
+z{Qk9Ads5(&Uy}s2nU`9u)Y+ZWIYoHF3Ag-nGI4wMwNIJ!Xp+Lc!zVix*FW{rK0K%7
+z!+uGbb5|mZe15IVpTFewZT75bzVSA)4?Zxy@xJr2{N}yt+Rw9l#h*y%Y<;|~;mN#x
+zPoEpDiglZ-F8gjNi&k4N%js3wcVAA`TxrbRmh)D$d)rzL<_`Z_)w@%!9yq-@_2E<B
+z>-*TB@cp_rJ+$P*cmIj{lI_<8W6s}Q_;#6=eMx1*r;CjGHhi|FdqngXocb12%jhn%
+Upi4D5{gY1I5BtE|eepg50R4$6`2YX_
+
+diff --git a/security/manager/ssl/tests/unit/exampleCerts/exampleEmailCert1.0.der b/security/manager/ssl/tests/unit/exampleCerts/exampleEmailCert1.0.der
+new file mode 100644
+index e69de29bb2d1d6434b8b29ae775ad8c2e48c5391..8d714efed4342a76fdf604a783e247e3705055c6
+GIT binary patch
+literal 706
+zc$_n6V%lfW#JFq$GZP~d6SMWNZUbI6POUbNw(q=*jNGgY2GWL-2I6eYp)AZi0;v^=
+zxdl0?LHYS5&Z$Kuh6ZxtyoRO*hDIiaCZ?uFMp5FtMj);slxv`2sAix7H;<E1Ogtsu
+zFTW(TIMq<kzyWHUUUGge&<#q+HZ!s^FgG#sGXTZ8n3@<F8NOc$$zY02uh5$zD$^vP
+zl)ItsZKmR{jhRe89xS@xr_*aIvg?pi;KDy5PCI7aSK0C}MTBwrb0zV;Ii_di)`Z5s
+z-RyS5xbKCLiS^v2x144#jSAi|FOhkTsc`hp-hhi?e@{Hu>HYb9uOkb`=IhFzocSi2
+zh|3GITeWVx6LOZR<9huWHH)}scQ?3gklgP3Ig5A4x9$_p23L)zpQ!DN)BV<WAj-_I
+z)KFE5<!aK&3?;RB2KAZU{I`oQiMdAdHA>#zxcD-orKio)V$+!#eI@5OY>sms*5Q%m
+z^k2Pfg4$k(RjEbmVs>6z7s(auyi&sP$gg`0>vQKnxA=E>r;F*;H81(9R5mg(Gcquu
+z#SJqkV8Yhcdu^NVRd<p3=DpBacMKn%_Z8b*)%_*SK>Yd)tt^#y>n>>I&d3hEaCw)M
+ze4g}s=bK(7HyT1^BfHJ^hw$D{XWj5#pVujWYDYU;zUa$S7xt`D7TJB#e2Pu6*aCjB
+z?DF-@43?9Xyf(IoEAB{AV%=SkaC3$J*4=vM?K=!MNw0Kx@;B}-zsuSC6JjQ9Nz9Xw
+ze75bk#4cy6-9Jv7%5#K-9of4$$mY_a!Ub&qr}?g6wB(r1ztw<s(lUmdZTx(PSDwD?
+zQfwGx>F;&x=;{>Zf;qSLye?0dtV>%O&zr)g;%M;I*!BpkP;$1X-E6;@u7%5=Jv8Os
+Ty>o5wcL}Yx-^w=qN%#u@Gbb6&
+
+diff --git a/security/manager/ssl/tests/unit/exampleCerts/exampleEmailCert1.1.der b/security/manager/ssl/tests/unit/exampleCerts/exampleEmailCert1.1.der
+new file mode 100644
+index e69de29bb2d1d6434b8b29ae775ad8c2e48c5391..20eae5374eb3a47d72591f61f8d669b1c2f4a200
+GIT binary patch
+literal 707
+zc$_n6V%l%e#JGF`GZP~d6APpHs{jLDHcqWJkGAi;jEvl@3<lDMk_O^z%%LpIJOZf|
+ziMa(isX_VqCC;fuC58ra;=G2Y28Ko^h9;(_M#fR%yhb3dA(U&NVW?)H0ymG7QA|7~
+z-!H!;v^dpJ&(HyCoL+K%F3=H5$Tl;wGB7tW@-qO%xtN+585y<(+X+;jSYFQgpzNqa
+z!e7RR=UEC%9cwgN8nP`#PVLVKPhwB$KIz=pnDff<?c1-ynw2UW*wX75$~=nKEBUzH
+z-||ydc=Nm$r4o}SMLpdaqIfaYd3E-uyP4CA#3ya<jkcLpx1?b)o6Yra8yx1o(^UJ%
+z|K(}IC7TWV(;u&scJ^C6&F_`>%+9&r^_Tx|`8at;k4P;0<m1VcCKzyAxcXkHh<NF7
+z*{aK7W^Lk^(|SrKu^cATJK_tToO=8(v(fNRc-gs{y9fHzROakxT-U$&(eb05YwsrY
+zg`UWlkXPC^b&HOu$0dn{fm}AZf}zQi=k#3**cvPG^}~|+l1FCV;Ii_FF<J4HiJ6gs
+z5iM?*K>?FBS*AAB@j<(9h<r(!!M5WeY}c2txR$?srkHS1O67&nhtJ8W%Ew*S9?|b(
+z*E9OvwbhpM!PR`369=ZgJHqnRB<;xFIFYMi{=RFvSbt3Rotu`(mVMz}|3Pm4+PhCa
+zPd~S8HM3BSc3i>j1u3k(x6bKYD&M{+V*9UkexgpNtrjN+23$MuUwY`i!kZdzeJ#O1
+zA9H4Z5_EXx=sx9-ki|N#8Z%dB`&HlaJGNXeeNcP!1oI(Xy)wi54l!Sx7G-bw`S9$G
+zXW6=6rd&|)^R@GMd3lw>$7}22yj&U<OTG>G?=4-is;+K&T;(&#!`V_b?LAlfc4_g=
+Ve!|Q#=lV%IM;q@QoF~rv0RRD}D3JgF
+
+diff --git a/security/manager/ssl/tests/unit/exampleCerts/exampleIndividualCert0.0.p12 b/security/manager/ssl/tests/unit/exampleCerts/exampleIndividualCert0.0.p12
+new file mode 100644
+index e69de29bb2d1d6434b8b29ae775ad8c2e48c5391..92236b80873f7a28b56e973528a9f5fe9b0d24b8
+GIT binary patch
+literal 2301
+zc$`&~c{~%0A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
+SJQ$_}ws<Z4?0UiPmi!wDCozQp
+
+diff --git a/security/manager/ssl/tests/unit/exampleCerts/exampleIndividualCert0.1.p12 b/security/manager/ssl/tests/unit/exampleCerts/exampleIndividualCert0.1.p12
+new file mode 100644
+index e69de29bb2d1d6434b8b29ae775ad8c2e48c5391..ffcf137c3ace8032a0d5361b223991f576a1e9d8
+GIT binary patch
+literal 2301
+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
+S4ThEIlu55UdA<L;CI15Dk2T5w
+
+diff --git a/security/manager/ssl/tests/unit/exampleCerts/exampleIndividualCert1.0.p12 b/security/manager/ssl/tests/unit/exampleCerts/exampleIndividualCert1.0.p12
+new file mode 100644
+index e69de29bb2d1d6434b8b29ae775ad8c2e48c5391..18b3e89f42fc9cb76151864afee1c0291a0ba936
+GIT binary patch
+literal 2301
+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
+RV3-)Bcn20+So*sq{{;uWIl=${
+
+diff --git a/security/manager/ssl/tests/unit/exampleCerts/exampleIndividualCert1.1.p12 b/security/manager/ssl/tests/unit/exampleCerts/exampleIndividualCert1.1.p12
+new file mode 100644
+index e69de29bb2d1d6434b8b29ae775ad8c2e48c5391..cdc3498b9dde2e5ade5e2634c06882eb0f7ec5f1
+GIT binary patch
+literal 2301
+zc$`&~c{me}AIF((?n&kdVb0v6k-1y+D=kLJeKvO_5q-%qnwupvM~OlhGe;(Aj?f`F
+zX718L`nivy5q|YNzw7(Q=lMLJ*ZcYW`Fg`~JZu0b7aYga4(3(EpTqA6a&mK);CQG&
+z98b+}TnWc<dHgQ|m*BWCzY!Y1$?<zx{@)W^8qD|aLx2+uhX8qe=J6|%4_u4@03MEb
+z9G66zR!y*1htSkV>9#q9No#_)IB2f@`S#>JS6MB7g2ULop$tlcRvdhoLP(n4fS;DS
+ze#g88?zAC3^{G0_JoWyDC~t3KhpU@QKQQq58MM9N;QBt9&G^1duCkLy>e&CIs9$gB
+zhE_ELmer8G8EJ=S!3OTrFMNx8MI$t0tyR>1;2n&|_2YtSQ%L(NPp+q2J!i?tYTopF
+z=ot&1JMg<hykxH}=vwND3XdJ$y1At_L??O-a@&X~J-xeeL99$<kcDZBn2$=v1xNAx
+z*f7ReAr$2&`uvw@wYhmwWa4e{j}7(uMl~G=<{N>+v+#Di&TI7m2-8t(=QLtcVZ}kc
+zc$Na*b@72^Ep<J4|Fx6L4dFP$7GMR}zo8i-zvL>gG1U#o;>+TxBkC_$Jqb=_q#JU?
+z?;bHK2tLh9c|MVDvYP@dNjfduH=vcOS!(wx;M)^PHgaReWD31sn4k}}ZarP|>=a;s
+zerRmxnF8e8Ykp3)Nk(jZFy8k_uMIWHgKKX})<9x<uyW<a=%oAccaL^p1@b#BLb6w<
+zPr6RYk?T9erhdTu>*6g^Lg_-co{`J?ZEWXBW1k;>2u6Q4UD9>Tk2O{eJkB#a>YDku
+zoa~pIy}lCqmOy!VKAlPNvN4}~kj?aA1w8srrtg+7jC%mi67=!%bt2Ks824hYFeS7x
+zz0^IA6(_f#5G^KAzzw68*SaG+6#K>y15(K}ry@*9R+^g>I~q}iLKVGl;@GpKR55}=
+z{HoYLmgfVk>!No-lBzEC7mq}Now=|65NV!0c=l8|n|W|l;U4X$@(Op~^s&awyNCUt
+z5Ctp;w)8_KZ|w~As8c~&Ww4(C|6Tq5y^d4I*)$7l&-i=VnJ*?)-sQ>2&GcC;o0<vj
+zSArQnXUnpoif^bIVK9iL@VSEey^`J!{_WmYYp|e|oU|-J`T<L853RS<)$?<JUYoN?
+z)p!h)!#FkPA#Yzh<)kC3e4v{^`eamgSttF|T6jgmf*4YRrp|xM0=%RyBQd_z%jkXk
+z9MU=YSW!w&TH}i!90xl6H~T=kKpaTxH&**S%3%KgXvN0~D8T_&;W*&p-)!UhW1Dn_
+z08QT#`2LS=KpgN*@}t2ie!iYfD3(BZL=+e|Yvc3nu+72wi<eWfPOe|vuNd|H#dfRM
+z*9=<M*d^VPW&QMy{!30J!$%D{&_J)c<oe0)rbI9_K_H@N;ZA(3$rn<-ovIsfY=X#Q
+z$eTCnWp4RBH!MJYO{Xs$o%NTu<Vv|4C>GFV+9Eb9pe8q4e8HFvywxE3>v-P*pW<GU
+z!FDvnD;mtSoVEhp=kN6%oM7E^?;+TCV8s>hJ8*}J1sZHg>;XG|B@0B1<P5S?(W{4-
+z@)o-;tsEuJ{L0G4&{B+w;_Ob9?ML)w5|q^O*CINm)+EZ-T$BL#_n{A!NeGmlO-0i;
+zV@dOccy|;;6!_C#U7}FK9*>n8;9WeGS=jo<b2Jptv3(o42>CoBbA|s~1(a>1C)KA@
+z3O#l6>3Z@3Mz{<yKE&&<ZXJ8FxvCXbrkdmOo@u<=M#EJ2<$rx3Y{VKf)V0-Yl1Gpg
+zA+sl^N|Ux{TxzuyIJ-x7Yp{>KG$A23x`q%Mhd9TgG+917X8ifUz>H3GrVZqB+sPYv
+zvz&cO;4kkZVHGIu$Ty-{ot!`NG-sgU2iZPSe@*J;+E&}Ox$SOalR{ta%qtyrVsM0q
+zrOONL)LxkDR)oMKq#G>O`@QEHMMIlnAlsgdy^V#&i4)72)9iVIuoAgAZHoKLhSRY`
+z9yACLlak6Bn7gO2v@Cx%!c<&Xbg(^aT2mu#JJQnVL`Izt)lDPR{;^|=yp53|-$lC!
+z=rdyMi5CfS8AexPqOMgPJ}{9I^XQ+OJR-BoYI^Jg5VLWiB&s+kJBo)nou_3!wbs?$
+z4W|}}Z&Hi;cYIBp<Lu>bXo{=Vv`Y0{>7q+1Ewq^irPoJ=F$Q}ZCAE@-&Qlyz9TF|J
+z&Y+54`mcz3VC<Tb$}Lo2;ftmraa2082(a?tP3zE^%r7Cw-1k%2$0sRc$r#^s&N7mK
+z+uItPFx=cGcat5sJ7e&?Xu9!N-f&@u72lTs;`(N@<P|_F9TBcZj^CElw&T&I_;`MH
+z9!t^jN!?0LsX3=@1hhQ?(a)-aT44mCXzHAEi_AQWakps9N2J%hzh6065T@$iW9uUu
+z%w5o=7r};wq%b?l<ytcNB{v<jk%x_|BcSW1p%QD;fpx4H;)NVuTX^Uv@XWq;(REVS
+z+S5gU3lzoPo@mS-nh8aP3oixT2N4>v1*l;9H(iyFht(@w57bt5UNeTr${8OOkmgkE
+zcTnW&8qPs*YZDI~X?H6_J2f}$gs6F}U;#nOA7T`)&6gEAGCvpVXdB*uG6>)<?@@e?
+zci6<#@~7QiEXmr)c;^cuAg1r*8s$-8EXT{~e^xqs5Idt5wnR{*%N7sUG=%PKsABpi
+zyrfb@-{bSI7<8}G&GqxME`=e|%x;S3J_;e$U5>0(O#F#5${)sdZ8V$Mk<dWhD#4-G
+zku_!{TR25pUB|C(H+I-T?%j$(xR;nqI#=a+g1SuT*^+XLK;64RRx~OElW1deJ7g%+
+zK%)DljBYn`^V}WI`zan0J@P?`l%w5Q_P3dbs^gyICs9Xq*>BGyibS0yTc(^wm&DE1
+zUbF4Pj(z`HX%*Bh%hO6*tfr?XA^D3hSugu*tD0p)uZHO;!4>}7j=Z8eVnAr`tte*c
+zLyj}3Q4Yfq;$#&eP5UQY2M&Ytf<fvKE`TJ60|?FCZVADEeM=#`Dwn(}G=ZR?YR7;)
+Quev8~&aQW(|Fq=40HQ}bvH$=8
+
+diff --git a/security/manager/ssl/tests/unit/exampleCerts/exampleOtherCert0.0.der b/security/manager/ssl/tests/unit/exampleCerts/exampleOtherCert0.0.der
+new file mode 100644
+index e69de29bb2d1d6434b8b29ae775ad8c2e48c5391..e8a2a2f9a8d4b86497e0a37aa655dfc643610070
+GIT binary patch
+literal 697
+zc$_n6V%loZ#5i{WGZP~d6AQyf*&PPFY@Awc9&O)w85y}*84RQiB@M*cm_u2Zc?41`
+z5_1c3QiJmIOPo`SN(>C-#CZ)(4GfJ;3{6Z;jSQp2d5u6^Lnzlk&QQic3ZhvUs@cCJ
+zBee*uTh9P!wGy&@jI0dIO^o~uKyfanCPqev{XI41o;qw5tsg9^dVKC1e>xbG+tqw3
+zI@?%=z0^ZsV?+M!+-A`oGfWcr73QXLn8!c(cYgnjEulF@_a;uWaJ5*q#HZEunuxaK
+z0?Ye;yqZ&u|I1{r2-*2)vqOT0gZNjWrFxHppW4mS*d-aXke6+KSY6loM-siKC$LTu
+zc=cK+M67O&?)1b9CA}NsG;7u0UsDg1nEW(3d6g#5y3<Srdl(aLyDr*s|I{b(<59(r
+zMGP;-iA&2dPt$m_cVb7T>zmxAf>rNWg=YU*enf4u%&N3C_t_NWzuyVh$UcAWaNk_b
+z4HtieE)n-v+;z7<F5;TQuNkF$QH$@s`rqArVlS(Fr<<EKKNB+}10!0DFoOcdWN+5q
+zzny9fj`zhb7WzBc-v5_>C#f=To6TdM>kDG`@0YtXW8w9cQ+B#tt#Iz}j<WsSurt9k
+z<Rnv3$>LMSb`va%KjbPUH)I<-Hk2JPdCcnn*5FZBPj~eldEY5FT@HL?b(rk_EoAwz
+zmEEs*e%-^ksj4C(s{OL#fq7mN^lNJO{lDLFM)sc7iRI^854>JG$MK%6$N3rRTXd$x
+znXC$Y&U5t6t^)=W{~Nyz5HV&yzcs3B&2nWX1_93Fmp?t+`0B{S(?Yveb+T?er0_9f
+z;V$V-AKWLbUGnUW|HKc=bT;naw{pt4#It3$%SGf<ZEH6g@Tir3es$yN(jdtd#pNw6
+Mce@`%&x_##0Izo@A^-pY
+
+diff --git a/security/manager/ssl/tests/unit/exampleCerts/exampleOtherCert0.1.der b/security/manager/ssl/tests/unit/exampleCerts/exampleOtherCert0.1.der
+new file mode 100644
+index e69de29bb2d1d6434b8b29ae775ad8c2e48c5391..e741b93c3b4fef611becb280b14232f30a95377e
+GIT binary patch
+literal 697
+zc$_n6V%loZ#5i{WGZP~d6APnd9j5^=8>d#AN85K^Mn-N{1_NnBNds{<=1>-99)Z+~
+z#N2|M)S&$Q66e&S5(5J{ab81H14APdLlaX|Bf}_hULz3K5Xv=>Gn6rqf@l_oYW6S5
+zNG$^E)-wcJt%PhJBP#=Q6C*zZP@IdYiII_Eal)0W`m<7>v&4kP?<(5Hx#`+v(Qe(-
+zlj_%s1n0K4`|k1Wy3lm~%`IISyFZ4@ZCI8HSxoHf;F#C#*D&9%Qazr1;zj;fd3%n%
+zICGmhqR)+I>LJg+s(q{6R|zKVnc(@ME}WBhO8z&8S@reoTe#0o7EqRI2|xat&6Af;
+zJ6Hbp)$)8J#{ZucAMIjuE-JmE<Z|=LwA6Ra9@C;fEt<PSv}-f}S><h78u9JIPRs#;
+zm$w`+)^E3+DsFkq<}mY(JQ0~~7nI}UmhO$6(f7sqiB*)kf?7!6FV187%TwlB&tI0X
+zb<MXmiTC;xT~<z5f4})v=uy6tH#^NAhby)V6jpfO(`|lolZly;fe|f6m_Y&4lyPCD
+z?a~GRnCuf?hq7pgz3EDB?tkxb_OKcQx4p~m9jRxR7M`@fTUycijeEI$zFV5qIVY3&
+z6+eE;mv<&-WG(5~yzPaH&|AHq;cUAP)zxe~IxYBP)a}(yCR3dmrK9imFWO`D@Xlw4
+z*&nA02W>no^Yg9I-``pW`&BiY!>_)%mKyQd%Oiiq@e98@|2|&k`Ok0r_Q?*eEz>nm
+z{5_W~(zx1J;6YvVf(d0z-!Dwn;naI&(psGHrzUKw)D7dP1|Rn`r@sX5WC^Q`RI&ZJ
+zXnx9~ptE|N+8r{dg#K*P65Dv{?3T2;dkntUkFp*(_CNJo@|AZ>6#p$_sHtsI*md*6
+K8oo~b$W#EWUL)cF
+
+diff --git a/security/manager/ssl/tests/unit/exampleCerts/exampleOtherCert1.0.der b/security/manager/ssl/tests/unit/exampleCerts/exampleOtherCert1.0.der
+new file mode 100644
+index e69de29bb2d1d6434b8b29ae775ad8c2e48c5391..0880fb38bd9181e84c5978e3caa0c6c8123a64ef
+GIT binary patch
+literal 697
+zc$_n6V%loZ#5i{WGZP~d6ANQ;$wUKQHcqWJkGAi;jEvl@3<lDMk_O^z%%LpIJOZf|
+ziMa(isX_VqCC;fuC58ra;=G2Y28Ko^h9;(_Mn+NMyhb3dA(U$%XDDMJ1<@=F)$CuA
+zky-@St!DtVS_#=cMpg#qCPsb+pg0#(6C)$T9hJzdyQe%_D%W)U?1VYbnHTTSIn-q^
+zqgHn5Y1xaPpZt$6Yo5Kqs^x%Os*mE4#ICPhHqJkr%d8o$$~7s9hD%EOf8sMb_PpiT
+zX7&ANYNYRKT(Hkuuukbf!$jrY1ACO}9A`GpIXXGz-nLaP0o8{^)F&xkF8ZZ$?Z)$u
+zrjO5WTD0`McZ|Q;lJkvUU&mK-?fhZd{@DIi)?F^Yi5Vv+HknqtoUgr8&Q;-XI-!5b
+z<cY=`e=ie_J8&jPLc7pU@=)#{mX=cwrfirlUioGh@6sj3rylW6W2sl0v2{}F)0W`<
+zeM(<Gc{|iz&?@ozKh5d>nYni?{@0u<P44O3BU8VBO_bE~{jUp|m>C%u(PD%d6fjX7
+zS6)ePv6-QpVy^c$;JfNWmc2bfCZ^?!J%sy>lC#1Wu>X1dQO@$u=^%HtM;q8a+D%w=
+zq_VR~En9QCeVK08D#JY@QwneX^tdt8V&l>~N4h8W$Iob+$+vTpK<FLmsqdxpC-L&$
+zbDeUgWanT1e7=(cQdcX3^X;09E3%&6a&tbB=q=vOsng+OUN9&1M2vgXv+pMY{lCX|
+zJ}R>95L!7=!sU@j;p@F!_cvUQ+N!XRd3uL5`!@NUSJN*%IJzfux~9F9(5<>V30X&W
+zYaVX;ui!1!`q;er|Nfx;Um9liWZzcm5Ix+Z%=Tek?Yg%<wYI#o+#XIgYG=u|p6{;6
+Lw_}!$!Ad~@P#Y(?
+
+diff --git a/security/manager/ssl/tests/unit/exampleCerts/exampleOtherCert1.1.der b/security/manager/ssl/tests/unit/exampleCerts/exampleOtherCert1.1.der
+new file mode 100644
+index e69de29bb2d1d6434b8b29ae775ad8c2e48c5391..be049f842d308beefa1b849fe77b684cf6680d0c
+GIT binary patch
+literal 697
+zc$_n6V%loZ#5i{WGZP~d6AR;w7yk@+**LY@JlekVGBR?rG8jl3N*ai>F^94+^9ZC?
+zB<2?6qz2{ZmpG>ul^7bxiSrto8W<Xx7@C-x8W~54^BRG;hET47oS}??6hyNyRI`6c
+zMrsjQx1J%;Y9(a*7+D#Zn;7{SfZ|+CO^l2TD_7dF?pyTY&hD$%j<%otz0O{8=_W-s
+zjocSY*cE2$z6dYe?p5|ElKb<=i@_(8cs8tLp4#HQ%VD;hRrZSQrpt1KWv^fC*87%q
+z#8gU+^M{q?v6qu}M~JVr`4Y`@;@{3q@})j=tR({6#b4yunirl_dA{nJx^%7&^DHSF
+z`MZ&mU3@>U%zxSBu}y3D-H$K3EM|mt2wtnOHV`-xobi^!Td(wpSX;+y7PYG7)3_(B
+zvWhL?Pk!NhGj6_R#xGAj<+KmEhs!PAuvPe-Jo#V#(S_$HQ{LL$G?rI-{I>N(&^DX=
+zIaM(qQtSRdb3ObtDP~J|l7H&zo7s=Ft%BDVbSw7DAJv}!NS%q9k%18{MwmeX6V3W!
+zPuLEw`OEn{ikCM@74?6aTRPX#KlOpG!@l4~;o{)tMS{Ls&zWDZU4OCHdHEy`mzV#}
+ztvWEJgK?VYjrRdRjz*?-X+%^RfAT56vZ}YDnsxufy*H*F(LEi!h2M1TvllsgY@K(N
+z+*sCS?VThLnsv14?ETOu?IMqDt(-sCwVaCQ{&o9`R*t~Q^qf`4o*h1LyVT4rmv_~@
+zjq~p{KY!RFwa!vZKkQnE<<`b4d;ab(*=eVz+p%qae5-H0+#Gq++Edp9Uow;gniqx3
+z@7sMKs8|1f$bZe58xDTem~mm>PPH>ftonB4IR!7-sJkopk8;lARTmf4^{nE0xb@qK
+LXuru}F4d0#f%GeA
+
+diff --git a/security/manager/ssl/tests/unit/exampleCerts/exampleRootCert0.der b/security/manager/ssl/tests/unit/exampleCerts/exampleRootCert0.der
+new file mode 100644
+index e69de29bb2d1d6434b8b29ae775ad8c2e48c5391..ae0dd33cbb4014b876e4be8b7d77ff6e9b2d2ed0
+GIT binary patch
+literal 728
+zc$_n6V!C3`#JFbxGZP~d6AP0~k&^*08>d#AN85K^Mn-N{1_NnBNds{<=1>-99)Z+~
+z#N2|M)S&$Q66e&S5(5J{ab81H14APdLlaX|BZDY$ULz3K5X!}`xrtE;*)m2}2IeM4
+zeg>d87gG}>Bg3}ol`A;I7B5_taKdKyd6h<fCHM1Y2L*pf+}r;2)6MNV$>H5<CcOfz
+zU5VH4+`Xt!bvM0!gZj-|hj)Gs2zjkkwqcf)7?Wo1Y=y(7{SPfSRL<so`lE5V#YAVu
+z+cp;OnLoR>IZwYdOZ|lBvo|c-kG5YdQ2Bgdz4v^U)0X)knM;L|lFNR?i&?zf>3n!)
+zv(%Bw{&_2k)}LRru5!A)D(8O{@r!>Z^Zr^lH%Ft&c$KQcy%V3y9$URI-!@^wl`lSw
+zFJ4|%u1dV?z4Du!d-~${ZM7%oAN_u2VTj&;#hj*>mwNZ4pBFxR_>Z3E^N;Hl^#3k$
+zSbKK2=QP)*5=rA7Q%*iQz2mI(qlZk)j0}v66%6DI_<=zvE6m9FpM}+c8Aus$g9P|l
+zSb)*?4=uu&K|xo3O^@&1lZVUeza6vjbZmRT^J2%>4eM4oh~2Cc*XCsu6IZExn|0>L
+zjb~Q#wt2XC*#GR$bV+0Sm-MSL(2QY^-TTlKL;jE(SC+|C+-DV^x^&y^+i`5Z{5GKn
+zCf?eWe6@W4sg9n)th*Pg?GGf_)-P1M?yLB7QmJxYUtX5d@mJ^Gvir{1w?jVC;Pa;|
+z+02hMS|^_gpCuD~=~DN57GdX;k#UiVJ{5txFWu_)K2#{4JF#n)-$LV=&wpvmN&j>D
+ziHom~llSFZe}nv8_bwgfSv%pz#--v%wz0DEFaDT%)SmUt)wXkLr5*)BBD2z*zQo@8
+Zp8M!YYW<@l;l`Esy?pJNR{mYv00904G?@SZ
+
+diff --git a/security/manager/ssl/tests/unit/exampleCerts/exampleRootCert1.der b/security/manager/ssl/tests/unit/exampleCerts/exampleRootCert1.der
+new file mode 100644
+index e69de29bb2d1d6434b8b29ae775ad8c2e48c5391..84a87f50ac826187a341dfd4770f3429e75c8df9
+GIT binary patch
+literal 728
+zc$_n6V!C3`#JFbxGZP~d6AQze*v$sKY@Awc9&O)w85y}*84RQiB@M*cm_u2Zc?41`
+z5_1c3QiJmIOPo`SN(>F;#CZ)(4GfJ;3{6Z;jf|qid5u6^Lns%&<|alZWXl*?8JL?G
+z`5A!XTue=jj0~ISZnicPayvhHd-)!wV^17aOB%X3Thzs5@2SmOx&DkoIX7>)_xrQ0
+zw`3&iJMKSNboJx(mk*X`pO5{ad7pENtkmgA-KQ4**`(fd{tB;8kdD-%Ht|DZ(c$|V
+z)`ccMW89|BD78!ekjXn6$!CELsf<(n3hn1xIm?8tsXVD{(0x0tV~P#?_m1B5^{L*T
+zn<oBZ?GlYUQloe`?%#pG@@xFw94%IfTrz)NT}ninipZM!9kZTa3YUHy*!wp9HII?J
+z_y1a{1>er!vZ}6ZxId}%<nsSFX6e1N;nrTo7^6}Z@jxfxbiC7Q#RG!2e0gF#v*TM%
+z3yO3F+vl;jeQ<Z#t10!c;OKQGW=00a#R>*;2K>Mvloe)V{LjK_zzn1exIqH^EG)oi
+z`-c``%%Gr)2ut-Ul(0`=I>xrpCHuL{tr-&=K0cd!Ph{b_OIc^wx|ey*)DrXLnjt3>
+z&KqX2r~mFFh0LU_YL&&g4*JbDoHhF!pEB8P{WhoFdfJ{c%gsxfCg`cYPilX+^Qpt`
+z=#tCNw*_~uQ&716`kZQHOZKPNM_QUE=iiy@#Hh7cD%L5yTu9;d>|?9WYCl-lU$@E2
+z%kIL|PdkmHa*wi|nzdN|rpj&KqhD`G-_~U~IrFu5Le`ZZ5jMgcaUTxtfANVsy{Dn-
+z(NdweKdo%+m?rM!PS_a7CcW~_j;5mCzWAgGku!MWRz3{-$XKKr{5Fey<CDPMcciN>
+Vy;YGF&zS4wH;Xm-zs%w0S^$XRBFF#$
+
+diff --git a/security/manager/ssl/tests/unit/exampleCerts/generateAndImport.py b/security/manager/ssl/tests/unit/exampleCerts/generateAndImport.py
+new file mode 100755
+--- /dev/null
++++ b/security/manager/ssl/tests/unit/exampleCerts/generateAndImport.py
+@@ -0,0 +1,96 @@
++#!/usr/bin/python
++
++# This Source Code Form is subject to the terms of the Mozilla Public
++# License, v. 2.0. If a copy of the MPL was not distributed with this
++# file, You can obtain one at http://mozilla.org/MPL/2.0/.
++
++import tempfile, os, sys
++import random
++
++if len(sys.argv) < 2:
++  sys.exit("Must pass in a path to a directory containing the cert DBs")
++
++profile_db_dir = sys.argv[1]
++if not os.path.isdir(profile_db_dir):
++  sys.exit("Passed in argument does not correspond to a directory")
++
++sys.path.append(os.path.abspath("../psm_common_py"))
++import CertUtils
++
++src_dir = os.getcwd()
++temp_dir = tempfile.mkdtemp()
++
++root_ext_text = ("basicConstraints = critical, CA:TRUE\n" +
++                 "keyUsage = keyCertSign, digitalSignature, nonRepudiation," +
++                 "keyEncipherment, dataEncipherment, keyAgreement, cRLSign\n")
++
++def generate_cert_and_import(cert_name, subject_string, extension_text,
++                             signer_key_filename, signer_cert_filename,
++                             trust_flags):
++  [key_filename, cert_filename] = CertUtils.generate_cert_generic(
++    temp_dir,
++    src_dir,
++    random.randint(100, 40000000),
++    "rsa",
++    cert_name,
++    extension_text,
++    signer_key_filename,
++    signer_cert_filename,
++    subject_string,
++    "2048")
++
++  os.system("certutil -A -d %s -n %s -i %s -t '%s'" %
++            (profile_db_dir, cert_name, cert_filename, trust_flags))
++
++  return [key_filename, cert_filename]
++
++# Generate roots. Will fall under "Authorities".
++for i in range(0, 2):
++  [root_key_filename, root_cert_filename] = generate_cert_and_import(
++    "exampleRootCert%d" % i,
++    "/CN=exampleRootCert%d" % i,
++    root_ext_text,
++    "",
++    "",
++    "CTu,CTu,CTu")
++
++  for j in range(0, 2):
++    # Generate e-mail certs. Fill fall under "People".
++    generate_cert_and_import(
++      "exampleEmailCert%d.%d" % (i, j),
++      "/emailAddress=doNotUse%d.%d@example.com" % (i, j),
++      "",
++      root_key_filename,
++      root_cert_filename,
++      ",u,")
++
++    # Generate certs identifying an individual.
++    # Will fall under "Your Certificates".
++    individual_cert_name = "exampleIndividualCert%d.%d" % (i, j)
++    [individual_key_filename, individual_cert_filename] = generate_cert_and_import(
++      individual_cert_name,
++      "/CN=exampleIndividual%d.%d" % (i, j),
++      "",
++      root_key_filename,
++      root_cert_filename,
++      "u,u,u")
++
++    # Need to import the .p12 file to get the cert to show up under "Your Certificates".
++    pkcs12_filename = CertUtils.generate_pkcs12(temp_dir, src_dir,
++                                                individual_cert_filename,
++                                                individual_key_filename,
++                                                individual_cert_name)
++    os.system("pk12util -i %s -d %s -W ''" %
++              (pkcs12_filename, profile_db_dir))
++
++    if os.path.isfile(individual_cert_filename): # Remove the misleading .der file
++      os.remove(individual_cert_filename)
++
++    # Generate certs that the Cert Manager can't classify. Will fall under "Others".
++    generate_cert_and_import(
++      "exampleOtherCert%d.%d" % (i, j),
++      "",
++      "",
++      root_key_filename,
++      root_cert_filename,
++      ",,")

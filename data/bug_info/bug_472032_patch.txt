@@ -1,0 +1,35 @@
+# HG changeset patch
+# User Mook <mook.moz+hg@gmail.com>
+# Date 1235639691 28800
+# Node ID 03e926cc55f967162fb652b6b3dc9ff0783cb484
+# Parent  1db3095fbf866b567fb3944902ab2eebf2ed3dc1
+bug 472032 - win64 sizeof(long)!=sizeof(void*) assertion in nsScriptSecurityManager.cpp (r/sr=dveditz)
+
+changed SecurityLevel to use PRWord, clarified assertion on the protected code.
+
+diff --git a/caps/include/nsScriptSecurityManager.h b/caps/include/nsScriptSecurityManager.h
+--- a/caps/include/nsScriptSecurityManager.h
++++ b/caps/include/nsScriptSecurityManager.h
+@@ -148,7 +148,7 @@
+ // Property Policy
+ union SecurityLevel
+ {
+-    PRInt32  level;
++    PRWord   level;
+     char*    capability;
+ };
+ 
+diff --git a/caps/src/nsScriptSecurityManager.cpp b/caps/src/nsScriptSecurityManager.cpp
+--- a/caps/src/nsScriptSecurityManager.cpp
++++ b/caps/src/nsScriptSecurityManager.cpp
+@@ -3201,7 +3201,9 @@
+       , mXPCDefaultGrantAll(PR_FALSE)
+ #endif
+ {
+-    NS_ASSERTION(sizeof(long) == sizeof(void*), "long and void* have different lengths on this platform. This may cause a security failure.");
++    NS_ASSERTION(sizeof(PRWord) == sizeof(void*),
++                 "PRWord and void* have different lengths on this platform. "
++                 "This may cause a security failure with the SecurityLevel union.");
+     mPrincipals.Init(31);
+ }
+ 

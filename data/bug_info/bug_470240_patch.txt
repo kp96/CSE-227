@@ -1,0 +1,43 @@
+Bug 470240 unrecognized certificate should highlight the case when there's no chain provided
+diff --git a/security/manager/locales/en-US/chrome/pipnss/pipnss.properties b/security/manager/locales/en-US/chrome/pipnss/pipnss.properties
+--- a/security/manager/locales/en-US/chrome/pipnss/pipnss.properties
++++ b/security/manager/locales/en-US/chrome/pipnss/pipnss.properties
+@@ -342,6 +342,7 @@ certErrorIntro=%S uses an invalid securi
+ 
+ certErrorTrust_SelfSigned=The certificate is not trusted because it is self signed.
+ certErrorTrust_UnknownIssuer=The certificate is not trusted because the issuer certificate is unknown.
++certErrorTrust_MissingChain=The certificate is not trusted because no issuer chain was provided.
+ certErrorTrust_CaInvalid=The certificate is not trusted because it was issued by an invalid CA certificate.
+ certErrorTrust_Issuer=The certificate is not trusted because the issuer certificate is not trusted.
+ certErrorTrust_ExpiredIssuer=The certificate is not trusted because the issuer certificate has expired.
+diff --git a/security/manager/ssl/src/nsNSSIOLayer.cpp b/security/manager/ssl/src/nsNSSIOLayer.cpp
+--- a/security/manager/ssl/src/nsNSSIOLayer.cpp
++++ b/security/manager/ssl/src/nsNSSIOLayer.cpp
+@@ -85,6 +85,7 @@
+ #include "nsProxyRelease.h"
+ #include "nsIClassInfoImpl.h"
+ #include "nsIProgrammingLanguage.h"
++#include "nsIArray.h"
+ 
+ #include "ssl.h"
+ #include "secerr.h"
+@@ -854,8 +855,18 @@ AppendErrorTextUntrusted(PRErrorCode err
+   if (!errorID) {
+     switch (errTrust) {
+       case SEC_ERROR_UNKNOWN_ISSUER:
+-        errorID = "certErrorTrust_UnknownIssuer";
++      {
++        nsCOMPtr<nsIArray> chain;
++        ix509->GetChain(getter_AddRefs(chain));
++        PRUint32 length = 0;
++        if (chain && NS_FAILED(chain->GetLength(&length)))
++          length = 0;
++        if (length == 1)
++          errorID = "certErrorTrust_MissingChain";
++        else
++          errorID = "certErrorTrust_UnknownIssuer";
+         break;
++      }
+       case SEC_ERROR_INADEQUATE_KEY_USAGE:
+         // Should get an individual string in the future
+         // For now, use the same as CaInvalid

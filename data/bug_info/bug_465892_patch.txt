@@ -1,0 +1,21 @@
+diff --git a/modules/libpref/src/init/all.js b/modules/libpref/src/init/all.js
+--- a/modules/libpref/src/init/all.js
++++ b/modules/libpref/src/init/all.js
+@@ -369,16 +369,17 @@ pref("capability.policy.mailnews.*.nodeV
+ pref("capability.policy.mailnews.*.nodeValue.get", "noAccess");
+ pref("capability.policy.mailnews.*.pathname.get", "noAccess");
+ pref("capability.policy.mailnews.*.protocol.get", "noAccess");
+ pref("capability.policy.mailnews.*.src.get", "noAccess");
+ pref("capability.policy.mailnews.*.substringData.get", "noAccess");
+ pref("capability.policy.mailnews.*.text.get", "noAccess");
+ pref("capability.policy.mailnews.*.textContent", "noAccess");
+ pref("capability.policy.mailnews.*.title.get", "noAccess");
++pref("capability.policy.mailnews.*.wholeText", "noAccess");
+ pref("capability.policy.mailnews.DOMException.toString", "noAccess");
+ pref("capability.policy.mailnews.HTMLAnchorElement.toString", "noAccess");
+ pref("capability.policy.mailnews.HTMLDocument.domain", "noAccess");
+ pref("capability.policy.mailnews.HTMLDocument.URL", "noAccess");
+ pref("capability.policy.mailnews.*.documentURI", "noAccess");
+ pref("capability.policy.mailnews.Location.toString", "noAccess");
+ pref("capability.policy.mailnews.Range.toString", "noAccess");
+ pref("capability.policy.mailnews.Window.blur", "noAccess");

@@ -1,0 +1,52 @@
+Index: resources/application/all-camino.js.in
+===================================================================
+RCS file: /cvsroot/mozilla/camino/resources/application/all-camino.js.in,v
+retrieving revision 1.25
+diff -u -8 -r1.25 all-camino.js.in
+--- resources/application/all-camino.js.in	7 Aug 2009 01:28:33 -0000	1.25
++++ resources/application/all-camino.js.in	7 Aug 2009 17:47:05 -0000
+@@ -248,17 +248,17 @@
+ // Name of the about: page contributed by safebrowsing to handle display of error
+ // pages on phishing/malware hits.
+ pref("urlclassifier.alternate_error_page", "safebrowsingblocked");
+ 
+ // The number of random entries to send with a gethash request.
+ pref("urlclassifier.gethashnoise", 4);
+ 
+ // The list of tables that use the gethash request to confirm partial results.
+-pref("urlclassifier.gethashtables", "goog-phish-shavar,goog-malware-shavar");
++pref("urlclassifier.gethashtables", "googpub-phish-shavar,goog-malware-shavar");
+ 
+ // If an urlclassifier table has not been updated in this number of seconds,
+ // a gethash request will be forced to check that the result is still in
+ // the database.
+ pref("urlclassifier.confirm-age", 2700);
+ 
+ // Base URL for crash report links in about:crashes
+ pref("breakpad.reportURL", "http://crash-stats.mozilla.com/report/index/");
+Index: src/application/MainController.mm
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/application/MainController.mm,v
+retrieving revision 1.285
+diff -u -8 -r1.285 MainController.mm
+--- src/application/MainController.mm	7 Aug 2009 01:28:32 -0000	1.285
++++ src/application/MainController.mm	7 Aug 2009 17:47:08 -0000
+@@ -692,17 +692,17 @@
+ 
+   // dock bookmarks
+   [self updateDockMenuBookmarkFolder];
+ }
+ 
+ - (void)setUpSafeBrowsing
+ {
+   SafeBrowsingListManager *safeBrowsingService = [SafeBrowsingListManager sharedInstance];
+-  [safeBrowsingService registerListWithName:@"goog-phish-shavar" type:eSafeBrowsingPhishingListType];
++  [safeBrowsingService registerListWithName:@"googpub-phish-shavar" type:eSafeBrowsingPhishingListType];
+   [safeBrowsingService registerListWithName:@"goog-malware-shavar" type:eSafeBrowsingMalwareListType];
+   [safeBrowsingService enableUpdateCheckingAccordingToPrefs];
+ }
+ 
+ #pragma mark -
+ #pragma mark Window Accesssors
+ 
+ - (NSArray*)browserWindows

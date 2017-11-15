@@ -1,0 +1,226 @@
+Index: mozilla/security/manager/ssl/public/nsICMSMessageErrors.idl
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/public/nsICMSMessageErrors.idl,v
+retrieving revision 1.2
+diff -u -1 -0 -p -r1.2 nsICMSMessageErrors.idl
+--- mozilla/security/manager/ssl/public/nsICMSMessageErrors.idl	13 Dec 2002 20:47:22 -0000	1.2
++++ mozilla/security/manager/ssl/public/nsICMSMessageErrors.idl	14 Jul 2007 06:58:17 -0000
+@@ -56,20 +56,21 @@ interface nsICMSMessageErrors : nsISuppo
+   const long VERIFY_BAD_SIGNATURE = 1033;
+   const long VERIFY_DIGEST_MISMATCH = 1034;
+   const long VERIFY_UNKNOWN_ALGO = 1035;
+   const long VERIFY_UNSUPPORTED_ALGO = 1036;
+   const long VERIFY_MALFORMED_SIGNATURE = 1037;
+   const long VERIFY_HEADER_MISMATCH = 1038;
+   const long VERIFY_NOT_YET_ATTEMPTED = 1039;
+   const long VERIFY_CERT_WITHOUT_ADDRESS = 1040;
+ 
+   const long ENCRYPT_NO_BULK_ALG = 1056;
++  const long ENCRYPT_INCOMPLETE = 1057;
+ };
+ 
+ %{ C++
+ /**
+  * CMS specific nsresult error codes
+  */
+ 
+ #define NS_ERROR_CMS_VERIFY_NOT_SIGNED \
+   NS_ERROR_GENERATE_FAILURE(NS_ERROR_MODULE_SECURITY, \
+                             nsICMSMessageErrors::VERIFY_NOT_SIGNED)
+@@ -111,11 +112,14 @@ interface nsICMSMessageErrors : nsISuppo
+                             nsICMSMessageErrors::VERIFY_HEADER_MISMATCH)
+ #define NS_ERROR_CMS_VERIFY_NOT_YET_ATTEMPTED \
+   NS_ERROR_GENERATE_FAILURE(NS_ERROR_MODULE_SECURITY, \
+                             nsICMSMessageErrors::VERIFY_NOT_YET_ATTEMPTED)
+ #define NS_ERROR_CMS_VERIFY_CERT_WITHOUT_ADDRESS \
+   NS_ERROR_GENERATE_FAILURE(NS_ERROR_MODULE_SECURITY, \
+                             nsICMSMessageErrors::VERIFY_CERT_WITHOUT_ADDRESS)
+ #define NS_ERROR_CMS_ENCRYPT_NO_BULK_ALG \
+   NS_ERROR_GENERATE_FAILURE(NS_ERROR_MODULE_SECURITY, \
+                             nsICMSMessageErrors::ENCRYPT_NO_BULK_ALG)
++#define NS_ERROR_CMS_ENCRYPT_INCOMPLETE \
++  NS_ERROR_GENERATE_FAILURE(NS_ERROR_MODULE_SECURITY, \
++                            nsICMSMessageErrors::ENCRYPT_INCOMPLETE)
+ %}
+Index: mozilla/mailnews/mime/src/mimecms.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/mailnews/mime/src/mimecms.cpp,v
+retrieving revision 1.24.8.2
+diff -u -1 -0 -p -r1.24.8.2 mimecms.cpp
+--- mozilla/mailnews/mime/src/mimecms.cpp	13 Apr 2006 22:08:49 -0000	1.24.8.2
++++ mozilla/mailnews/mime/src/mimecms.cpp	14 Jul 2007 06:58:18 -0000
+@@ -90,31 +90,33 @@ static int MimeEncryptedCMSClassInitiali
+ 
+ typedef struct MimeCMSdata
+ {
+   int (*output_fn) (const char *buf, PRInt32 buf_size, void *output_closure);
+   void *output_closure;
+   nsCOMPtr<nsICMSDecoder> decoder_context;
+   nsCOMPtr<nsICMSMessage> content_info;
+   PRBool ci_is_encrypted;
+   char *sender_addr;
+   PRBool decoding_failed;
++  PRUint32 decoded_bytes;
+   MimeObject *self;
+   PRBool parent_is_encrypted_p;
+   PRBool parent_holds_stamp_p;
+   nsCOMPtr<nsIMsgSMIMEHeaderSink> smimeHeaderSink;
+   
+   MimeCMSdata()
+   :output_fn(nsnull),
+   output_closure(nsnull),
+   ci_is_encrypted(PR_FALSE),
+   sender_addr(nsnull),
+   decoding_failed(PR_FALSE),
++  decoded_bytes(0),
+   self(nsnull),
+   parent_is_encrypted_p(PR_FALSE),
+   parent_holds_stamp_p(PR_FALSE)
+   {
+   }
+   
+   ~MimeCMSdata()
+   {
+     if(sender_addr)
+       PR_Free(sender_addr);
+@@ -139,20 +141,22 @@ static void MimeCMS_content_callback (vo
+     return;
+ 
+   PR_SetError(0,0);
+   status = data->output_fn (buf, length, data->output_closure);
+   if (status < 0)
+   {
+     PR_SetError(status, 0);
+     data->output_fn = 0;
+     return;
+   }
++
++  data->decoded_bytes += length;
+ }
+ 
+ PRBool MimeEncryptedCMS_encrypted_p (MimeObject *obj)
+ {
+   PRBool encrypted;
+ 
+   if (!obj) return PR_FALSE;
+   if (mime_typep(obj, (MimeObjectClass *) &mimeEncryptedCMSClass))
+   {
+     MimeEncrypted *enc = (MimeEncrypted *) obj;
+@@ -623,21 +627,31 @@ MimeCMS_eof (void *crypto_closure, PRBoo
+   data->smimeHeaderSink->MaxWantedNesting(&maxNestLevel);
+ 
+   if (aRelativeNestLevel > maxNestLevel)
+     return 0;
+ 
+   if (data->decoding_failed)
+     status = nsICMSMessageErrors::GENERAL_ERROR;
+ 
+   if (!data->content_info)
+   {
+-    status = nsICMSMessageErrors::GENERAL_ERROR;
++    if (!data->decoded_bytes)
++    {
++      // We were unable to decode any data.
++      status = nsICMSMessageErrors::GENERAL_ERROR;
++    }
++    else
++    {
++      // Some content got decoded, but we failed to decode
++      // the final summary, probably we got truncated data.
++      status = nsICMSMessageErrors::ENCRYPT_INCOMPLETE;
++    }
+ 
+     // Although a CMS message could be either encrypted or opaquely signed,
+     // what we see is most likely encrypted, because if it were
+     // signed only, we probably would have been able to decode it.
+ 
+     data->ci_is_encrypted = PR_TRUE;
+   }
+   else
+   {
+     rv = data->content_info->ContentIsEncrypted(&data->ci_is_encrypted);
+Index: mozilla/mailnews/extensions/smime/resources/content/msgReadSecurityInfo.js
+===================================================================
+RCS file: /cvsroot/mozilla/mailnews/extensions/smime/resources/content/msgReadSecurityInfo.js,v
+retrieving revision 1.10
+diff -u -1 -0 -p -r1.10 msgReadSecurityInfo.js
+--- mozilla/mailnews/extensions/smime/resources/content/msgReadSecurityInfo.js	7 Jul 2004 11:32:43 -0000	1.10
++++ mozilla/mailnews/extensions/smime/resources/content/msgReadSecurityInfo.js	14 Jul 2007 06:58:18 -0000
+@@ -177,20 +177,25 @@ function onLoad()
+       case -1:
+         encInfoLabel = "EINoneLabel";
+         encInfo = "EINone";
+         break;
+ 
+       case nsICMSMessageErrors.SUCCESS:
+         encInfoLabel = "EIValidLabel";
+         encInfo = "EIValid";
+         break;
+ 
++      case nsICMSMessageErrors.ENCRYPT_INCOMPLETE:
++        encInfoLabel = "EIInvalidLabel";
++        encInfo = "EIContentAltered";
++        break;
++
+       case nsICMSMessageErrors.GENERAL_ERROR:
+         encInfoLabel = "EIInvalidLabel";
+         encInfoHeader = "EIInvalidHeader";
+         encInfo_clueless = 1;
+         break;
+     }
+ 
+ 
+     document.getElementById("encryptionLabel").value = 
+       bundle.getString(encInfoLabel);
+Index: mozilla/mail/extensions/smime/content/msgHdrViewSMIMEOverlay.js
+===================================================================
+RCS file: /cvsroot/mozilla/mail/extensions/smime/content/msgHdrViewSMIMEOverlay.js,v
+retrieving revision 1.4
+diff -u -1 -0 -p -r1.4 msgHdrViewSMIMEOverlay.js
+--- mozilla/mail/extensions/smime/content/msgHdrViewSMIMEOverlay.js	29 Jul 2005 22:01:06 -0000	1.4
++++ mozilla/mail/extensions/smime/content/msgHdrViewSMIMEOverlay.js	14 Jul 2007 06:58:19 -0000
+@@ -118,38 +118,42 @@ var smimeHeaderSink = 
+       gEncryptedUINode.setAttribute("encrypted", "notok");
+       gStatusBar.setAttribute("encrypted", "notok");
+     }
+     
+     if (gEncryptedURIService)
+     {
+       gMyLastEncryptedURI = GetLoadedMessage();
+       gEncryptedURIService.rememberEncrypted(gMyLastEncryptedURI);
+     }
+ 
+-    if (nsICMSMessageErrors.SUCCESS != aEncryptionStatus)
++    switch (aEncryptionStatus)
+     {
++    case nsICMSMessageErrors.SUCCESS:
++    case nsICMSMessageErrors.ENCRYPT_INCOMPLETE:
++      break;
++    default:
+       var brand = gBrandBundle.getString("brandShortName");
+       var title = gSMIMEBundle.getString("CantDecryptTitle").replace(/%brand%/g,brand);
+       var body = gSMIMEBundle.getString("CantDecryptBody").replace(/%brand%/g,brand);
+ 
+       // insert our message
+       msgWindow.displayHTMLInMessagePane(title,
+        "<html>\n"+
+        "<body bgcolor=\"#fafaee\">\n"+
+        "<center><br><br><br>\n"+
+        "<table>\n"+
+        "<tr><td>\n"+
+        "<center><strong><font size=\"+3\">\n"+
+        title+"</font></center><br>\n"+
+        body+"\n"+
+        "</td></tr></table></center></body></html>", false);
+-
++      break;
+     }
+   },
+ 
+   QueryInterface : function(iid)
+   {
+     if (iid.equals(Components.interfaces.nsIMsgSMIMEHeaderSink) || iid.equals(Components.interfaces.nsISupports))
+       return this;
+     throw Components.results.NS_NOINTERFACE;
+   }
+ };

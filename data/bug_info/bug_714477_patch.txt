@@ -1,0 +1,284 @@
+# HG changeset patch
+# Parent 386af1a4821ae79bcf60e009cadb5c5cfab32e9e
+# User Brian Smith <bsmith@mozilla.com>
+Bug 714477: Do not check the OCSP enabled pref during extended validation, r?kaie
+
+diff -r 386af1a4821a security/manager/ssl/public/nsIX509CertDB.idl
+--- a/security/manager/ssl/public/nsIX509CertDB.idl	Sat Nov 10 08:40:54 2012 -0800
++++ b/security/manager/ssl/public/nsIX509CertDB.idl	Sat Nov 10 08:49:26 2012 -0800
+@@ -12,17 +12,17 @@ interface nsIX509Cert3;
+ interface nsIFile;
+ interface nsIInterfaceRequestor;
+ interface nsIZipReader;
+ 
+ %{C++
+ #define NS_X509CERTDB_CONTRACTID "@mozilla.org/security/x509certdb;1"
+ %}
+ 
+-[scriptable, function, uuid(48411e2d-85a9-4b16-bec8-e30cde801f9e)]
++[scriptable, function, uuid(1ed05e18-8c5c-4e5f-b8e0-0e247c974834)]
+ interface nsIOpenSignedJARFileCallback : nsISupports
+ {
+   void OpenSignedJARFileFinished(in nsresult rv,
+                                  in nsIZipReader aZipReader,
+                                  in nsIX509Cert3 aSignerCert);
+ };
+ 
+ /**
+@@ -253,21 +253,16 @@ interface nsIX509CertDB : nsISupports {
+   /**
+    *  An array of all known OCSP responders within the scope of the 
+    *  certificate database.
+    *
+    *  @return Array of OCSP responders, entries are QIable to nsIOCSPResponder.
+    */
+   nsIArray getOCSPResponders();
+ 
+-  /**
+-   *  Whether OCSP is enabled in preferences.
+-   */
+-  readonly attribute boolean isOcspOn;
+-
+   /*
+    *  Decode a raw data presentation and instantiate an object in memory.
+    *
+    *  @param base64 The raw representation of a certificate,
+    *                encoded as Base 64.
+    *  @return The new certificate object.
+    */
+   nsIX509Cert constructX509FromBase64(in string base64);
+diff -r 386af1a4821a security/manager/ssl/src/nsCERTValInParamWrapper.cpp
+--- a/security/manager/ssl/src/nsCERTValInParamWrapper.cpp	Sat Nov 10 08:40:54 2012 -0800
++++ b/security/manager/ssl/src/nsCERTValInParamWrapper.cpp	Sat Nov 10 08:49:26 2012 -0800
+@@ -30,16 +30,18 @@ nsresult nsCERTValInParamWrapper::Constr
+                                             ocsp_download_config odc,
+                                             ocsp_strict_config osc,
+                                             any_revo_fresh_config arfc,
+                                             const char *firstNetworkRevocationMethod)
+ {
+   if (mAlreadyConstructed)
+     return NS_ERROR_FAILURE;
+ 
++  mOCSPDownloadEnabled = odc == ocsp_on;
++
+   CERTValInParam *p = (CERTValInParam*)PORT_Alloc(3 * sizeof(CERTValInParam));
+   if (!p)
+     return NS_ERROR_OUT_OF_MEMORY;
+ 
+   CERTRevocationFlags *rev = CERT_AllocCERTRevocationFlags(
+       cert_revocation_method_ocsp +1, 1,
+       cert_revocation_method_ocsp +1, 1);
+   
+diff -r 386af1a4821a security/manager/ssl/src/nsCERTValInParamWrapper.h
+--- a/security/manager/ssl/src/nsCERTValInParamWrapper.h	Sat Nov 10 08:40:54 2012 -0800
++++ b/security/manager/ssl/src/nsCERTValInParamWrapper.h	Sat Nov 10 08:49:26 2012 -0800
+@@ -31,21 +31,22 @@
+  * 
+  * This guarantees the object will still be alive after the call,
+  * and if the default object has been replaced in the meantime,
+  * the reference counter will go to zero, and the old default
+  * object will get destroyed automatically.
+  */
+ class nsCERTValInParamWrapper
+ {
+- public:
+-    NS_IMETHOD_(nsrefcnt) AddRef();
+-    NS_IMETHOD_(nsrefcnt) Release();
++public:
++  NS_IMETHOD_(nsrefcnt) AddRef();
++  NS_IMETHOD_(nsrefcnt) Release();
+ 
+-public:
++  bool IsOCSPDownloadEnabled() const { return mOCSPDownloadEnabled; }
++
+   nsCERTValInParamWrapper();
+   virtual ~nsCERTValInParamWrapper();
+ 
+   enum missing_cert_download_config { missing_cert_download_off = 0, missing_cert_download_on };
+   enum crl_download_config { crl_local_only = 0, crl_download_allowed };
+   enum ocsp_download_config { ocsp_off = 0, ocsp_on };
+   enum ocsp_strict_config { ocsp_relaxed = 0, ocsp_strict };
+   enum any_revo_fresh_config { any_revo_relaxed = 0, any_revo_strict };
+@@ -56,14 +57,15 @@ public:
+                      const char *firstNetworkRevocationMethod);
+ 
+ private:
+   nsAutoRefCnt mRefCnt;
+   NS_DECL_OWNINGTHREAD
+   bool mAlreadyConstructed;
+   CERTValInParam *mCVIN;
+   CERTRevocationFlags *mRev;
++  bool mOCSPDownloadEnabled;
+   
+ public:
+   CERTValInParam *GetRawPointerForNSS() { return mCVIN; }
+ };
+ 
+ #endif
+diff -r 386af1a4821a security/manager/ssl/src/nsIdentityChecking.cpp
+--- a/security/manager/ssl/src/nsIdentityChecking.cpp	Sat Nov 10 08:40:54 2012 -0800
++++ b/security/manager/ssl/src/nsIdentityChecking.cpp	Sat Nov 10 08:49:26 2012 -0800
+@@ -1,14 +1,15 @@
+ /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+  *
+  * This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
++#include "mozilla/RefPtr.h"
+ #include "nsAppDirectoryServiceDefs.h"
+ #include "nsStreamUtils.h"
+ #include "nsNetUtil.h"
+ #include "nsILineInputStream.h"
+ #include "nsPromiseFlatString.h"
+ #include "nsTArray.h"
+ 
+ #include "cert.h"
+@@ -23,16 +24,18 @@
+ #define PSM_ENABLE_TEST_EV_ROOTS
+ #endif
+ #endif
+ 
+ #ifdef PR_LOGGING
+ extern PRLogModuleInfo* gPIPNSSLog;
+ #endif
+ 
++using namespace mozilla;
++
+ NSSCleanupAutoPtrClass(CERTCertificate, CERT_DestroyCertificate)
+ NSSCleanupAutoPtrClass(CERTCertList, CERT_DestroyCertList)
+ NSSCleanupAutoPtrClass_WithParam(SECItem, SECITEM_FreeItem, TrueParam, true)
+ 
+ #define CONST_OID static const unsigned char
+ #define OI(x) { siDEROID, (unsigned char *)x, sizeof x }
+ 
+ struct nsMyTrustedEVInfo
+@@ -1136,28 +1139,23 @@ nsNSSCertificate::hasValidEVOidTag(SECOi
+ 
+   nsresult nrv;
+   nsCOMPtr<nsINSSComponent> nssComponent = 
+     do_GetService(PSM_COMPONENT_CONTRACTID, &nrv);
+   if (NS_FAILED(nrv))
+     return nrv;
+   nssComponent->EnsureIdentityInfoLoaded();
+ 
++  RefPtr<nsCERTValInParamWrapper> certVal;
++  nrv = nssComponent->GetDefaultCERTValInParam(certVal);
++  NS_ENSURE_SUCCESS(nrv, nrv);
++
+   validEV = false;
+   resultOidTag = SEC_OID_UNKNOWN;
+ 
+-  bool isOCSPEnabled = false;
+-  nsCOMPtr<nsIX509CertDB> certdb;
+-  certdb = do_GetService(NS_X509CERTDB_CONTRACTID);
+-  if (certdb)
+-    certdb->GetIsOcspOn(&isOCSPEnabled);
+-  // No OCSP, no EV
+-  if (!isOCSPEnabled)
+-    return NS_OK;
+-
+   SECOidTag oid_tag;
+   SECStatus rv = getFirstEVPolicy(mCert, oid_tag);
+   if (rv != SECSuccess)
+     return NS_OK;
+ 
+   if (oid_tag == SEC_OID_UNKNOWN) // not in our list of OIDs accepted for EV
+     return NS_OK;
+ 
+@@ -1165,17 +1163,18 @@ nsNSSCertificate::hasValidEVOidTag(SECOi
+   CERTCertListCleaner rootListCleaner(rootList);
+ 
+   CERTRevocationMethodIndex preferedRevMethods[1] = { 
+     cert_revocation_method_ocsp
+   };
+ 
+   uint64_t revMethodFlags = 
+     CERT_REV_M_TEST_USING_THIS_METHOD
+-    | CERT_REV_M_ALLOW_NETWORK_FETCHING
++    | (certVal->IsOCSPDownloadEnabled() ? CERT_REV_M_ALLOW_NETWORK_FETCHING
++                                        : CERT_REV_M_FORBID_NETWORK_FETCHING)
+     | CERT_REV_M_ALLOW_IMPLICIT_DEFAULT_SOURCE
+     | CERT_REV_M_REQUIRE_INFO_ON_MISSING_SOURCE
+     | CERT_REV_M_IGNORE_MISSING_FRESH_INFO
+     | CERT_REV_M_STOP_TESTING_ON_FRESH_INFO;
+ 
+   uint64_t revMethodIndependentFlags = 
+     CERT_REV_MI_TEST_ALL_LOCAL_INFORMATION_FIRST
+     | CERT_REV_MI_REQUIRE_SOME_FRESH_INFO_AVAILABLE;
+diff -r 386af1a4821a security/manager/ssl/src/nsNSSCertificate.h
+--- a/security/manager/ssl/src/nsNSSCertificate.h	Sat Nov 10 08:40:54 2012 -0800
++++ b/security/manager/ssl/src/nsNSSCertificate.h	Sat Nov 10 08:49:26 2012 -0800
+@@ -4,17 +4,16 @@
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ #ifndef _NS_NSSCERTIFICATE_H_
+ #define _NS_NSSCERTIFICATE_H_
+ 
+ #include "nsIX509Cert.h"
+ #include "nsIX509Cert2.h"
+ #include "nsIX509Cert3.h"
+-#include "nsIX509CertDB.h"
+ #include "nsIX509CertList.h"
+ #include "nsIASN1Object.h"
+ #include "nsISMimeCert.h"
+ #include "nsIIdentityInfo.h"
+ #include "nsCOMPtr.h"
+ #include "nsNSSShutDown.h"
+ #include "nsISimpleEnumerator.h"
+ #include "nsISerializable.h"
+diff -r 386af1a4821a security/manager/ssl/src/nsNSSCertificateDB.cpp
+--- a/security/manager/ssl/src/nsNSSCertificateDB.cpp	Sat Nov 10 08:40:54 2012 -0800
++++ b/security/manager/ssl/src/nsNSSCertificateDB.cpp	Sat Nov 10 08:49:26 2012 -0800
+@@ -1353,30 +1353,16 @@ nsNSSCertificateDB::getCertNames(CERTCer
+       tmpArray[i++] = ToNewUnicode(certstr);
+     }
+   }
+ finish:
+   *_count = numcerts;
+   *_certNames = tmpArray;
+ }
+ 
+-/* somewhat follows logic of cert_list_include_cert from PSM 1.x */
+-
+-
+-NS_IMETHODIMP 
+-nsNSSCertificateDB::GetIsOcspOn(bool *aOcspOn)
+-{
+-  nsCOMPtr<nsIPrefBranch> pref = do_GetService(NS_PREFSERVICE_CONTRACTID);
+-
+-  int32_t ocspEnabled;
+-  pref->GetIntPref("security.OCSP.enabled", &ocspEnabled);
+-  *aOcspOn = ( ocspEnabled == 0 ) ? false : true; 
+-  return NS_OK;
+-}
+-
+ /* nsIX509Cert getDefaultEmailEncryptionCert (); */
+ NS_IMETHODIMP
+ nsNSSCertificateDB::FindEmailEncryptionCert(const nsAString &aNickname, nsIX509Cert **_retval)
+ {
+   if (!_retval)
+     return NS_ERROR_FAILURE;
+ 
+   *_retval = 0;
+diff -r 386af1a4821a security/manager/ssl/src/nsNSSIOLayer.cpp
+--- a/security/manager/ssl/src/nsNSSIOLayer.cpp	Sat Nov 10 08:40:54 2012 -0800
++++ b/security/manager/ssl/src/nsNSSIOLayer.cpp	Sat Nov 10 08:49:26 2012 -0800
+@@ -17,16 +17,17 @@
+ #include "nsPrintfCString.h"
+ #include "SSLServerCertVerification.h"
+ #include "nsNSSCertHelper.h"
+ #include "nsNSSCleaner.h"
+ #include "nsIDocShell.h"
+ #include "nsIDocShellTreeItem.h"
+ #include "nsISecureBrowserUI.h"
+ #include "nsIInterfaceRequestorUtils.h"
++#include "nsIX509CertDB.h"
+ #include "nsCharSeparatedTokenizer.h"
+ #include "nsIConsoleService.h"
+ #include "PSMRunnable.h"
+ 
+ #include "ssl.h"
+ #include "secerr.h"
+ #include "sslerr.h"
+ #include "secder.h"

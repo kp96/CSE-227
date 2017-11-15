@@ -1,0 +1,110 @@
+Index: js/src/xpconnect/src/XPCNativeWrapper.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/js/src/xpconnect/src/XPCNativeWrapper.cpp,v
+retrieving revision 1.22
+diff -u -p -d -1 -0 -r1.22 XPCNativeWrapper.cpp
+--- js/src/xpconnect/src/XPCNativeWrapper.cpp	2 Jun 2005 21:33:17 -0000	1.22
++++ js/src/xpconnect/src/XPCNativeWrapper.cpp	5 Jul 2005 21:54:18 -0000
+@@ -306,54 +306,52 @@ XPC_NW_FunctionWrapper(JSContext *cx, JS
+ static JSBool
+ XPC_NW_GetOrSetProperty(JSContext *cx, JSObject *obj, jsval id, jsval *vp,
+                         JSBool aIsSet)
+ {
+   // We don't deal with the following properties here.
+   if (id == GetStringByIndex(cx, XPCJSRuntime::IDX_PROTOTYPE) ||
+       id == GetStringByIndex(cx, XPCJSRuntime::IDX_TO_STRING)) {
+     return JS_TRUE;
+   }
+ 
++  // Be paranoid, don't let people use this as another object's
++  // prototype or anything like that.
++  if (!XPCNativeWrapper::IsNativeWrapper(cx, obj)) {
++    return ThrowException(NS_ERROR_UNEXPECTED, cx);
++  }
++
++  XPCWrappedNative *wrappedNative =
++    XPCNativeWrapper::GetWrappedNative(cx, obj);
++
++  if (!wrappedNative) {
++    return ThrowException(NS_ERROR_INVALID_ARG, cx);
++  }
++
++  JSObject *nativeObj = wrappedNative->GetFlatJSObject();
++
+   // We can't use XPC_NW_BYPASS here, because we need to do a full
+   // OBJ_SET_PROPERTY or OBJ_GET_PROPERTY on the wrapped native's
+   // object, in order to trigger reflection done by the underlying
+   // OBJ_LOOKUP_PROPERTY done by SET and GET.
+ 
+   if (ShouldBypassNativeWrapper(cx, obj)) {
+-    XPCWrappedNative *wn = XPCNativeWrapper::GetWrappedNative(cx, obj);
+     jsid interned_id;
+ 
+     if (!::JS_ValueToId(cx, id, &interned_id)) {
+       return JS_FALSE;
+     }
+ 
+-    JSObject *wn_obj = wn->GetFlatJSObject();
+     return aIsSet
+-           ? OBJ_SET_PROPERTY(cx, wn_obj, interned_id, vp)
+-           : OBJ_GET_PROPERTY(cx, wn_obj, interned_id, vp);
+-  }
+-
+-  // Be paranoid, don't let people use this as another object's
+-  // prototype or anything like that.
+-  if (!XPCNativeWrapper::IsNativeWrapper(cx, obj)) {
+-    return ThrowException(NS_ERROR_UNEXPECTED, cx);
+-  }
+-
+-  XPCWrappedNative *wrappedNative =
+-    XPCNativeWrapper::GetWrappedNative(cx, obj);
+-
+-  if (!wrappedNative) {
+-    return ThrowException(NS_ERROR_UNEXPECTED, cx);
++           ? OBJ_SET_PROPERTY(cx, nativeObj, interned_id, vp)
++           : OBJ_GET_PROPERTY(cx, nativeObj, interned_id, vp);
+   }
+ 
+-  JSObject *nativeObj = wrappedNative->GetFlatJSObject();
+-
+   if (!aIsSet &&
+       id == GetStringByIndex(cx, XPCJSRuntime::IDX_WRAPPED_JSOBJECT)) {
+     // Return the underlying native object, the XPConnect wrapped
+     // object that this additional wrapper layer wraps.
+ 
+     *vp = OBJECT_TO_JSVAL(nativeObj);
+ 
+     return JS_TRUE;
+   }
+ 
+@@ -1106,21 +1104,29 @@ XPC_NW_toString(JSContext *cx, JSObject 
+ PRBool
+ XPCNativeWrapper::AttachNewConstructorObject(XPCCallContext &ccx,
+                                              JSObject *aGlobalObject)
+ {
+   JSObject *class_obj =
+     ::JS_InitClass(ccx, aGlobalObject, nsnull, &sXPC_NW_JSClass.base,
+                    XPCNativeWrapperCtor, 0, nsnull, sXPC_NW_JSClass_methods,
+                    nsnull, nsnull);
+   if (!class_obj) {
+     NS_WARNING("can't initialize the XPCNativeWrapper class");
+-    return NS_ERROR_OUT_OF_MEMORY;
++    return PR_FALSE;
++  }
++  
++  // Make sure our prototype chain is empty and that people can't mess
++  // with XPCNativeWrapper.prototype.
++  ::JS_SetPrototype(ccx, class_obj, nsnull);
++  if (!::JS_SealObject(ccx, class_obj, JS_FALSE)) {
++    NS_WARNING("Failed to seal XPCNativeWrapper.prototype");
++    return PR_FALSE;
+   }
+ 
+   JSBool found;
+   return ::JS_SetPropertyAttributes(ccx, aGlobalObject,
+                                     sXPC_NW_JSClass.base.name,
+                                     JSPROP_READONLY | JSPROP_PERMANENT,
+                                     &found);
+ }
+ 
+ // static

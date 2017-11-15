@@ -1,0 +1,25 @@
+# HG changeset patch
+# Parent dc2939f2640dc3d46cf1ee99fad45e171e100b4f
+# User Edmund Wong <ewong@pw-wspx.org>
+Bug 423401 - Removed usage of nsDependentCString() r=kaie, r=honzab.moz
+
+diff --git a/security/manager/ssl/src/nsNSSCallbacks.cpp b/security/manager/ssl/src/nsNSSCallbacks.cpp
+--- a/security/manager/ssl/src/nsNSSCallbacks.cpp
++++ b/security/manager/ssl/src/nsNSSCallbacks.cpp
+@@ -234,14 +234,14 @@ SECStatus nsNSSHttpRequestSession::creat
+     rs->mTimeoutInterval = maxBug404059Timeout;
+   }
+ 
+-  rs->mURL.Append(nsDependentCString(http_protocol_variant));
++  rs->mURL.Assign(http_protocol_variant);
+   rs->mURL.AppendLiteral("://");
+   rs->mURL.Append(hss->mHost);
+   rs->mURL.AppendLiteral(":");
+   rs->mURL.AppendInt(hss->mPort);
+   rs->mURL.Append(path_and_query_string);
+ 
+-  rs->mRequestMethod = nsDependentCString(http_request_method);
++  rs->mRequestMethod = http_request_method;
+ 
+   *pRequest = (void*)rs;
+   return SECSuccess;

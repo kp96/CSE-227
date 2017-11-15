@@ -1,0 +1,43 @@
+# HG changeset patch
+# User Michael Wu <mwu@mozilla.com>
+# Parent 84ee69a7dd2f3a697a5517bb1feca90b0554e44b
+Bug 635087 - nsCryptoRunnable::Run leaks JSPrincipals, r=
+
+diff --git a/security/manager/ssl/src/nsCrypto.cpp b/security/manager/ssl/src/nsCrypto.cpp
+--- a/security/manager/ssl/src/nsCrypto.cpp
++++ b/security/manager/ssl/src/nsCrypto.cpp
+@@ -2182,6 +2182,13 @@ nsCryptoRunnable::Run()
+   JSPrincipals *principals;
+   JSContext *cx = m_args->m_cx;
+ 
++  JSAutoRequest ar(cx);
++  JSAutoEnterCompartment ac;
++
++  if (!ac.enter(cx, m_args->m_scope)) {
++    return NS_ERROR_FAILURE;
++  }
++
+   nsresult rv = m_args->m_principals->GetJSPrincipals(cx, &principals);
+   if (NS_FAILED(rv))
+     return NS_ERROR_FAILURE;
+@@ -2189,11 +2196,10 @@ nsCryptoRunnable::Run()
+   // make sure the right context is on the stack. must not return w/out popping
+   nsCOMPtr<nsIJSContextStack> stack(do_GetService("@mozilla.org/js/xpc/ContextStack;1"));
+   if (!stack || NS_FAILED(stack->Push(cx))) {
++    JSPRINCIPALS_DROP(cx, principals);
+     return NS_ERROR_FAILURE;
+   }
+ 
+-  JSAutoRequest ar(cx);
+-
+   jsval retval;
+   if (JS_EvaluateScriptForPrincipals(cx, m_args->m_scope, principals,
+                                      m_args->m_jsCallback, 
+@@ -2204,6 +2210,7 @@ nsCryptoRunnable::Run()
+   }
+ 
+   stack->Pop(nsnull);
++  JSPRINCIPALS_DROP(cx, principals);
+   return rv;
+ }
+ 

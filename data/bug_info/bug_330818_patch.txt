@@ -1,0 +1,20 @@
+Index: nsDocument.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/content/base/src/nsDocument.cpp,v
+retrieving revision 3.626
+diff -p -u -d -u -5 -r3.626 nsDocument.cpp
+--- nsDocument.cpp	9 Mar 2006 07:29:38 -0000	3.626
++++ nsDocument.cpp	17 Mar 2006 21:30:38 -0000
+@@ -3215,10 +3215,12 @@
+ NS_IMETHODIMP
+ nsDocument::GetBoxObjectFor(nsIDOMElement* aElement, nsIBoxObject** aResult)
+ {
+   nsCOMPtr<nsIContent> content(do_QueryInterface(aElement));
+   NS_ENSURE_TRUE(content, NS_ERROR_UNEXPECTED);
++  NS_ENSURE_TRUE(content->GetCurrentDoc() == this,
++                 NS_ERROR_DOM_WRONG_DOCUMENT_ERR);
+   
+   nsresult rv;
+ 
+   *aResult = nsnull;
+ 

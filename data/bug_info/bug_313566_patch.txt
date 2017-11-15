@@ -1,0 +1,83 @@
+Index: content/xul/document/src/nsXULCommandDispatcher.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/content/xul/document/src/nsXULCommandDispatcher.cpp,v
+retrieving revision 1.82
+diff -p -U10 -r1.82 nsXULCommandDispatcher.cpp
+--- content/xul/document/src/nsXULCommandDispatcher.cpp	28 Apr 2005 23:47:56 -0000	1.82
++++ content/xul/document/src/nsXULCommandDispatcher.cpp	25 Oct 2005 00:22:20 -0000
+@@ -1,11 +1,12 @@
+ /* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* vim: set ts=2 sw=2 et tw=80: */
+ /* ***** BEGIN LICENSE BLOCK *****
+  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
+  *
+  * The contents of this file are subject to the Mozilla Public License Version
+  * 1.1 (the "License"); you may not use this file except in compliance with
+  * the License. You may obtain a copy of the License at
+  * http://www.mozilla.org/MPL/
+  *
+  * Software distributed under the License is distributed on an "AS IS" basis,
+  * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
+@@ -134,34 +135,60 @@ nsXULCommandDispatcher::EnsureFocusContr
+ 
+ ////////////////////////////////////////////////////////////////
+ // nsIDOMXULTracker Interface
+ 
+ NS_IMETHODIMP
+ nsXULCommandDispatcher::GetFocusedElement(nsIDOMElement** aElement)
+ {
+   EnsureFocusController();
+   NS_ENSURE_TRUE(mFocusController, NS_ERROR_FAILURE);
+ 
+-  return mFocusController->GetFocusedElement(aElement);
++  nsresult rv = mFocusController->GetFocusedElement(aElement);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  // Make sure the caller can access the focused element.
++  if (*aElement && !nsContentUtils::CanCallerAccess(*aElement)) {
++    // XXX This might want to return null, but we use that return value
++    // to mean "there is no focused element," so to be clear, throw an
++    // exception.
++    return NS_ERROR_DOM_SECURITY_ERR;
++  }
++
++  return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsXULCommandDispatcher::GetFocusedWindow(nsIDOMWindow** aWindow)
+ {
+   EnsureFocusController();
+   NS_ENSURE_TRUE(mFocusController, NS_ERROR_FAILURE);
+ 
+   nsCOMPtr<nsIDOMWindowInternal> window;
+   nsresult rv = mFocusController->GetFocusedWindow(getter_AddRefs(window));
+   NS_ENSURE_TRUE(NS_SUCCEEDED(rv) && window, rv);
+ 
+-  return CallQueryInterface(window, aWindow);
++  rv = CallQueryInterface(window, aWindow);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  // Make sure the caller can access this window. The caller can access this
++  // window iff the window's document has the same origin.
++  nsCOMPtr<nsIDOMDocument> domdoc;
++  rv = (*aWindow)->GetDocument(getter_AddRefs(domdoc));
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  // Note: If there is no document, then this window has been cleared and
++  // there's nothing left to protect, so let the window pass through.
++  if (domdoc && !nsContentUtils::CanCallerAccess(domdoc)) {
++    return NS_ERROR_DOM_SECURITY_ERR;
++  }
++
++  return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsXULCommandDispatcher::SetFocusedElement(nsIDOMElement* aElement)
+ {
+   EnsureFocusController();
+   NS_ENSURE_TRUE(mFocusController, NS_ERROR_FAILURE);
+ 
+   return mFocusController->SetFocusedElement(aElement);
+ }

@@ -1,0 +1,268 @@
+Index: browser/base/content/browser-scripts.inc
+===================================================================
+RCS file: /cvsroot/mozilla/browser/base/content/browser-scripts.inc,v
+retrieving revision 1.3
+diff -u -9 -p -r1.3 browser-scripts.inc
+--- browser/base/content/browser-scripts.inc	3 Dec 2003 05:37:53 -0000	1.3
++++ browser/base/content/browser-scripts.inc	15 Oct 2004 21:03:10 -0000
+@@ -39,10 +39,10 @@
+ <script type="application/x-javascript" src="chrome://global/content/globalOverlay.js"/>
+ <script type="application/x-javascript" src="chrome://global/content/findUtils.js"/>
+ <script type="application/x-javascript" src="chrome://global/content/printUtils.js"/>
+ <script type="application/x-javascript" src="chrome://browser/content/utilityOverlay.js"/>
+ <script type="application/x-javascript" src="chrome://browser/content/bookmarks/bookmarks.js"/>
+ <script type="application/x-javascript" src="chrome://browser/content/bookmarks/bookmarksMenu.js"/>
+ <script type="application/x-javascript" src="chrome://global/content/viewZoomOverlay.js"/>
+ <script type="application/x-javascript" src="chrome://browser/content/contentAreaUtils.js"/>
+ <script type="application/x-javascript" src="chrome://browser/content/browser.js"/>
+-
++<script type="application/x-javascript" src="chrome://global/content/XPCNativeWrapper.js"/>
+Index: browser/base/content/browser.js
+===================================================================
+RCS file: /cvsroot/mozilla/browser/base/content/browser.js,v
+retrieving revision 1.296.2.3.2.122
+diff -u -9 -p -r1.296.2.3.2.122 browser.js
+--- browser/base/content/browser.js	13 Oct 2004 22:24:37 -0000	1.296.2.3.2.122
++++ browser/base/content/browser.js	15 Oct 2004 21:03:12 -0000
+@@ -4422,24 +4422,26 @@ nsContextMenu.prototype = {
+                  this.isLinkType( "snews:", link ) ); 
+     },
+     // Returns true iff clicked on link is of type given.
+     isLinkType : function ( linktype, link ) {        
+         try {
+             // Test for missing protocol property.
+             if ( !link.protocol ) {
+                 // We must resort to testing the URL string :-(.
+                 var protocol;
+-                if ( link.href ) {
+-                    protocol = link.href.substr( 0, linktype.length );
++                var wrapper = new XPCNativeWrapper(link, "href",
++                                                   "getAttributeNS()");
++                if (wrapper.href) {
++                    protocol = wrapper.href.substr(0, linktype.length);
+                 } else {
+-                    protocol = link.getAttributeNS("http://www.w3.org/1999/xlink","href");
+-                    if ( protocol ) {
+-                        protocol = protocol.substr( 0, linktype.length );
++                    protocol = wrapper.getAttributeNS("http://www.w3.org/1999/xlink","href");
++                    if (protocol) {
++                        protocol = protocol.substr(0, linktype.length);
+                     }
+                 }
+                 return protocol.toLowerCase() === linktype;        
+             } else {
+                 // Presume all but javascript: urls are saveable.
+                 return link.protocol.toLowerCase() === linktype;
+             }
+         } catch (e) {
+             // something was wrong with the link,
+@@ -4672,37 +4674,40 @@ nsContextMenu.prototype = {
+             var attr = attrs.item( i );
+             node.setAttribute( attr.nodeName, attr.nodeValue );
+         }
+ 
+         // Voila!
+         return node;
+     },
+     // Generate fully-qualified URL for clicked-on link.
+     linkURL : function () {
+-        if (this.link.href) {
+-          return this.link.href;
++        var wrapper = new XPCNativeWrapper(this.link, "href", "baseURI",
++                                           "getAttributeNS()");
++        if (wrapper.href) {
++          return wrapper.href;
+         }
+-        var href = this.link.getAttributeNS("http://www.w3.org/1999/xlink","href");
++        var href = wrapper.getAttributeNS("http://www.w3.org/1999/xlink",
++                                          "href");
+         if (!href || !href.match(/\S/)) {
+           throw "Empty href"; // Without this we try to save as the current doc, for example, HTML case also throws if empty
+         }
+-        href = makeURLAbsolute(this.link.baseURI,href);
++        href = makeURLAbsolute(wrapper.baseURI, href);
+         return href;
+     },
+     // Get text of link.
+     linkText : function () {
+         var text = gatherTextUnder( this.link );
+         if (!text || !text.match(/\S/)) {
+           text = this.link.getAttribute("title");
+           if (!text || !text.match(/\S/)) {
+             text = this.link.getAttribute("alt");
+             if (!text || !text.match(/\S/)) {
+-              if (this.link.href) {                
++              if (this.link.href) {
+                 text = this.link.href;
+               } else {
+                 text = getAttributeNS("http://www.w3.org/1999/xlink", "href");
+                 if (text && text.match(/\S/)) {
+                   text = makeURLAbsolute(this.link.baseURI, text);
+                 }
+               }
+             }
+           }
+@@ -4910,76 +4915,82 @@ function asyncOpenWebPanel(event)
+      default:
+        linkNode = findParentNode(event.originalTarget, "a");
+        // <a> cannot be nested.  So if we find an anchor without an
+        // href, there is no useful <a> around the target
+        if (linkNode && !linkNode.hasAttribute("href"))
+          linkNode = null;
+        break;
+    }
+    if (linkNode) {
++     var wrapper = new XPCNativeWrapper(linkNode, "href", "getAttribute()");
+      if (event.button == 0 && !event.ctrlKey && !event.shiftKey &&
+          !event.altKey && !event.metaKey) {
+        // A Web panel's links should target the main content area.  Do this
+        // if no modifier keys are down and if there's no target or the target equals
+        // _main (the IE convention) or _content (the Mozilla convention).
+        // The only reason we field _main and _content here is for the markLinkVisited
+        // hack.
+        target = linkNode.getAttribute("target");
+        if (fieldNormalClicks && 
+            (!target || target == "_content" || target  == "_main")) 
+          // IE uses _main, SeaMonkey uses _content, we support both
+        {
+-         if (!linkNode.href) return true;
++         if (!wrapper.href) return true;
+          if (linkNode.getAttribute("onclick")) return true;
+          var postData = { };
+-         var url = getShortcutOrURI(linkNode.href, postData);
++         var url = getShortcutOrURI(wrapper.href, postData);
+          if (!url)
+            return true;
+-         markLinkVisited(linkNode.href, linkNode);
++         markLinkVisited(wrapper.href, linkNode);
+          loadURI(url, null, postData.value);
+          event.preventDefault();
+          return false;
+        }
+        else if (linkNode.getAttribute("rel") == "sidebar") {
+          // This is the Opera convention for a special link that - when clicked - allows
+          // you to add a sidebar panel.  We support the Opera convention here.  The link's
+          // title attribute contains the title that should be used for the sidebar panel.
+          openDialog("chrome://browser/content/bookmarks/addBookmark2.xul", "",
+                     "centerscreen,chrome,dialog,resizable,dependent",
+-                    linkNode.getAttribute("title"), 
+-                    linkNode.href, null, null, null, null, true);
++                    wrapper.getAttribute("title"), 
++                    wrapper.href, null, null, null, null, true);
+          event.preventDefault();
+          return false;
+        }
+        else if (target == "_search") {
+          // Used in WinIE as a way of transiently loading pages in a sidebar.  We
+          // mimic that WinIE functionality here and also load the page transiently.
+-         openWebPanel(gNavigatorBundle.getString("webPanels"), linkNode.href);
++         openWebPanel(gNavigatorBundle.getString("webPanels"), wrapper.href);
+          event.preventDefault();
+          return false;
+        }
+      }
+-     else
+-       handleLinkClick(event, linkNode.href, linkNode);
++     else {
++       handleLinkClick(event, wrapper.href, linkNode);
++     }
++
+      return true;
+    } else {
+      // Try simple XLink
+      var href;
+      linkNode = target;
+      while (linkNode) {
+        if (linkNode.nodeType == Node.ELEMENT_NODE) {
+-         href = linkNode.getAttributeNS("http://www.w3.org/1999/xlink", "href");
++         var wrapper = new XPCNativeWrapper(linkNode, "getAttributeNS()");
++
++         href = wrapper.getAttributeNS("http://www.w3.org/1999/xlink", "href");
+          break;
+        }
+        linkNode = linkNode.parentNode;
+      }
+      if (href) {
+-       href = makeURLAbsolute(target.baseURI,href);
++       var baseURI = new XPCNativeWrapper(linkNode, "baseURI").baseURI;
++       href = makeURLAbsolute(baseURI, href);
+        handleLinkClick(event, href, null);
+        return true;
+      }
+    }
+    if (event.button == 1 &&
+        !findParentNode(event.originalTarget, "scrollbar") &&
+        gPrefService.getBoolPref("middlemouse.contentLoadURL")) {
+      middleMousePaste(event);
+    }
+@@ -5850,21 +5861,23 @@ function livemarkOnLinkAdded(event)
+       // ??? this really shouldn't happen..
+       return;
+     }
+ 
+     var livemarkLinks = [];
+     if (browserForLink.livemarkLinks != null) {
+       livemarkLinks = browserForLink.livemarkLinks;
+     }
+ 
+-    livemarkLinks.push({ href: event.target.href,
+-                         type: event.target.type,
+-                        title: event.target.title});
++    var wrapper = new XPCNativeWrapper(event.target, "href", "type", "title");
++
++    livemarkLinks.push({ href: wrapper.href,
++                         type: wrapper.type,
++                        title: wrapper.title});
+ 
+     browserForLink.livemarkLinks = livemarkLinks;
+     if (browserForLink == gBrowser || browserForLink == gBrowser.mCurrentBrowser)
+       gLivemarksButton.setAttribute("livemarks", "true");
+   }
+ }
+ 
+ // this is called both from onload and also whenever the user
+ // switches tabs; we update whether we show or hide the livemark
+Index: xpfe/communicator/resources/content/contentAreaClick.js
+===================================================================
+RCS file: /cvsroot/mozilla/xpfe/communicator/resources/content/contentAreaClick.js,v
+retrieving revision 1.37
+diff -u -9 -p -r1.37 contentAreaClick.js
+--- xpfe/communicator/resources/content/contentAreaClick.js	19 Mar 2004 01:34:40 -0000	1.37
++++ xpfe/communicator/resources/content/contentAreaClick.js	15 Oct 2004 21:03:12 -0000
+@@ -144,31 +144,33 @@
+         linkNode = findParentNode(event.originalTarget, "a");
+         // <a> cannot be nested.  So if we find an anchor without an
+         // href, there is no useful <a> around the target
+         if (linkNode && !linkNode.hasAttribute("href"))
+           linkNode = null;
+         break;
+     }
+     var href;
+     if (linkNode) {
+-      href = linkNode.href;
++      href = new XPCNativeWrapper(linkNode, "href").href;
+     } else {
+       // Try simple XLink
+       linkNode = target;
+       while (linkNode) {
+         if (linkNode.nodeType == Node.ELEMENT_NODE) {
+-          href = linkNode.getAttributeNS("http://www.w3.org/1999/xlink", "href");
++          var wrapper = new XPCNativeWrapper(linkNode, "getAttributeNS()");
++          href = wrapper.getAttributeNS("http://www.w3.org/1999/xlink", "href");
+           break;
+         }
+         linkNode = linkNode.parentNode;
+       }
+       if (href && href != "") {
+-        href = makeURLAbsolute(target.baseURI,href);
++        var baseURI = new XPCNativeWrapper(linkNode, "baseURI").baseURI;
++        href = makeURLAbsolute(baseURI, href);
+       }
+     }
+     return href;
+   }
+ 
+   // Called whenever the user clicks in the content area,
+   // except when left-clicking on links (special case)
+   // should always return true for click to go through
+   function contentAreaClick(event) 

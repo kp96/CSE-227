@@ -1,0 +1,11 @@
+As a preparation for the NSS dependency fix,
+push patch from bug 474473 (independently of a NSS tag).
+
+Tree will remain in this state only for minutes.
+Then update to a new NSS tag, which includes above fix,
+(and touch the coreconf.dep file to force rebuilding
+all of NSS):
+
+python client.py update_nss NSS_3_12_3_BETA2
+hg addremove -n
+hg commit -A

@@ -1,0 +1,1679 @@
+diff --git a/security/manager/ssl/src/nsCertVerificationThread.cpp b/security/manager/ssl/src/nsCertVerificationThread.cpp
+--- a/security/manager/ssl/src/nsCertVerificationThread.cpp
++++ b/security/manager/ssl/src/nsCertVerificationThread.cpp
+@@ -93,7 +93,8 @@ void nsSMimeVerificationJob::Run()
+ }
+ 
+ nsCertVerificationThread::nsCertVerificationThread()
+-: mJobQ(nsnull)
++: nsPSMBackgroundThread(nsnull),
++  mJobQ(nsnull)
+ {
+   NS_ASSERTION(!verification_thread_singleton, 
+                "nsCertVerificationThread is a singleton, caller attempts"
+diff --git a/security/manager/ssl/src/nsNSSCallbacks.cpp b/security/manager/ssl/src/nsNSSCallbacks.cpp
+--- a/security/manager/ssl/src/nsNSSCallbacks.cpp
++++ b/security/manager/ssl/src/nsNSSCallbacks.cpp
+@@ -434,7 +434,7 @@ nsNSSHttpRequestSession::internal_send_r
+ 
+       if (!request_canceled)
+       {
+-        PRBool wantExit = nsSSLThread::exitRequested();
++        PRBool wantExit = nsSSLThreadControl::exitRequested();
+         PRBool timeout = 
+           (PRIntervalTime)(PR_IntervalNow() - start_time) > mTimeoutInterval;
+ 
+diff --git a/security/manager/ssl/src/nsNSSComponent.cpp b/security/manager/ssl/src/nsNSSComponent.cpp
+--- a/security/manager/ssl/src/nsNSSComponent.cpp
++++ b/security/manager/ssl/src/nsNSSComponent.cpp
+@@ -275,8 +275,34 @@ nsTokenEventRunnable::Run()
+   return nssComponent->DispatchEvent(mType, mTokenName);
+ }
+ 
++// We must ensure that the nsNSSComponent has been loaded before
++// creating any other components.
++PRBool EnsureNSSInitialized(PRBool ensure)
++{
++  static PRBool haveLoaded = PR_FALSE;
++
++  if (!ensure) {
++    haveLoaded = PR_FALSE;
++    return PR_FALSE;
++  }
++
++  if (haveLoaded)
++    return PR_TRUE;
++
++  nsCOMPtr<nsISupports> nssComponent 
++    = do_GetService(PSM_COMPONENT_CONTRACTID);
++
++  // If we succeeded to get the PSM service rise the flag to avoid
++  // unnecessary calls to GetService.
++  if (nssComponent)
++    haveLoaded = PR_TRUE;
++
++  return haveLoaded;
++}
++
+ nsNSSComponent::nsNSSComponent()
+-  :mNSSInitialized(PR_FALSE), mThreadList(nsnull)
++  :mNSSInitialized(PR_FALSE), mThreadList(nsnull),
++   mSSLThread(NULL), mCertVerificationThread(NULL)
+ {
+   mutex = PR_NewLock();
+   
+@@ -296,29 +322,16 @@ nsNSSComponent::nsNSSComponent()
+   // registering all identity data until first needed.
+   memset(&mIdentityInfoCallOnce, 0, sizeof(PRCallOnceType));
+ 
+-  nsSSLIOLayerHelpers::Init();
+-  
+   NS_ASSERTION( (0 == mInstanceCount), "nsNSSComponent is a singleton, but instantiated multiple times!");
+   ++mInstanceCount;
+   hashTableCerts = nsnull;
+   mShutdownObjectList = nsNSSShutDownList::construct();
+   mIsNetworkDown = PR_FALSE;
+-  mSSLThread = new nsSSLThread();
+-  if (mSSLThread)
+-    mSSLThread->startThread();
+-  mCertVerificationThread = new nsCertVerificationThread();
+-  if (mCertVerificationThread)
+-    mCertVerificationThread->startThread();
+ }
+ 
+ nsNSSComponent::~nsNSSComponent()
+ {
+-  if (mSSLThread)
+-  {
+-    mSSLThread->requestExit();
+-    delete mSSLThread;
+-    mSSLThread = nsnull;
+-  }
++  nsSSLThreadControl::Stop();
+   
+   if (mCertVerificationThread)
+   {
+@@ -348,6 +361,7 @@ nsNSSComponent::~nsNSSComponent()
+   // All cleanup code requiring services needs to happen in xpcom_shutdown
+ 
+   ShutdownNSS();
++  nsSSLThreadControl::clearEvents();
+   nsSSLIOLayerHelpers::Cleanup();
+   --mInstanceCount;
+   delete mShutdownObjectList;
+@@ -357,6 +371,8 @@ nsNSSComponent::~nsNSSComponent()
+     mutex = nsnull;
+   }
+ 
++  EnsureNSSInitialized(PR_FALSE);
++
+   PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsNSSComponent::dtor finished\n"));
+ }
+ 
+@@ -1470,9 +1486,6 @@ nsNSSComponent::InitializeNSS(PRBool sho
+       return NS_ERROR_FAILURE;
+     }
+     
+-    hashTableCerts = PL_NewHashTable( 0, certHashtable_keyHash, certHashtable_keyCompare, 
+-      certHashtable_valueCompare, 0, 0 );
+-
+     nsresult rv;
+     nsCAutoString profileStr;
+     nsCOMPtr<nsIFile> profilePath;
+@@ -1521,6 +1534,9 @@ nsNSSComponent::InitializeNSS(PRBool sho
+     if (NS_FAILED(rv)) 
+       return rv;
+ 
++    hashTableCerts = PL_NewHashTable( 0, certHashtable_keyHash, certHashtable_keyCompare, 
++      certHashtable_valueCompare, 0, 0 );
++
+   #if defined(XP_MACOSX)
+     // function may modify the parameters
+     // ignore return code from conversion, we continue anyway
+@@ -1710,8 +1726,7 @@ nsNSSComponent::Init()
+ 
+   PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("Beginning NSS initialization\n"));
+ 
+-  if (!mutex || !mShutdownObjectList || 
+-      !mSSLThread || !mCertVerificationThread)
++  if (!mutex || !mShutdownObjectList)
+   {
+     PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("NSS init, out of memory in constructor\n"));
+     return NS_ERROR_OUT_OF_MEMORY;
+@@ -1747,9 +1762,25 @@ nsNSSComponent::Init()
+   rv = InitializeNSS(PR_TRUE); // ok to show a warning box on failure
+   if (NS_FAILED(rv)) {
+     PR_LOG(gPIPNSSLog, PR_LOG_ERROR, ("Unable to Initialize NSS.\n"));
++
++    DeregisterObservers();
++    mPIPNSSBundle = nsnull;
+     return rv;
+   }
+ 
++  nsSSLIOLayerHelpers::Init();
++  nsSSLThreadControl::Init();
++  nsSSLThreadControl::Start();
++  mCertVerificationThread = new nsCertVerificationThread();
++  if (mCertVerificationThread)
++    mCertVerificationThread->startThread();
++
++  if (!mSSLThread || !mCertVerificationThread)
++  {
++    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("NSS init, could not create threads\n"));
++    return NS_ERROR_OUT_OF_MEMORY;
++  }
++
+   InitializeCRLUpdateTimer();
+   RegisterPSMContentListener();
+ 
+@@ -2186,6 +2217,31 @@ nsNSSComponent::RegisterObservers()
+   return NS_OK;
+ }
+ 
++nsresult
++nsNSSComponent::DeregisterObservers()
++{
++  if (!mObserversRegistered)
++    return NS_OK;
++
++  nsCOMPtr<nsIObserverService> observerService(do_GetService("@mozilla.org/observer-service;1"));
++  NS_ASSERTION(observerService, "could not get observer service");
++  if (observerService) {
++    mObserversRegistered = PR_FALSE;
++    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsNSSComponent: removing observers\n"));
++
++    observerService->RemoveObserver(this, NS_XPCOM_SHUTDOWN_OBSERVER_ID);
++
++    observerService->RemoveObserver(this, PROFILE_APPROVE_CHANGE_TOPIC);
++    observerService->RemoveObserver(this, PROFILE_CHANGE_TEARDOWN_TOPIC);
++    observerService->RemoveObserver(this, PROFILE_CHANGE_TEARDOWN_VETO_TOPIC);
++    observerService->RemoveObserver(this, PROFILE_BEFORE_CHANGE_TOPIC);
++    observerService->RemoveObserver(this, PROFILE_AFTER_CHANGE_TOPIC);
++    observerService->RemoveObserver(this, PROFILE_CHANGE_NET_TEARDOWN_TOPIC);
++    observerService->RemoveObserver(this, PROFILE_CHANGE_NET_RESTORE_TOPIC);
++  }
++  return NS_OK;
++}
++
+ NS_IMETHODIMP
+ nsNSSComponent::RememberCert(CERTCertificate *cert)
+ {
+@@ -2338,8 +2394,7 @@ nsNSSComponent::DoProfileApproveChange(n
+ void
+ nsNSSComponent::DoProfileChangeNetTeardown()
+ {
+-  if (mSSLThread)
+-    mSSLThread->requestExit();
++  nsSSLThreadControl::RequestExit();
+   if (mCertVerificationThread)
+     mCertVerificationThread->requestExit();
+   mIsNetworkDown = PR_TRUE;
+@@ -2401,10 +2456,8 @@ nsNSSComponent::DoProfileBeforeChange(ns
+ void
+ nsNSSComponent::DoProfileChangeNetRestore()
+ {
+-  delete mSSLThread;
+-  mSSLThread = new nsSSLThread();
+-  if (mSSLThread)
+-    mSSLThread->startThread();
++  nsSSLThreadControl::Stop();
++  nsSSLThreadControl::Start();
+   delete mCertVerificationThread;
+   mCertVerificationThread = new nsCertVerificationThread();
+   if (mCertVerificationThread)
+diff --git a/security/manager/ssl/src/nsNSSComponent.h b/security/manager/ssl/src/nsNSSComponent.h
+--- a/security/manager/ssl/src/nsNSSComponent.h
++++ b/security/manager/ssl/src/nsNSSComponent.h
+@@ -93,6 +93,8 @@
+ #define NS_CRYPTO_HMAC_CLASSNAME "Mozilla Crypto HMAC Function Component"
+ #define NS_CRYPTO_HMAC_CID {0xa496d0a2, 0xdff7, 0x4e23, {0xbd, 0x65, 0x1c, 0xa7, 0x42, 0xfa, 0x17, 0x8a}}
+ 
++extern PRBool EnsureNSSInitialized(PRBool reset);
++
+ //--------------------------------------------
+ // Now we need a content listener to register 
+ //--------------------------------------------
+@@ -287,6 +289,7 @@ private:
+   nsresult ConfigureInternalPKCS11Token();
+   nsresult RegisterPSMContentListener();
+   nsresult RegisterObservers();
++  nsresult DeregisterObservers();
+   nsresult DownloadCrlSilently();
+   nsresult PostCRLImportEvent(const nsCSubstring &urlString, nsIStreamListener *psmDownloader);
+   nsresult getParamsForNextCrlToDownload(nsAutoString *url, PRTime *time, nsAutoString *key);
+diff --git a/security/manager/ssl/src/nsNSSIOLayer.cpp b/security/manager/ssl/src/nsNSSIOLayer.cpp
+--- a/security/manager/ssl/src/nsNSSIOLayer.cpp
++++ b/security/manager/ssl/src/nsNSSIOLayer.cpp
+@@ -338,7 +338,7 @@ nsNSSSocketInfo::EnsureDocShellDependent
+   if (mDocShellDependentStuffKnown)
+     return NS_OK;
+ 
+-  if (!mCallbacks || nsSSLThread::exitRequested())
++  if (!mCallbacks || nsSSLThreadControl::exitRequested())
+     return NS_ERROR_FAILURE;
+ 
+   mDocShellDependentStuffKnown = PR_TRUE;
+@@ -537,7 +537,7 @@ NS_IMETHODIMP nsNSSSocketInfo::GetInterf
+ 
+     rv = ir->GetInterface(uuid, result);
+   } else {
+-    if (nsSSLThread::exitRequested())
++    if (nsSSLThreadControl::exitRequested())
+       return NS_ERROR_FAILURE;
+ 
+     nsCOMPtr<nsIInterfaceRequestor> proxiedCallbacks;
+@@ -673,7 +673,7 @@ nsresult nsNSSSocketInfo::ActivateSSL()
+   if (isAlreadyShutDown())
+     return NS_ERROR_NOT_AVAILABLE;
+ 
+-  nsresult rv = nsSSLThread::requestActivateSSL(this);
++  nsresult rv = nsSSLThreadControl::requestActivateSSL(this);
+   
+   if (NS_FAILED(rv))
+     return rv;
+@@ -774,11 +774,10 @@ void nsSSLIOLayerHelpers::Cleanup()
+     mTLSIntolerantSites = nsnull;
+   }
+ 
+-  if (mSharedPollableEvent)
+-    PR_DestroyPollableEvent(mSharedPollableEvent);
+-
+-  if (mutex)
++  if (mutex) {
+     PR_DestroyLock(mutex);
++    mutex = nsnull;
++  }
+ }
+ 
+ static nsresult
+@@ -1231,7 +1230,7 @@ displayAlert(nsAFlatString &formattedStr
+   // The interface requestor object may not be safe, so proxy the call to get
+   // the nsIPrompt.
+ 
+-  if (nsSSLThread::exitRequested())
++  if (nsSSLThreadControl::exitRequested())
+     return NS_ERROR_FAILURE;
+ 
+   nsCOMPtr<nsIInterfaceRequestor> proxiedCallbacks;
+@@ -1268,7 +1267,7 @@ nsHandleSSLError(nsNSSSocketInfo *socket
+     return NS_OK;
+   }
+ 
+-  if (nsSSLThread::exitRequested()) {
++  if (nsSSLThreadControl::exitRequested()) {
+     return NS_ERROR_FAILURE;
+   }
+ 
+@@ -1514,7 +1513,7 @@ nsSSLIOLayerClose(PRFileDesc *fd)
+   nsNSSSocketInfo *socketInfo = (nsNSSSocketInfo*)fd->secret;
+   NS_ASSERTION(socketInfo,"nsNSSSocketInfo was null for an fd");
+ 
+-  return nsSSLThread::requestClose(socketInfo);
++  return nsSSLThreadControl::requestClose(socketInfo);
+ }
+ 
+ PRStatus nsNSSSocketInfo::CloseSocketAndDestroy()
+@@ -1768,16 +1767,14 @@ nsSSLIOLayerPoll(PRFileDesc *fd, PRInt16
+   nsNSSSocketInfo *socketInfo = (nsNSSSocketInfo*)fd->secret;
+   NS_ASSERTION(socketInfo,"nsNSSSocketInfo was null for an fd");
+ 
+-  return nsSSLThread::requestPoll(socketInfo, in_flags, out_flags);
++  return nsSSLThreadControl::requestPoll(socketInfo, in_flags, out_flags);
+ }
+ 
++PRBool nsSSLIOLayerHelpers::nsSSLIOLayerInitialized = PR_FALSE;
+ PRDescIdentity nsSSLIOLayerHelpers::nsSSLIOLayerIdentity;
+ PRIOMethods nsSSLIOLayerHelpers::nsSSLIOLayerMethods;
+ PRLock *nsSSLIOLayerHelpers::mutex = nsnull;
+ nsCStringHashSet *nsSSLIOLayerHelpers::mTLSIntolerantSites = nsnull;
+-PRFileDesc *nsSSLIOLayerHelpers::mSharedPollableEvent = nsnull;
+-nsNSSSocketInfo *nsSSLIOLayerHelpers::mSocketOwningPollableEvent = nsnull;
+-PRBool nsSSLIOLayerHelpers::mPollableEventCurrentlySet = PR_FALSE;
+ 
+ static PRIntn _PSM_InvalidInt(void)
+ {
+@@ -1817,7 +1814,7 @@ static PRStatus PR_CALLBACK PSMGetsockna
+   nsNSSSocketInfo *socketInfo = (nsNSSSocketInfo*)fd->secret;
+   NS_ASSERTION(socketInfo,"nsNSSSocketInfo was null for an fd");
+ 
+-  return nsSSLThread::requestGetsockname(socketInfo, addr);
++  return nsSSLThreadControl::requestGetsockname(socketInfo, addr);
+ }
+ 
+ static PRStatus PR_CALLBACK PSMGetpeername(PRFileDesc *fd, PRNetAddr *addr)
+@@ -1830,7 +1827,7 @@ static PRStatus PR_CALLBACK PSMGetpeerna
+   nsNSSSocketInfo *socketInfo = (nsNSSSocketInfo*)fd->secret;
+   NS_ASSERTION(socketInfo,"nsNSSSocketInfo was null for an fd");
+ 
+-  return nsSSLThread::requestGetpeername(socketInfo, addr);
++  return nsSSLThreadControl::requestGetpeername(socketInfo, addr);
+ }
+ 
+ static PRStatus PR_CALLBACK PSMGetsocketoption(PRFileDesc *fd, 
+@@ -1844,7 +1841,7 @@ static PRStatus PR_CALLBACK PSMGetsocket
+   nsNSSSocketInfo *socketInfo = (nsNSSSocketInfo*)fd->secret;
+   NS_ASSERTION(socketInfo,"nsNSSSocketInfo was null for an fd");
+ 
+-  return nsSSLThread::requestGetsocketoption(socketInfo, data);
++  return nsSSLThreadControl::requestGetsocketoption(socketInfo, data);
+ }
+ 
+ static PRStatus PR_CALLBACK PSMSetsocketoption(PRFileDesc *fd, 
+@@ -1858,7 +1855,7 @@ static PRStatus PR_CALLBACK PSMSetsocket
+   nsNSSSocketInfo *socketInfo = (nsNSSSocketInfo*)fd->secret;
+   NS_ASSERTION(socketInfo,"nsNSSSocketInfo was null for an fd");
+ 
+-  return nsSSLThread::requestSetsocketoption(socketInfo, data);
++  return nsSSLThreadControl::requestSetsocketoption(socketInfo, data);
+ }
+ 
+ static PRInt32 PR_CALLBACK PSMRecv(PRFileDesc *fd, void *buf, PRInt32 amount,
+@@ -1874,7 +1871,7 @@ static PRInt32 PR_CALLBACK PSMRecv(PRFil
+   NS_ASSERTION(socketInfo,"nsNSSSocketInfo was null for an fd");
+ 
+   if (flags == PR_MSG_PEEK) {
+-    return nsSSLThread::requestRecvMsgPeek(socketInfo, buf, amount, flags, timeout);
++    return nsSSLThreadControl::requestRecvMsgPeek(socketInfo, buf, amount, flags, timeout);
+   }
+ 
+   if (flags != 0) {
+@@ -1882,7 +1879,7 @@ static PRInt32 PR_CALLBACK PSMRecv(PRFil
+     return -1;
+   }
+ 
+-  return nsSSLThread::requestRead(socketInfo, buf, amount, timeout);
++  return nsSSLThreadControl::requestRead(socketInfo, buf, amount, timeout);
+ }
+ 
+ static PRInt32 PR_CALLBACK PSMSend(PRFileDesc *fd, const void *buf, PRInt32 amount,
+@@ -1902,7 +1899,7 @@ static PRInt32 PR_CALLBACK PSMSend(PRFil
+   nsNSSSocketInfo *socketInfo = (nsNSSSocketInfo*)fd->secret;
+   NS_ASSERTION(socketInfo,"nsNSSSocketInfo was null for an fd");
+ 
+-  return nsSSLThread::requestWrite(socketInfo, buf, amount, timeout);
++  return nsSSLThreadControl::requestWrite(socketInfo, buf, amount, timeout);
+ }
+ 
+ static PRInt32 PR_CALLBACK
+@@ -1927,54 +1924,53 @@ static PRStatus PR_CALLBACK PSMConnectco
+   nsNSSSocketInfo *socketInfo = (nsNSSSocketInfo*)fd->secret;
+   NS_ASSERTION(socketInfo,"nsNSSSocketInfo was null for an fd");
+ 
+-  return nsSSLThread::requestConnectcontinue(socketInfo, out_flags);
++  return nsSSLThreadControl::requestConnectcontinue(socketInfo, out_flags);
+ }
+ 
+ nsresult nsSSLIOLayerHelpers::Init()
+ {
+-  nsSSLIOLayerIdentity = PR_GetUniqueIdentity("NSS layer");
+-  nsSSLIOLayerMethods  = *PR_GetDefaultIOMethods();
++  if (!nsSSLIOLayerInitialized) {
++    nsSSLIOLayerInitialized = PR_TRUE;
++    nsSSLIOLayerIdentity = PR_GetUniqueIdentity("NSS layer");
++    nsSSLIOLayerMethods  = *PR_GetDefaultIOMethods();
+ 
+-  nsSSLIOLayerMethods.available = (PRAvailableFN)_PSM_InvalidInt;
+-  nsSSLIOLayerMethods.available64 = (PRAvailable64FN)_PSM_InvalidInt64;
+-  nsSSLIOLayerMethods.fsync = (PRFsyncFN)_PSM_InvalidStatus;
+-  nsSSLIOLayerMethods.seek = (PRSeekFN)_PSM_InvalidInt;
+-  nsSSLIOLayerMethods.seek64 = (PRSeek64FN)_PSM_InvalidInt64;
+-  nsSSLIOLayerMethods.fileInfo = (PRFileInfoFN)_PSM_InvalidStatus;
+-  nsSSLIOLayerMethods.fileInfo64 = (PRFileInfo64FN)_PSM_InvalidStatus;
+-  nsSSLIOLayerMethods.writev = (PRWritevFN)_PSM_InvalidInt;
+-  nsSSLIOLayerMethods.accept = (PRAcceptFN)_PSM_InvalidDesc;
+-  nsSSLIOLayerMethods.bind = (PRBindFN)_PSM_InvalidStatus;
+-  nsSSLIOLayerMethods.listen = (PRListenFN)_PSM_InvalidStatus;
+-  nsSSLIOLayerMethods.shutdown = (PRShutdownFN)_PSM_InvalidStatus;
+-  nsSSLIOLayerMethods.recvfrom = (PRRecvfromFN)_PSM_InvalidInt;
+-  nsSSLIOLayerMethods.sendto = (PRSendtoFN)_PSM_InvalidInt;
+-  nsSSLIOLayerMethods.acceptread = (PRAcceptreadFN)_PSM_InvalidInt;
+-  nsSSLIOLayerMethods.transmitfile = (PRTransmitfileFN)_PSM_InvalidInt;
+-  nsSSLIOLayerMethods.sendfile = (PRSendfileFN)_PSM_InvalidInt;
++    nsSSLIOLayerMethods.available = (PRAvailableFN)_PSM_InvalidInt;
++    nsSSLIOLayerMethods.available64 = (PRAvailable64FN)_PSM_InvalidInt64;
++    nsSSLIOLayerMethods.fsync = (PRFsyncFN)_PSM_InvalidStatus;
++    nsSSLIOLayerMethods.seek = (PRSeekFN)_PSM_InvalidInt;
++    nsSSLIOLayerMethods.seek64 = (PRSeek64FN)_PSM_InvalidInt64;
++    nsSSLIOLayerMethods.fileInfo = (PRFileInfoFN)_PSM_InvalidStatus;
++    nsSSLIOLayerMethods.fileInfo64 = (PRFileInfo64FN)_PSM_InvalidStatus;
++    nsSSLIOLayerMethods.writev = (PRWritevFN)_PSM_InvalidInt;
++    nsSSLIOLayerMethods.accept = (PRAcceptFN)_PSM_InvalidDesc;
++    nsSSLIOLayerMethods.bind = (PRBindFN)_PSM_InvalidStatus;
++    nsSSLIOLayerMethods.listen = (PRListenFN)_PSM_InvalidStatus;
++    nsSSLIOLayerMethods.shutdown = (PRShutdownFN)_PSM_InvalidStatus;
++    nsSSLIOLayerMethods.recvfrom = (PRRecvfromFN)_PSM_InvalidInt;
++    nsSSLIOLayerMethods.sendto = (PRSendtoFN)_PSM_InvalidInt;
++    nsSSLIOLayerMethods.acceptread = (PRAcceptreadFN)_PSM_InvalidInt;
++    nsSSLIOLayerMethods.transmitfile = (PRTransmitfileFN)_PSM_InvalidInt;
++    nsSSLIOLayerMethods.sendfile = (PRSendfileFN)_PSM_InvalidInt;
+ 
+-  nsSSLIOLayerMethods.getsockname = PSMGetsockname;
+-  nsSSLIOLayerMethods.getpeername = PSMGetpeername;
+-  nsSSLIOLayerMethods.getsocketoption = PSMGetsocketoption;
+-  nsSSLIOLayerMethods.setsocketoption = PSMSetsocketoption;
+-  nsSSLIOLayerMethods.recv = PSMRecv;
+-  nsSSLIOLayerMethods.send = PSMSend;
+-  nsSSLIOLayerMethods.connectcontinue = PSMConnectcontinue;
++    nsSSLIOLayerMethods.getsockname = PSMGetsockname;
++    nsSSLIOLayerMethods.getpeername = PSMGetpeername;
++    nsSSLIOLayerMethods.getsocketoption = PSMGetsocketoption;
++    nsSSLIOLayerMethods.setsocketoption = PSMSetsocketoption;
++    nsSSLIOLayerMethods.recv = PSMRecv;
++    nsSSLIOLayerMethods.send = PSMSend;
++    nsSSLIOLayerMethods.connectcontinue = PSMConnectcontinue;
+ 
+-  nsSSLIOLayerMethods.connect = nsSSLIOLayerConnect;
+-  nsSSLIOLayerMethods.close = nsSSLIOLayerClose;
+-  nsSSLIOLayerMethods.write = nsSSLIOLayerWrite;
+-  nsSSLIOLayerMethods.read = nsSSLIOLayerRead;
+-  nsSSLIOLayerMethods.poll = nsSSLIOLayerPoll;
++    nsSSLIOLayerMethods.connect = nsSSLIOLayerConnect;
++    nsSSLIOLayerMethods.close = nsSSLIOLayerClose;
++    nsSSLIOLayerMethods.write = nsSSLIOLayerWrite;
++    nsSSLIOLayerMethods.read = nsSSLIOLayerRead;
++    nsSSLIOLayerMethods.poll = nsSSLIOLayerPoll;
++  }
+ 
+   mutex = PR_NewLock();
+   if (!mutex)
+     return NS_ERROR_OUT_OF_MEMORY;
+ 
+-  mSharedPollableEvent = PR_NewPollableEvent();
+-
+-  // if we can not get a pollable event, we'll have to do busy waiting
+-
+   mTLSIntolerantSites = new nsCStringHashSet();
+   if (!mTLSIntolerantSites)
+     return NS_ERROR_OUT_OF_MEMORY;
+@@ -2880,7 +2876,7 @@ nsNSSBadCertHandler(void *arg, PRFileDes
+   if (!infoObject)
+     return SECFailure;
+ 
+-  if (nsSSLThread::exitRequested())
++  if (nsSSLThreadControl::exitRequested())
+     return cancel_and_failure(infoObject);
+ 
+   CERTCertificate *peerCert = nsnull;
+diff --git a/security/manager/ssl/src/nsNSSIOLayer.h b/security/manager/ssl/src/nsNSSIOLayer.h
+--- a/security/manager/ssl/src/nsNSSIOLayer.h
++++ b/security/manager/ssl/src/nsNSSIOLayer.h
+@@ -238,6 +238,7 @@ private:
+   void destructorSafeDestroyNSSReference();
+ 
+ friend class nsSSLThread;
++friend class nsSSLThreadControl;
+ };
+ 
+ class nsCStringHashSet;
+@@ -248,6 +249,7 @@ public:
+   static nsresult Init();
+   static void Cleanup();
+ 
++  static PRBool nsSSLIOLayerInitialized;
+   static PRDescIdentity nsSSLIOLayerIdentity;
+   static PRIOMethods nsSSLIOLayerMethods;
+ 
+@@ -258,11 +260,6 @@ public:
+ 
+   static void addIntolerantSite(const nsCString &str);
+   static PRBool isKnownAsIntolerantSite(const nsCString &str);
+-  
+-  static PRFileDesc *mSharedPollableEvent;
+-  static nsNSSSocketInfo *mSocketOwningPollableEvent;
+-  
+-  static PRBool mPollableEventCurrentlySet;
+ };
+ 
+ nsresult nsSSLIOLayerNewSocket(PRInt32 family,
+diff --git a/security/manager/ssl/src/nsNSSModule.cpp b/security/manager/ssl/src/nsNSSModule.cpp
+--- a/security/manager/ssl/src/nsNSSModule.cpp
++++ b/security/manager/ssl/src/nsNSSModule.cpp
+@@ -79,26 +79,6 @@
+ #include "nsSSLStatus.h"
+ #include "nsNSSIOLayer.h"
+ 
+-// We must ensure that the nsNSSComponent has been loaded before
+-// creating any other components.
+-static void EnsureNSSInitialized(PRBool triggeredByNSSComponent)
+-{
+-  static PRBool haveLoaded = PR_FALSE;
+-  if (haveLoaded)
+-    return;
+-
+-  haveLoaded = PR_TRUE;
+-  
+-  if (triggeredByNSSComponent) {
+-    // We must prevent a recursion, as nsNSSComponent creates
+-    // additional instances
+-    return;
+-  }
+-  
+-  nsCOMPtr<nsISupports> nssComponent 
+-    = do_GetService(PSM_COMPONENT_CONTRACTID);
+-}
+-
+ // These two macros are ripped off from nsIGenericFactory.h and slightly
+ // modified.
+ #define NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(triggeredByNSSComponent,           \
+@@ -110,7 +90,9 @@ _InstanceClass##Constructor(nsISupports 
+     nsresult rv;                                                              \
+     _InstanceClass * inst;                                                    \
+                                                                               \
+-    EnsureNSSInitialized(triggeredByNSSComponent);                            \
++    if (!triggeredByNSSComponent &&                                           \
++        !EnsureNSSInitialized(PR_TRUE))                                       \
++        return NS_ERROR_FAILURE;                                              \
+                                                                               \
+     *aResult = NULL;                                                          \
+     if (NULL != aOuter) {                                                     \
+@@ -140,7 +122,9 @@ _InstanceClass##Constructor(nsISupports 
+     nsresult rv;                                                              \
+     _InstanceClass * inst;                                                    \
+                                                                               \
+-    EnsureNSSInitialized(triggeredByNSSComponent);                            \
++    if (!triggeredByNSSComponent &&                                           \
++        !EnsureNSSInitialized(PR_TRUE))                                       \
++        return NS_ERROR_FAILURE;                                              \
+                                                                               \
+     *aResult = NULL;                                                          \
+     if (NULL != aOuter) {                                                     \
+diff --git a/security/manager/ssl/src/nsPSMBackgroundThread.cpp b/security/manager/ssl/src/nsPSMBackgroundThread.cpp
+--- a/security/manager/ssl/src/nsPSMBackgroundThread.cpp
++++ b/security/manager/ssl/src/nsPSMBackgroundThread.cpp
+@@ -44,13 +44,20 @@ void PR_CALLBACK nsPSMBackgroundThread::
+   self->Run();
+ }
+ 
+-nsPSMBackgroundThread::nsPSMBackgroundThread()
++nsPSMBackgroundThread::nsPSMBackgroundThread(PRLock *aForeignMutex)
+ : mThreadHandle(nsnull),
+   mMutex(nsnull),
++  mUseForeignMutex(PR_FALSE),
+   mCond(nsnull),
+   mExitRequested(PR_FALSE)
+ {
+-  mMutex = PR_NewLock();
++  if (aForeignMutex) {
++    mMutex = aForeignMutex;
++    mUseForeignMutex = PR_TRUE;
++  }
++  else {
++    mMutex = PR_NewLock();
++  }
+   mCond = PR_NewCondVar(mMutex);
+ }
+ 
+@@ -75,7 +82,7 @@ nsPSMBackgroundThread::~nsPSMBackgroundT
+   if (mCond)
+     PR_DestroyCondVar(mCond);
+ 
+-  if (mMutex)
++  if (!mUseForeignMutex && mMutex)
+     PR_DestroyLock(mMutex);
+ }
+ 
+@@ -97,3 +104,16 @@ void nsPSMBackgroundThread::requestExit(
+   PR_JoinThread(mThreadHandle);
+   mThreadHandle = nsnull;
+ }
++
++#if 0
++void nsPSMBackgroundThread::notifyThread()
++{
++  if (!mMutex || !mCond)
++    return;
++    
++  {
++    nsAutoLock threadLock(mMutex);
++    PR_NotifyAllCondVar(mCond);
++  }
++}
++#endif
+diff --git a/security/manager/ssl/src/nsPSMBackgroundThread.h b/security/manager/ssl/src/nsPSMBackgroundThread.h
+--- a/security/manager/ssl/src/nsPSMBackgroundThread.h
++++ b/security/manager/ssl/src/nsPSMBackgroundThread.h
+@@ -55,6 +55,7 @@ protected:
+   // Derived classes may use it to protect additional
+   // resources.
+   PRLock *mMutex;
++  PRBool mUseForeignMutex;
+ 
+   // Used to signal the thread's Run loop
+   PRCondVar *mCond;
+@@ -63,11 +64,15 @@ protected:
+   PRBool mExitRequested;
+ 
+ public:
+-  nsPSMBackgroundThread();
++  nsPSMBackgroundThread(PRLock *aForeignMutex);
+   virtual ~nsPSMBackgroundThread();
+ 
+   nsresult startThread();
+   void requestExit();
++
++#if 0
++  void notifyThread();
++#endif
+ };
+ 
+ 
+diff --git a/security/manager/ssl/src/nsSSLThread.cpp b/security/manager/ssl/src/nsSSLThread.cpp
+--- a/security/manager/ssl/src/nsSSLThread.cpp
++++ b/security/manager/ssl/src/nsSSLThread.cpp
+@@ -46,26 +46,31 @@
+ extern PRLogModuleInfo* gPIPNSSLog;
+ #endif
+ 
+-nsSSLThread::nsSSLThread()
+-: mBusySocket(nsnull),
+-  mSocketScheduledToBeDestroyed(nsnull)
++const PRUint8 nsSSLThreadControl::mCountSharedPollableEvents = 
++  nsSSLThreadControl::mDefaultCountSharedPollableEvents;
++PRFileDesc **nsSSLThreadControl::mSharedPollableEvents = nsnull;
++nsNSSSocketInfo **nsSSLThreadControl::mSocketsOwningPollableEvent = nsnull;
++PRBool *nsSSLThreadControl::mPollableEventsCurrentlySet = nsnull;
++nsSSLThread **nsSSLThreadControl::mThreads = nsnull;
++
++nsSSLThread::nsSSLThread(PRUint8 sslThreadIndex, PRLock *aForeignMutex)
++: nsPSMBackgroundThread(aForeignMutex),
++  mBusySocket(nsnull),
++  mSocketScheduledToBeDestroyed(nsnull),
++  mMyWorkerThreadIndex(sslThreadIndex)
+ {
+-  NS_ASSERTION(!ssl_thread_singleton, "nsSSLThread is a singleton, caller attempts to create another instance!");
+-  
+-  ssl_thread_singleton = this;
+ }
+ 
+ nsSSLThread::~nsSSLThread()
+ {
+-  ssl_thread_singleton = nsnull;
+ }
+ 
+-PRFileDesc *nsSSLThread::getRealSSLFD(nsNSSSocketInfo *si)
++PRFileDesc *nsSSLThreadControl::getRealSSLFD(nsNSSSocketInfo *si)
+ {
+-  if (!ssl_thread_singleton || !si || !ssl_thread_singleton->mThreadHandle)
++  if (!si)
+     return nsnull;
+ 
+-  nsAutoLock threadLock(ssl_thread_singleton->mMutex);
++  nsAutoLock threadLock(nsSSLIOLayerHelpers::mutex);
+ 
+   if (si->mThreadData->mReplacedSSLFileDesc)
+   {
+@@ -77,7 +82,7 @@ PRFileDesc *nsSSLThread::getRealSSLFD(ns
+   }
+ }
+ 
+-PRStatus nsSSLThread::requestGetsockname(nsNSSSocketInfo *si, PRNetAddr *addr)
++PRStatus nsSSLThreadControl::requestGetsockname(nsNSSSocketInfo *si, PRNetAddr *addr)
+ {
+   PRFileDesc *fd = getRealSSLFD(si);
+   if (!fd)
+@@ -86,7 +91,7 @@ PRStatus nsSSLThread::requestGetsockname
+   return fd->methods->getsockname(fd, addr);
+ }
+ 
+-PRStatus nsSSLThread::requestGetpeername(nsNSSSocketInfo *si, PRNetAddr *addr)
++PRStatus nsSSLThreadControl::requestGetpeername(nsNSSSocketInfo *si, PRNetAddr *addr)
+ {
+   PRFileDesc *fd = getRealSSLFD(si);
+   if (!fd)
+@@ -95,8 +100,8 @@ PRStatus nsSSLThread::requestGetpeername
+   return fd->methods->getpeername(fd, addr);
+ }
+ 
+-PRStatus nsSSLThread::requestGetsocketoption(nsNSSSocketInfo *si, 
+-                                             PRSocketOptionData *data)
++PRStatus nsSSLThreadControl::requestGetsocketoption(nsNSSSocketInfo *si, 
++                                                    PRSocketOptionData *data)
+ {
+   PRFileDesc *fd = getRealSSLFD(si);
+   if (!fd)
+@@ -105,8 +110,8 @@ PRStatus nsSSLThread::requestGetsocketop
+   return fd->methods->getsocketoption(fd, data);
+ }
+ 
+-PRStatus nsSSLThread::requestSetsocketoption(nsNSSSocketInfo *si, 
+-                                             const PRSocketOptionData *data)
++PRStatus nsSSLThreadControl::requestSetsocketoption(nsNSSSocketInfo *si, 
++                                                    const PRSocketOptionData *data)
+ {
+   PRFileDesc *fd = getRealSSLFD(si);
+   if (!fd)
+@@ -115,8 +120,8 @@ PRStatus nsSSLThread::requestSetsocketop
+   return fd->methods->setsocketoption(fd, data);
+ }
+ 
+-PRStatus nsSSLThread::requestConnectcontinue(nsNSSSocketInfo *si, 
+-                                             PRInt16 out_flags)
++PRStatus nsSSLThreadControl::requestConnectcontinue(nsNSSSocketInfo *si, 
++                                                    PRInt16 out_flags)
+ {
+   PRFileDesc *fd = getRealSSLFD(si);
+   if (!fd)
+@@ -125,10 +130,122 @@ PRStatus nsSSLThread::requestConnectcont
+   return fd->methods->connectcontinue(fd, out_flags);
+ }
+ 
+-PRInt32 nsSSLThread::requestRecvMsgPeek(nsNSSSocketInfo *si, void *buf, PRInt32 amount,
+-                                        PRIntn flags, PRIntervalTime timeout)
++// caller must hold nsSSLIOLayerHelpers::mutex
++PRBool nsSSLThreadControl::isSocketBusy(nsNSSSocketInfo *si)
+ {
+-  if (!ssl_thread_singleton || !si || !ssl_thread_singleton->mThreadHandle)
++  if (!mThreads)
++    return PR_FALSE;
++
++  for (PRUint8 i=0; i<mCountSharedPollableEvents; ++i) {
++    if (si == mThreads[i]->mBusySocket)
++      return PR_TRUE;
++  }
++  
++  return PR_FALSE;
++}
++
++// caller must hold nsSSLIOLayerHelpers::mutex
++PRBool nsSSLThreadControl::anySocketBusy()
++{
++  if (!mThreads)
++    return PR_FALSE;
++
++  for (PRUint8 i=0; i<mCountSharedPollableEvents; ++i) {
++    if (mThreads[i]->mBusySocket)
++      return PR_TRUE;
++  }
++  
++  return PR_FALSE;
++}
++
++// caller must hold nsSSLIOLayerHelpers::mutex
++PRBool nsSSLThreadControl::haveFreeWorker()
++{
++  if (!mThreads)
++    return PR_FALSE;
++
++  for (PRUint8 i=0; i<mCountSharedPollableEvents; ++i) {
++    if (!mThreads[i]->mBusySocket)
++      return PR_TRUE;
++  }
++  
++  return PR_FALSE;
++}
++
++// caller must hold nsSSLIOLayerHelpers::mutex
++nsSSLThread *nsSSLThreadControl::findBusySocketThread(nsNSSSocketInfo *si)
++{
++  if (!mThreads)
++    return nsnull;
++
++  for (PRUint8 i=0; i<mCountSharedPollableEvents; ++i) {
++    if (si == mThreads[i]->mBusySocket)
++      return mThreads[i];
++  }
++  
++  return nsnull;
++}
++
++// caller must hold nsSSLIOLayerHelpers::mutex
++PRBool nsSSLThreadControl::findBusySocketThreadIndex(nsNSSSocketInfo *si, PRUint8 &foundIndex)
++{
++  if (!mThreads)
++    return PR_FALSE;
++
++  for (PRUint8 i=0; i<mCountSharedPollableEvents; ++i) {
++    if (si == mThreads[i]->mBusySocket)
++      foundIndex = i;
++      return PR_TRUE;
++  }
++  
++  return PR_FALSE;
++}
++
++// caller must hold nsSSLIOLayerHelpers::mutex
++void nsSSLThread::releaseBusySocket()
++{
++  mBusySocket = nsnull;
++}
++
++// caller must hold nsSSLIOLayerHelpers::mutex
++PRBool nsSSLThreadControl::assignFreeWorkerThread(nsNSSSocketInfo *si, 
++                                                  PRUint8 & allocatedWorkerIndex)
++{
++  if (!mThreads)
++    return PR_FALSE;
++
++  if (!si)
++    return PR_FALSE;
++
++  for (PRUint8 i = 0; i < mCountSharedPollableEvents; ++i) {
++    if (mThreads[i]->mBusySocket) {
++      // already in use, skip
++      continue;
++    }
++    if (!mThreads[i]->mThreadHandle) {
++      // oops? thread not started, can't use
++    }
++
++    mThreads[i]->mBusySocket = si;
++    allocatedWorkerIndex = i;
++
++if (i>0) {
++  fprintf(stderr, "====> YES we are using a secondary SSL worker thread %d\n", i);
++}
++
++    return PR_TRUE;
++  }
++
++fprintf(stderr, "====> NO FREE WORKER\n");
++
++  NS_ASSERTION(PR_FALSE, "no free worker found, need more SSL threads?");
++  return PR_FALSE;
++}
++
++PRInt32 nsSSLThreadControl::requestRecvMsgPeek(nsNSSSocketInfo *si, void *buf, PRInt32 amount,
++                                               PRIntn flags, PRIntervalTime timeout)
++{
++  if (!si)
+   {
+     PR_SetError(PR_BAD_DESCRIPTOR_ERROR, 0);
+     return -1;
+@@ -137,9 +254,9 @@ PRInt32 nsSSLThread::requestRecvMsgPeek(
+   PRFileDesc *realSSLFD;
+ 
+   {
+-    nsAutoLock threadLock(ssl_thread_singleton->mMutex);
++    nsAutoLock threadLock(nsSSLIOLayerHelpers::mutex);
+ 
+-    if (si == ssl_thread_singleton->mBusySocket)
++    if (isSocketBusy(si))
+     {
+       PORT_SetError(PR_WOULD_BLOCK_ERROR);
+       return -1;
+@@ -200,7 +317,7 @@ PRInt32 nsSSLThread::requestRecvMsgPeek(
+   return realSSLFD->methods->recv(realSSLFD, buf, amount, flags, timeout);
+ }
+ 
+-nsresult nsSSLThread::requestActivateSSL(nsNSSSocketInfo *si)
++nsresult nsSSLThreadControl::requestActivateSSL(nsNSSSocketInfo *si)
+ {
+   PRFileDesc *fd = getRealSSLFD(si);
+   if (!fd)
+@@ -215,9 +332,9 @@ nsresult nsSSLThread::requestActivateSSL
+   return NS_OK;
+ }
+ 
+-PRInt16 nsSSLThread::requestPoll(nsNSSSocketInfo *si, PRInt16 in_flags, PRInt16 *out_flags)
++PRInt16 nsSSLThreadControl::requestPoll(nsNSSSocketInfo *si, PRInt16 in_flags, PRInt16 *out_flags)
+ {
+-  if (!ssl_thread_singleton || !si || !ssl_thread_singleton->mThreadHandle)
++  if (!si)
+     return 0;
+ 
+   *out_flags = 0;
+@@ -226,9 +343,9 @@ PRInt16 nsSSLThread::requestPoll(nsNSSSo
+   PRBool handshake_timeout = PR_FALSE;
+   
+   {
+-    nsAutoLock threadLock(ssl_thread_singleton->mMutex);
++    nsAutoLock threadLock(nsSSLIOLayerHelpers::mutex);
+ 
+-    if (ssl_thread_singleton->mBusySocket)
++    if (anySocketBusy())
+     {
+       // If there is currently any socket busy on the SSL thread,
+       // use our own poll method implementation.
+@@ -260,9 +377,10 @@ PRInt16 nsSSLThread::requestPoll(nsNSSSo
+         case nsSSLSocketThreadData::ssl_pending_write:
+         case nsSSLSocketThreadData::ssl_pending_read:
+         {
+-          if (si == ssl_thread_singleton->mBusySocket)
++          PRUint8 threadIndex;
++          if (findBusySocketThreadIndex(si, threadIndex))
+           {
+-            if (nsSSLIOLayerHelpers::mSharedPollableEvent)
++            if (mSharedPollableEvents[threadIndex])
+             {
+               // The lower layer of the socket is currently the pollable event,
+               // which signals the readable state.
+@@ -319,7 +437,7 @@ PRInt16 nsSSLThread::requestPoll(nsNSSSo
+ 
+           handshake_timeout = si->HandshakeTimeout();
+ 
+-          if (si != ssl_thread_singleton->mBusySocket)
++          if (!haveFreeWorker())
+           {
+             // Some other socket is currently busy on the SSL thread.
+             // It is possible that busy socket is currently blocked (e.g. by UI).
+@@ -351,7 +469,7 @@ PRInt16 nsSSLThread::requestPoll(nsNSSSo
+ 
+     if (handshake_timeout)
+     {
+-      NS_ASSERTION(in_flags & PR_POLL_EXCEPT, "nsSSLThread::requestPoll handshake timeout, but caller did not poll for EXCEPT");
++      NS_ASSERTION(in_flags & PR_POLL_EXCEPT, "nsSSLThreadControl::requestPoll handshake timeout, but caller did not poll for EXCEPT");
+ 
+       *out_flags |= PR_POLL_EXCEPT;
+       return in_flags;
+@@ -372,53 +490,36 @@ PRInt16 nsSSLThread::requestPoll(nsNSSSo
+   return si->mFd->lower->methods->poll(si->mFd->lower, in_flags, out_flags);
+ }
+ 
+-PRStatus nsSSLThread::requestClose(nsNSSSocketInfo *si)
++// caller must hold nsSSLIOLayerHelpers::mutex
++void nsSSLThread::scheduleLateClose(nsNSSSocketInfo *si)
+ {
+-  if (!ssl_thread_singleton || !si)
++  if (!mMutex || !mCond)
++    return;
++
++  mSocketScheduledToBeDestroyed = si;
++  PR_NotifyAllCondVar(mCond);
++}
++
++PRStatus nsSSLThreadControl::requestClose(nsNSSSocketInfo *si)
++{
++  if (!si)
+     return PR_FAILURE;
+ 
+-  PRBool close_later = PR_FALSE;
+-  nsCOMPtr<nsIRequest> requestToCancel;
++  nsSSLThread *lateCloseThread = nsnull;
+ 
+   {
+-    nsAutoLock threadLock(ssl_thread_singleton->mMutex);
++    nsAutoLock threadLock(nsSSLIOLayerHelpers::mutex);
++    lateCloseThread = findBusySocketThread(si);
++    // That's tricky, SSL thread is currently busy with this socket,
++    // and might even be blocked on it (UI or OCSP).
++    // We should not close the socket directly, but rather
++    // schedule closing it, at the time the SSL thread is done.
+ 
+-    if (ssl_thread_singleton->mBusySocket == si) {
+-    
+-      // That's tricky, SSL thread is currently busy with this socket,
+-      // and might even be blocked on it (UI or OCSP).
+-      // We should not close the socket directly, but rather
+-      // schedule closing it, at the time the SSL thread is done.
+-      // If there is indeed a depending OCSP request pending,
+-      // we should cancel it now.
+-      
+-      if (ssl_thread_singleton->mPendingHTTPRequest)
+-      {
+-        requestToCancel.swap(ssl_thread_singleton->mPendingHTTPRequest);
+-      }
+-      
+-      close_later = PR_TRUE;
+-      ssl_thread_singleton->mSocketScheduledToBeDestroyed = si;
+-
+-      PR_NotifyAllCondVar(ssl_thread_singleton->mCond);
+-    }
++    if (lateCloseThread)
++      lateCloseThread->scheduleLateClose(si);
+   }
+ 
+-  if (requestToCancel)
+-  {
+-    if (NS_IsMainThread())
+-    {
+-      requestToCancel->Cancel(NS_ERROR_ABORT);
+-    }
+-    else
+-    {
+-      NS_WARNING("Attempt to close SSL socket from a thread that is not the main thread. Can not cancel pending HTTP request from NSS");
+-    }
+-  
+-    requestToCancel = nsnull;
+-  }
+-  
+-  if (!close_later)
++  if (!lateCloseThread)
+   {
+     return si->CloseSocketAndDestroy();
+   }
+@@ -430,28 +531,28 @@ void nsSSLThread::restoreOriginalSocket_
+ {
+   if (si->mThreadData->mReplacedSSLFileDesc)
+   {
+-    if (nsSSLIOLayerHelpers::mPollableEventCurrentlySet)
++    if (nsSSLThreadControl::mPollableEventsCurrentlySet[mMyWorkerThreadIndex])
+     {
+-      nsSSLIOLayerHelpers::mPollableEventCurrentlySet = PR_FALSE;
+-      if (nsSSLIOLayerHelpers::mSharedPollableEvent)
++      nsSSLThreadControl::mPollableEventsCurrentlySet[mMyWorkerThreadIndex] = PR_FALSE;
++      if (nsSSLThreadControl::mSharedPollableEvents[mMyWorkerThreadIndex])
+       {
+-        PR_WaitForPollableEvent(nsSSLIOLayerHelpers::mSharedPollableEvent);
++        PR_WaitForPollableEvent(nsSSLThreadControl::mSharedPollableEvents[mMyWorkerThreadIndex]);
+       }
+     }
+ 
+-    if (nsSSLIOLayerHelpers::mSharedPollableEvent)
++    if (nsSSLThreadControl::mSharedPollableEvents[mMyWorkerThreadIndex])
+     {
+       // need to restore
+       si->mFd->lower = si->mThreadData->mReplacedSSLFileDesc;
+       si->mThreadData->mReplacedSSLFileDesc = nsnull;
+     }
+ 
+-    nsSSLIOLayerHelpers::mSocketOwningPollableEvent = nsnull;
++    nsSSLThreadControl::mSocketsOwningPollableEvent[mMyWorkerThreadIndex] = nsnull;
+   }
+ }
+ 
+-PRStatus nsSSLThread::getRealFDIfBlockingSocket_locked(nsNSSSocketInfo *si, 
+-                                                       PRFileDesc *&out_fd)
++PRStatus nsSSLThreadControl::getRealFDIfBlockingSocket_locked(nsNSSSocketInfo *si, 
++                                                              PRFileDesc *&out_fd)
+ {
+   out_fd = nsnull;
+ 
+@@ -478,10 +579,10 @@ PRStatus nsSSLThread::getRealFDIfBlockin
+   return PR_SUCCESS;
+ }
+ 
+-PRInt32 nsSSLThread::requestRead(nsNSSSocketInfo *si, void *buf, PRInt32 amount, 
+-                                 PRIntervalTime timeout)
++PRInt32 nsSSLThreadControl::requestRead(nsNSSSocketInfo *si, void *buf, PRInt32 amount, 
++                                        PRIntervalTime timeout)
+ {
+-  if (!ssl_thread_singleton || !si || !buf || !amount || !ssl_thread_singleton->mThreadHandle)
++  if (!si || !buf || !amount)
+   {
+     PR_SetError(PR_UNKNOWN_ERROR, 0);
+     return -1;
+@@ -493,13 +594,15 @@ PRInt32 nsSSLThread::requestRead(nsNSSSo
+   PRFileDesc *blockingFD = nsnull;
+ 
+   {
+-    nsAutoLock threadLock(ssl_thread_singleton->mMutex);
+-
+-    if (ssl_thread_singleton->mExitRequested) {
++    nsAutoLock threadLock(nsSSLIOLayerHelpers::mutex);
++    if (mThreads && mThreads[0] && mThreads[0]->mExitRequested) {
+       PR_SetError(PR_UNKNOWN_ERROR, 0);
+       return -1;
+     }
++  }
+ 
++  {
++    nsAutoLock threadLock(nsSSLIOLayerHelpers::mutex);
+     if (getRealFDIfBlockingSocket_locked(si, blockingFD) == PR_FAILURE) {
+       return -1;
+     }
+@@ -508,7 +611,8 @@ PRInt32 nsSSLThread::requestRead(nsNSSSo
+     {
+       my_ssl_state = si->mThreadData->mSSLState;
+   
+-      if (ssl_thread_singleton->mBusySocket == si)
++      nsSSLThread *t = findBusySocketThread(si);
++      if (t)
+       {
+         this_socket_is_busy = PR_TRUE;
+   
+@@ -517,24 +621,23 @@ PRInt32 nsSSLThread::requestRead(nsNSSSo
+           // we will now care for the data that's ready,
+           // the socket is no longer busy on the ssl thread
+           
+-          restoreOriginalSocket_locked(si);
+-  
+-          ssl_thread_singleton->mBusySocket = nsnull;
+-          
++          t->restoreOriginalSocket_locked(si);
++          t->releaseBusySocket();
+           // We'll handle the results further down,
+           // while not holding the lock.
+         }
+       }
+-      else if (ssl_thread_singleton->mBusySocket)
++      else 
++      if (!haveFreeWorker())
+       {
+         some_other_socket_is_busy = PR_TRUE;
+       }
+   
+       if (!this_socket_is_busy && si->HandshakeTimeout())
+       {
+-        restoreOriginalSocket_locked(si);
++        t->restoreOriginalSocket_locked(si);
+         PR_SetError(PR_CONNECT_RESET_ERROR, 0);
+-        checkHandshake(-1, PR_TRUE, si->mFd->lower, si);
++        nsSSLThread::checkHandshake(-1, PR_TRUE, si->mFd->lower, si);
+         return -1;
+       }
+     }
+@@ -681,34 +784,45 @@ PRInt32 nsSSLThread::requestRead(nsNSSSo
+   // Finally, we return the data obtained on the SSL thread back to our caller.
+ 
+   {
+-    nsAutoLock threadLock(ssl_thread_singleton->mMutex);
++    nsAutoLock threadLock(nsSSLIOLayerHelpers::mutex);
+ 
+-    if (nsSSLIOLayerHelpers::mSharedPollableEvent)
++    PRUint8 allocatedWorkerIndex;
++    if (!assignFreeWorkerThread(si, allocatedWorkerIndex))
+     {
+-      NS_ASSERTION(!nsSSLIOLayerHelpers::mSocketOwningPollableEvent, 
+-                   "oops, some other socket still owns our shared pollable event");
+-  
++int* a = (int*)(void*)1;
++*a=1;
++
++      // I hope this never happens
++      // if it does, we should change this code to reserve the worker
++      // at the time we check haveFreeWorker above,
++      // but make sure we cancel the reservation should we leave this
++      // function prior to arriving here.
++      PORT_SetError(PR_WOULD_BLOCK_ERROR);
++      return -1;
++    }
++
++    if (mSharedPollableEvents[allocatedWorkerIndex])
++    {
+       NS_ASSERTION(!si->mThreadData->mReplacedSSLFileDesc, "oops");
+   
+       si->mThreadData->mReplacedSSLFileDesc = si->mFd->lower;
+-      si->mFd->lower = nsSSLIOLayerHelpers::mSharedPollableEvent;
++      si->mFd->lower = mSharedPollableEvents[allocatedWorkerIndex];
+     }
+ 
+-    nsSSLIOLayerHelpers::mSocketOwningPollableEvent = si;
+-    ssl_thread_singleton->mBusySocket = si;
++    mSocketsOwningPollableEvent[allocatedWorkerIndex] = si;
+ 
+     // notify the thread
+-    PR_NotifyAllCondVar(ssl_thread_singleton->mCond);
++    PR_NotifyAllCondVar(nsSSLThreadControl::mThreads[allocatedWorkerIndex]->mCond);
+   }
+ 
+   PORT_SetError(PR_WOULD_BLOCK_ERROR);
+   return -1;
+ }
+ 
+-PRInt32 nsSSLThread::requestWrite(nsNSSSocketInfo *si, const void *buf, PRInt32 amount,
+-                                  PRIntervalTime timeout)
++PRInt32 nsSSLThreadControl::requestWrite(nsNSSSocketInfo *si, const void *buf, PRInt32 amount,
++                                         PRIntervalTime timeout)
+ {
+-  if (!ssl_thread_singleton || !si || !buf || !amount || !ssl_thread_singleton->mThreadHandle)
++  if (!si || !buf || !amount)
+   {
+     PR_SetError(PR_UNKNOWN_ERROR, 0);
+     return -1;
+@@ -720,13 +834,15 @@ PRInt32 nsSSLThread::requestWrite(nsNSSS
+   PRFileDesc *blockingFD = nsnull;
+   
+   {
+-    nsAutoLock threadLock(ssl_thread_singleton->mMutex);
+-    
+-    if (ssl_thread_singleton->mExitRequested) {
++    nsAutoLock threadLock(nsSSLIOLayerHelpers::mutex);
++    if (mThreads && mThreads[0] && mThreads[0]->mExitRequested) {
+       PR_SetError(PR_UNKNOWN_ERROR, 0);
+       return -1;
+     }
++  }
+ 
++  {
++    nsAutoLock threadLock(nsSSLIOLayerHelpers::mutex);
+     if (getRealFDIfBlockingSocket_locked(si, blockingFD) == PR_FAILURE) {
+       return -1;
+     }
+@@ -735,7 +851,8 @@ PRInt32 nsSSLThread::requestWrite(nsNSSS
+     {
+       my_ssl_state = si->mThreadData->mSSLState;
+   
+-      if (ssl_thread_singleton->mBusySocket == si)
++      nsSSLThread *t = findBusySocketThread(si);
++      if (t)
+       {
+         this_socket_is_busy = PR_TRUE;
+         
+@@ -744,24 +861,23 @@ PRInt32 nsSSLThread::requestWrite(nsNSSS
+           // we will now care for the data that's ready,
+           // the socket is no longer busy on the ssl thread
+           
+-          restoreOriginalSocket_locked(si);
+-  
+-          ssl_thread_singleton->mBusySocket = nsnull;
+-          
++          t->restoreOriginalSocket_locked(si);
++          t->releaseBusySocket();
+           // We'll handle the results further down,
+           // while not holding the lock.
+         }
+       }
+-      else if (ssl_thread_singleton->mBusySocket)
++      else 
++      if (!haveFreeWorker())
+       {
+         some_other_socket_is_busy = PR_TRUE;
+       }
+   
+       if (!this_socket_is_busy && si->HandshakeTimeout())
+       {
+-        restoreOriginalSocket_locked(si);
++        t->restoreOriginalSocket_locked(si);
+         PR_SetError(PR_CONNECT_RESET_ERROR, 0);
+-        checkHandshake(-1, PR_FALSE, si->mFd->lower, si);
++        nsSSLThread::checkHandshake(-1, PR_FALSE, si->mFd->lower, si);
+         return -1;
+       }
+     }
+@@ -876,23 +992,34 @@ PRInt32 nsSSLThread::requestWrite(nsNSSS
+   si->mThreadData->mSSLState = nsSSLSocketThreadData::ssl_pending_write;
+ 
+   {
+-    nsAutoLock threadLock(ssl_thread_singleton->mMutex);
++    nsAutoLock threadLock(nsSSLIOLayerHelpers::mutex);
+ 
+-    if (nsSSLIOLayerHelpers::mSharedPollableEvent)
++    PRUint8 allocatedWorkerIndex;
++    if (!assignFreeWorkerThread(si, allocatedWorkerIndex))
+     {
+-      NS_ASSERTION(!nsSSLIOLayerHelpers::mSocketOwningPollableEvent, 
+-                   "oops, some other socket still owns our shared pollable event");
+-  
++int* a = (int*)(void*)1;
++*a=1;
++      // I hope this never happens
++      // if it does, we should change this code to reserve the worker
++      // at the time we check haveFreeWorker above,
++      // but make sure we cancel the reservation should we leave this
++      // function prior to arriving here.
++      PORT_SetError(PR_WOULD_BLOCK_ERROR);
++      return -1;
++    }
++
++    if (mSharedPollableEvents[allocatedWorkerIndex])
++    {
+       NS_ASSERTION(!si->mThreadData->mReplacedSSLFileDesc, "oops");
+   
+       si->mThreadData->mReplacedSSLFileDesc = si->mFd->lower;
+-      si->mFd->lower = nsSSLIOLayerHelpers::mSharedPollableEvent;
++      si->mFd->lower = mSharedPollableEvents[allocatedWorkerIndex];
+     }
+ 
+-    nsSSLIOLayerHelpers::mSocketOwningPollableEvent = si;
+-    ssl_thread_singleton->mBusySocket = si;
++    mSocketsOwningPollableEvent[allocatedWorkerIndex] = si;
+ 
+-    PR_NotifyAllCondVar(ssl_thread_singleton->mCond);
++    // notify the thread
++    PR_NotifyAllCondVar(nsSSLThreadControl::mThreads[allocatedWorkerIndex]->mCond);
+   }
+ 
+   PORT_SetError(PR_WOULD_BLOCK_ERROR);
+@@ -920,7 +1047,7 @@ void nsSSLThread::Run(void)
+       // In this scope we need mutex protection,
+       // as we find out what needs to be done.
+       
+-      nsAutoLock threadLock(ssl_thread_singleton->mMutex);
++      nsAutoLock threadLock(nsSSLIOLayerHelpers::mutex);
+       
+       if (mSocketScheduledToBeDestroyed)
+       {
+@@ -940,14 +1067,23 @@ void nsSSLThread::Run(void)
+         mSocketScheduledToBeDestroyed = nsnull;
+         continue; // go back and finally destroy it, before doing anything else
+       }
++    }
+ 
++    {
++      nsAutoLock threadLock(mMutex);
+       if (mExitRequested)
+         break;
++    }
+ 
+-      PRBool pending_work = PR_FALSE;
++    PRBool pending_work = PR_FALSE;
++    PRBool exit_requested = PR_FALSE;
++    nsNSSSocketInfo *scheduled_to_destroyed = nsnull;
+ 
+-      do
++    do
++    {
+       {
++        nsAutoLock threadLock(nsSSLIOLayerHelpers::mutex);
++      
+         if (mBusySocket
+             &&
+               (mBusySocket->mThreadData->mSSLState == nsSSLSocketThreadData::ssl_pending_read
+@@ -955,28 +1091,31 @@ void nsSSLThread::Run(void)
+               mBusySocket->mThreadData->mSSLState == nsSSLSocketThreadData::ssl_pending_write))
+         {
+           pending_work = PR_TRUE;
++          busy_socket_ssl_state = mBusySocket->mThreadData->mSSLState;
+         }
+ 
+         if (!pending_work)
+         {
+           // no work to do ? let's wait a moment
+-
+           PR_WaitCondVar(mCond, PR_INTERVAL_NO_TIMEOUT);
+         }
+-        
+-      } while (!pending_work && !mExitRequested && !mSocketScheduledToBeDestroyed);
+-      
+-      if (mSocketScheduledToBeDestroyed)
+-        continue;
+-      
+-      if (mExitRequested)
+-        break;
+-      
+-      if (!pending_work)
+-        continue;
+-      
+-      busy_socket_ssl_state = mBusySocket->mThreadData->mSSLState;
+-    }
++      }
++
++      {
++        nsAutoLock threadLock(mMutex);
++        exit_requested = mExitRequested;
++        scheduled_to_destroyed = mSocketScheduledToBeDestroyed;
++      }
++    } while (!pending_work && !exit_requested && !scheduled_to_destroyed);
++    
++    if (scheduled_to_destroyed)
++      continue;
++    
++    if (exit_requested)
++      break;
++    
++    if (!pending_work)
++      continue;
+ 
+     {
+       // In this scope we need to make sure NSS does not go away
+@@ -1079,23 +1218,23 @@ void nsSSLThread::Run(void)
+     PRBool needToSetPollableEvent = PR_FALSE;
+ 
+     {
+-      nsAutoLock threadLock(ssl_thread_singleton->mMutex);
++      nsAutoLock threadLock(nsSSLIOLayerHelpers::mutex);
+       
+       mBusySocket->mThreadData->mSSLState = busy_socket_ssl_state;
+       
+-      if (!nsSSLIOLayerHelpers::mPollableEventCurrentlySet)
++      if (!nsSSLThreadControl::mPollableEventsCurrentlySet[mMyWorkerThreadIndex])
+       {
+         needToSetPollableEvent = PR_TRUE;
+-        nsSSLIOLayerHelpers::mPollableEventCurrentlySet = PR_TRUE;
++        nsSSLThreadControl::mPollableEventsCurrentlySet[mMyWorkerThreadIndex] = PR_TRUE;
+       }
+     }
+ 
+-    if (needToSetPollableEvent && nsSSLIOLayerHelpers::mSharedPollableEvent)
++    if (needToSetPollableEvent && nsSSLThreadControl::mSharedPollableEvents[mMyWorkerThreadIndex])
+     {
+       // Wake up the file descriptor on the Necko thread,
+       // so it can fetch the results from the SSL I/O call 
+       // that we just completed.
+-      PR_SetPollableEvent(nsSSLIOLayerHelpers::mSharedPollableEvent);
++      PR_SetPollableEvent(nsSSLThreadControl::mSharedPollableEvents[mMyWorkerThreadIndex]);
+ 
+       // if we don't have a pollable event, we'll have to wake up
+       // the caller by other means.
+@@ -1103,31 +1242,145 @@ void nsSSLThread::Run(void)
+   }
+ 
+   {
+-    nsAutoLock threadLock(ssl_thread_singleton->mMutex);
++    nsAutoLock threadLock(nsSSLIOLayerHelpers::mutex);
+     if (mBusySocket)
+     {
+       restoreOriginalSocket_locked(mBusySocket);
+       mBusySocket = nsnull;
+     }
+-    if (!nsSSLIOLayerHelpers::mPollableEventCurrentlySet)
++    if (!nsSSLThreadControl::mPollableEventsCurrentlySet[mMyWorkerThreadIndex])
+     {
+-      nsSSLIOLayerHelpers::mPollableEventCurrentlySet = PR_TRUE;
+-      if (nsSSLIOLayerHelpers::mSharedPollableEvent)
++      nsSSLThreadControl::mPollableEventsCurrentlySet[mMyWorkerThreadIndex] = PR_TRUE;
++      if (nsSSLThreadControl::mSharedPollableEvents[mMyWorkerThreadIndex])
+       {
+-        PR_SetPollableEvent(nsSSLIOLayerHelpers::mSharedPollableEvent);
++        PR_SetPollableEvent(nsSSLThreadControl::mSharedPollableEvents[mMyWorkerThreadIndex]);
+       }
+     }
+   }
+ }
+ 
+-PRBool nsSSLThread::exitRequested()
++PRBool nsSSLThreadControl::exitRequested()
+ {
+-  if (!ssl_thread_singleton)
+-    return PR_FALSE;
+-
+   // no lock
+ 
+-  return ssl_thread_singleton->mExitRequested;
++  if (mThreads && mThreads[0])
++    return mThreads[0]->mExitRequested;
++  else
++    return PR_FALSE;
+ }
+ 
+-nsSSLThread *nsSSLThread::ssl_thread_singleton = nsnull;
++void nsSSLThreadControl::clearEvents()
++{
++  PRUint8 iEvent;
++  if (mSharedPollableEvents) {
++    for (iEvent = 0; iEvent < mCountSharedPollableEvents; ++iEvent) {
++      PR_DestroyPollableEvent(mSharedPollableEvents[iEvent]);
++    }
++    nsMemory::Free(mSharedPollableEvents);
++    mSharedPollableEvents = nsnull;
++  }
++  
++  if (mSocketsOwningPollableEvent) {
++    nsMemory::Free(mSocketsOwningPollableEvent);
++    mSocketsOwningPollableEvent = nsnull;
++  }
++  
++  if (mPollableEventsCurrentlySet) {
++    nsMemory::Free(mPollableEventsCurrentlySet);
++    mPollableEventsCurrentlySet = nsnull;
++  }
++}
++
++nsresult nsSSLThreadControl::Init()
++{
++  PRUint8 iEvent;
++  mSharedPollableEvents = (PRFileDesc **)
++    nsMemory::Alloc(mCountSharedPollableEvents * sizeof(PRFileDesc*));
++  if (!mSharedPollableEvents) {
++    clearEvents();
++    return NS_ERROR_OUT_OF_MEMORY;
++  }
++  for (iEvent = 0; iEvent < mCountSharedPollableEvents; ++iEvent) {
++    mSharedPollableEvents[iEvent] = nsnull;
++  }
++  for (iEvent = 0; iEvent < mCountSharedPollableEvents; ++iEvent) {
++    mSharedPollableEvents[iEvent] = PR_NewPollableEvent();
++    // if (!mSharedPollableEvents[iEvent])
++    // => no pollable events available, this thread must use busy waiting
++  }
++
++  mSocketsOwningPollableEvent = (nsNSSSocketInfo **)
++    nsMemory::Alloc(mCountSharedPollableEvents * sizeof(nsNSSSocketInfo *));
++  if (!mSocketsOwningPollableEvent) {
++    clearEvents();
++    return NS_ERROR_OUT_OF_MEMORY;
++  }
++  for (iEvent = 0; iEvent < mCountSharedPollableEvents; ++iEvent) {
++    mSocketsOwningPollableEvent[iEvent] = nsnull;
++  }
++
++  mPollableEventsCurrentlySet = (PRBool *)
++    nsMemory::Alloc(mCountSharedPollableEvents * sizeof(PRBool));
++  if (!mPollableEventsCurrentlySet) {
++    clearEvents();
++    return NS_ERROR_OUT_OF_MEMORY;
++  }
++  for (iEvent = 0; iEvent < mCountSharedPollableEvents; ++iEvent) {
++    mPollableEventsCurrentlySet[iEvent] = PR_FALSE;
++  }
++  
++  return NS_OK;
++}
++
++void nsSSLThreadControl::Start()
++{
++  PRUint8 iEvent;
++
++  mThreads = (nsSSLThread **)
++    nsMemory::Alloc(mCountSharedPollableEvents * sizeof(nsSSLThread*));
++  if (!nsSSLThreadControl::mThreads) {
++    return;
++  }
++  for (iEvent = 0; iEvent < mCountSharedPollableEvents; ++iEvent) {
++    mThreads[iEvent] = nsnull;
++  }
++
++  for (iEvent=0; iEvent<nsSSLThreadControl::mCountSharedPollableEvents; ++iEvent) {
++    mThreads[iEvent] = new nsSSLThread(iEvent, nsSSLIOLayerHelpers::mutex);
++    if (mThreads[iEvent])
++      mThreads[iEvent]->startThread();
++  }
++}
++
++void nsSSLThreadControl::Stop()
++{
++  if (!mThreads)
++    return;
++
++  PRUint8 iEvent;
++  for (iEvent=0; iEvent<nsSSLThreadControl::mCountSharedPollableEvents; ++iEvent) {
++    if (mThreads[iEvent])
++    {
++      mThreads[iEvent]->requestExit();
++      delete mThreads[iEvent];
++      mThreads[iEvent] = nsnull;
++    }
++  }
++  
++  nsMemory::Free(mThreads);
++  mThreads = nsnull;
++}
++
++void nsSSLThreadControl::RequestExit()
++{
++  if (!mThreads)
++    return;
++
++  PRUint8 iEvent;
++  for (iEvent=0; iEvent<nsSSLThreadControl::mCountSharedPollableEvents; ++iEvent) {
++    if (mThreads[iEvent])
++    {
++      mThreads[iEvent]->requestExit();
++    }
++  }
++}
+diff --git a/security/manager/ssl/src/nsSSLThread.h b/security/manager/ssl/src/nsSSLThread.h
+--- a/security/manager/ssl/src/nsSSLThread.h
++++ b/security/manager/ssl/src/nsSSLThread.h
+@@ -46,13 +46,15 @@ class nsNSSSocketInfo;
+ class nsIHttpChannel;
+ 
+ class nsSSLThread : public nsPSMBackgroundThread
++              //    potentially needed for delayed socket destroy
++              //  , public nsSupportsWeakReference
+ {
+ private:
+-  // We use mMutex contained in our base class
++  // We use mMutex contained in nsSSLThreadControl
+   // to protect access to these variables:
+   //   mBusySocket, mSocketScheduledToBeDestroyed
+   // and to nsSSLSocketThreadData::mSSLState
+-  // while a socket is the busy socket.
++  // while a socket is a busy socket.
+ 
+   // We use mCond contained in our base class
+   // to notify the SSL thread that a new SSL I/O 
+@@ -80,8 +82,17 @@ private:
+   // we can use this handle to cancel the dependent HTTP request,
+   // should we be asked to close the original SSL socket.
+   nsCOMPtr<nsIRequest> mPendingHTTPRequest;
++  
++  const PRUint8 mMyWorkerThreadIndex;
+ 
+   virtual void Run(void);
++  void scheduleLateClose(nsNSSSocketInfo *si);
++
++  // Function can be called from either Necko or SSL thread
++  // Caller must lock mMutex before this call.
++  void restoreOriginalSocket_locked(nsNSSSocketInfo *si);
++
++  void releaseBusySocket();
+ 
+   // Called from SSL thread only
+   static PRInt32 checkHandshake(PRInt32 bytesTransfered, 
+@@ -89,13 +100,22 @@ private:
+                                 PRFileDesc* fd, 
+                                 nsNSSSocketInfo *socketInfo);
+ 
+-  // Function can be called from either Necko or SSL thread
+-  // Caller must lock mMutex before this call.
+-  static void restoreOriginalSocket_locked(nsNSSSocketInfo *si);
++public:
++  nsSSLThread(PRUint8 sslThreadIndex, PRLock *aForeignMutex);
++  ~nsSSLThread();
++  
++friend class nsSSLThreadControl;
++};
+ 
+-  // Helper for requestSomething functions, 
+-  // caled from the Necko thread only.
+-  static PRFileDesc *getRealSSLFD(nsNSSSocketInfo *si);
++class nsSSLThreadControl
++{
++protected:
++  static PRBool isSocketBusy(nsNSSSocketInfo *si);
++  static PRBool anySocketBusy();
++  static PRBool haveFreeWorker();
++  static nsSSLThread *findBusySocketThread(nsNSSSocketInfo *si);
++  static PRBool findBusySocketThreadIndex(nsNSSSocketInfo *si, PRUint8 &foundIndex);
++  static PRBool assignFreeWorkerThread(nsNSSSocketInfo *si, PRUint8 & allocatedWorkerIndex);
+ 
+   // Support of blocking sockets is very rudimentary.
+   // We only support it because Mozilla's LDAP code requires blocking I/O.
+@@ -110,10 +130,17 @@ private:
+   static PRStatus getRealFDIfBlockingSocket_locked(nsNSSSocketInfo *si, 
+                                                    PRFileDesc *&out_fd);
+ public:
+-  nsSSLThread();
+-  ~nsSSLThread();
++  enum { mDefaultCountSharedPollableEvents = 5 };
++  static const PRUint8 mCountSharedPollableEvents;
+ 
+-  static nsSSLThread *ssl_thread_singleton;
++  static PRFileDesc **mSharedPollableEvents; // array
++  static nsNSSSocketInfo **mSocketsOwningPollableEvent; // array
++  static PRBool *mPollableEventsCurrentlySet; // array
++  static nsSSLThread **mThreads; // array
++
++  // Helper for requestSomething functions, 
++  // caled from the Necko thread only.
++  static PRFileDesc *getRealSSLFD(nsNSSSocketInfo *si);
+ 
+   // All requestSomething functions are called from 
+   // the Necko thread only.
+@@ -151,8 +178,14 @@ public:
+                                          PRInt16 out_flags);
+ 
+   static nsresult requestActivateSSL(nsNSSSocketInfo *si);
++
++  static PRBool exitRequested();
+   
+-  static PRBool exitRequested();
++  static void clearEvents();
++  static nsresult Init();
++  static void Start();
++  static void Stop();
++  static void RequestExit();
+ };
+ 
+ #endif //_NSSSLTHREAD_H_

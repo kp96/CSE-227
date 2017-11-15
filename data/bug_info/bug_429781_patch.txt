@@ -1,0 +1,104 @@
+Index: content/base/src/nsXMLHttpRequest.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/content/base/src/nsXMLHttpRequest.cpp,v
+retrieving revision 1.239
+diff -u -p -1 -2 -r1.239 nsXMLHttpRequest.cpp
+--- content/base/src/nsXMLHttpRequest.cpp	18 Apr 2008 17:35:55 -0000	1.239
++++ content/base/src/nsXMLHttpRequest.cpp	21 Apr 2008 22:38:09 -0000
+@@ -1989,34 +1989,41 @@ nsXMLHttpRequest::SetRequestHeader(const
+   // the executing script has UniversalBrowserWrite permission.
+ 
+   PRBool privileged;
+   rv = IsCapabilityEnabled("UniversalBrowserWrite", &privileged);
+   if (NS_FAILED(rv))
+     return NS_ERROR_FAILURE;
+ 
+   if (!privileged) {
+     // Check for dangerous headers
+     const char *kInvalidHeaders[] = {
+       "accept-charset", "accept-encoding", "connection", "content-length",
+       "content-transfer-encoding", "date", "expect", "host", "keep-alive",
+-      "proxy-connection", "referer", "access-control-origin", "te", "trailer",
++      "referer", "access-control-origin", "te", "trailer",
+       "transfer-encoding", "upgrade", "via", "xmlhttprequest-security-check"
+     };
+     PRUint32 i;
+     for (i = 0; i < NS_ARRAY_LENGTH(kInvalidHeaders); ++i) {
+       if (header.LowerCaseEqualsASCII(kInvalidHeaders[i])) {
+         NS_WARNING("refusing to set request header");
+         return NS_OK;
+       }
+     }
++    if (StringBeginsWith(header, NS_LITERAL_CSTRING("proxy-"),
++                         nsCaseInsensitiveCStringComparator()) ||
++        StringBeginsWith(header, NS_LITERAL_CSTRING("sec-"),
++                         nsCaseInsensitiveCStringComparator())) {
++      NS_WARNING("refusing to set request header");
++      return NS_OK;
++    }
+   }
+ 
+   // We need to set, not add to, the header.
+   return httpChannel->SetRequestHeader(header, value, PR_FALSE);
+ }
+ 
+ /* readonly attribute long readyState; */
+ NS_IMETHODIMP
+ nsXMLHttpRequest::GetReadyState(PRInt32 *aState)
+ {
+   NS_ENSURE_ARG_POINTER(aState);
+   // Translate some of our internal states for external consumers
+Index: content/base/test/test_bug308484.html
+===================================================================
+RCS file: /cvsroot/mozilla/content/base/test/test_bug308484.html,v
+retrieving revision 1.1
+diff -u -p -1 -2 -r1.1 test_bug308484.html
+--- content/base/test/test_bug308484.html	6 Feb 2007 00:20:25 -0000	1.1
++++ content/base/test/test_bug308484.html	21 Apr 2008 22:38:09 -0000
+@@ -11,25 +11,45 @@ https://bugzilla.mozilla.org/show_bug.cg
+ </head>
+ <body>
+ <a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id=308484">Mozilla Bug 308484</a>
+ <p id="display"></p>
+ <div id="content" style="display: none">
+   
+ </div>
+ <pre id="test">
+ <script class="testbody" type="text/javascript">
+ 
+ /** Test for Bug 308484 **/
+ 
+-var headers = ["Host", "Content-Length", "Transfer-Encoding", "Via", "Upgrade"];
++var headers = [
++  "aCCept-chaRset",
++  "acCePt-eNcoDing",
++  "coNnEctIon",
++  "coNtEnt-LEngth",
++  "cOntEnt-tRAnsFer-enCoDiNg",
++  "DATE",
++  "exPeCt",
++  "hOSt",
++  "keep-alive",
++  "reFERer",
++  "te",
++  "trAiLer",
++  "trANsfEr-eNcoDiNg",
++  "uPGraDe",
++  "viA",
++  "pRoxy-",
++  "sEc-",
++  "proxy-fOobar",
++  "sec-bAZbOx"
++];
+ var i, request;
+ 
+ // Try setting headers in unprivileged context
+ request = new XMLHttpRequest();
+ request.open("GET", window.location.href);
+ for (i = 0; i < headers.length; i++)
+   request.setRequestHeader(headers[i], "test" + i);
+ 
+ // Read out headers
+ netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect UniversalBrowserWrite");
+ var channel = request.channel.QueryInterface(Components.interfaces.nsIHttpChannel);
+ for (i = 0; i < headers.length; i++) {

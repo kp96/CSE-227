@@ -1,0 +1,26 @@
+--- a/mailnews/extensions/smime/resources/content/certFetchingStatus.js	2009-02-19 18:01:11.000000000 +0100
++++ b/mailnews/extensions/smime/resources/content/certFetchingStatus.js	2009-02-20 15:29:42.000000000 +0100
+@@ -78,10 +78,6 @@
+       .getService(Components.interfaces.nsIPrefService);
+   var prefs = prefService.getBranch(null);
+ 
+-  gLdapServerURL =
+-    Components.classes["@mozilla.org/network/ldap-url;1"]
+-      .createInstance().QueryInterface(Components.interfaces.nsILDAPURL);
+-
+   // get the login to authenticate as, if there is one
+   try {
+     gLogin = prefs.getComplexValue(gDirectoryPref + ".auth.dn", Components.interfaces.nsISupportsString).data;
+@@ -90,7 +86,11 @@
+   }
+ 
+   try {
+-    gLdapServerURL.spec = prefs.getCharPref(gDirectoryPref + ".uri");
++    let url = prefs.getCharPref(gDirectoryPref + ".uri");
++
++    gLdapServerURL = Components.classes["@mozilla.org/network/io-service;1"]
++      .getService(Components.interfaces.nsIIOService)
++      .newURI(url, null, null).QueryInterface(Components.interfaces.nsILDAPURL);
+ 
+     gLdapConnection = Components.classes["@mozilla.org/network/ldap-connection;1"]
+       .createInstance().QueryInterface(Components.interfaces.nsILDAPConnection);

@@ -1,0 +1,20 @@
+Index: src/security/CertificatesWindowController.mm
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/security/CertificatesWindowController.mm,v
+retrieving revision 1.12
+diff -u -r1.12 CertificatesWindowController.mm
+--- src/security/CertificatesWindowController.mm	30 Jul 2008 23:23:03 -0000	1.12
++++ src/security/CertificatesWindowController.mm	18 Aug 2008 15:29:49 -0000
+@@ -438,6 +438,12 @@
+   NSTableColumn* validityColumn = [mCertsOutlineView tableColumnWithIdentifier:@"attributedShortValidityString"];
+   [[validityColumn dataCell] setWraps:NO];
+ 
++  NSDateFormatter* dateFormatter = [[[NSDateFormatter alloc] init] autorelease];
++  [dateFormatter setFormatterBehavior:NSDateFormatterBehavior10_4];
++  [dateFormatter setDateStyle:NSDateFormatterShortStyle];
++  [dateFormatter setTimeStyle:NSDateFormatterNoStyle];
++  [[[mCertsOutlineView tableColumnWithIdentifier:@"expiresDate"] dataCell] setFormatter:dateFormatter];
++
+   [self reloadCertData];
+ }
+ 

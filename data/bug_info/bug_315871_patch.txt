@@ -1,0 +1,1016 @@
+Index: mozilla/security/manager/locales/en-US/chrome/pippki/certManager.dtd
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/locales/en-US/chrome/pippki/certManager.dtd,v
+retrieving revision 1.7
+diff -u -1 -0 -p -r1.7 certManager.dtd
+--- mozilla/security/manager/locales/en-US/chrome/pippki/certManager.dtd	15 Jun 2007 22:09:23 -0000	1.7
++++ mozilla/security/manager/locales/en-US/chrome/pippki/certManager.dtd	25 Sep 2007 21:37:02 -0000
+@@ -95,32 +95,34 @@
+ <!ENTITY certmgr.certname                     "Certificate Name">
+ <!ENTITY certmgr.tokenname                    "Security Device">
+ <!ENTITY certmgr.purpose                      "Purposes">
+ <!ENTITY certmgr.issued                       "Issued On">
+ <!ENTITY certmgr.expires                      "Expires On">
+ <!ENTITY certmgr.email                        "E-Mail Address">
+ <!ENTITY certmgr.serial                       "Serial Number">
+ 
+ <!ENTITY certmgr.close.label                  "Close">
+ <!ENTITY certmgr.close.accesskey              "C">
+-<!ENTITY certmgr.view.label                   "View">
++<!ENTITY certmgr.view2.label                   "View…">
+ <!ENTITY certmgr.view.accesskey               "V">
+-<!ENTITY certmgr.edit.label                   "Edit">
++<!ENTITY certmgr.edit2.label                   "Edit…">
+ <!ENTITY certmgr.edit.accesskey               "E">
+ <!ENTITY certmgr.editca.label                 "Edit CA Trust">
+ <!ENTITY certmgr.editca.accesskey             "d">
+ <!ENTITY certmgr.add.label                    "Add">
+ <!ENTITY certmgr.add.accesskey                "A">
+-<!ENTITY certmgr.delete.label                 "Delete">
++<!ENTITY certmgr.export.label                 "Export…">
++<!ENTITY certmgr.export.accesskey             "x">
++<!ENTITY certmgr.delete2.label                 "Delete…">
+ <!ENTITY certmgr.delete.accesskey             "D">
+-<!ENTITY certmgr.backup.label                 "Backup">
++<!ENTITY certmgr.backup2.label                 "Backup…">
+ <!ENTITY certmgr.backup.accesskey             "B">
+-<!ENTITY certmgr.backupall.label              "Backup All">
++<!ENTITY certmgr.backupall2.label              "Backup All…">
+ <!ENTITY certmgr.backupall.accesskey          "k">
+-<!ENTITY certmgr.restore.label                "Import">
++<!ENTITY certmgr.restore2.label                "Import…">
+ <!ENTITY certmgr.restore.accesskey            "m">
+ <!ENTITY certmgr.details.label                "Certificate Fields">
+ <!ENTITY certmgr.details.accesskey            "F">
+ <!ENTITY certmgr.fields.label                 "Field Value">
+ <!ENTITY certmgr.fields.accesskey             "V">
+ <!ENTITY certmgr.hierarchy.label              "Certificate Hierarchy">
+ <!ENTITY certmgr.hierarchy.accesskey          "C">
+Index: mozilla/security/manager/locales/en-US/chrome/pippki/pippki.properties
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/locales/en-US/chrome/pippki/pippki.properties,v
+retrieving revision 1.11
+diff -u -1 -0 -p -r1.11 pippki.properties
+--- mozilla/security/manager/locales/en-US/chrome/pippki/pippki.properties	5 Aug 2007 11:54:02 -0000	1.11
++++ mozilla/security/manager/locales/en-US/chrome/pippki/pippki.properties	25 Sep 2007 21:37:02 -0000
+@@ -188,10 +188,24 @@ crlImportNewCRLTitle=Import Certificate 
+ crlImportNewCRLLabel=Import the CRL from:
+ 
+ #Import certificate(s) file dialog
+ importEmailCertPrompt=Select File containing somebody's Email certificate to import
+ importCACertsPrompt=Select File containing CA certificate(s) to import
+ importWebSiteCertPrompt=Select File containing Web Site certificate to import
+ file_browse_Certificate_spec=Certificate Files
+ 
+ # Form Signing confirmation prompt
+ formSigningIntro=The site '%S' has requested that you sign the following text message:
++
++# Cert export
++SaveCertAs=Save Certificate To File
++CertFormatBase64=X.509 Certificate (PEM)
++CertFormatBase64Chain=X.509 Certificate with chain (PEM)
++CertFormatDER=X.509 Certificate (DER)
++CertFormatPKCS7=X.509 Certificate (PKCS#7)
++CertFormatPKCS7Chain=X.509 Certificate with chain (PKCS#7)
++writeFileFailure=File Error
++writeFileFailed=Can't write to file %S:\n%S.
++writeFileAccessDenied=Access denied
++writeFileIsLocked=File is locked
++writeFileNoDeviceSpace=No space left on device
++writeFileUnknownError=Unknown error
+Index: mozilla/security/manager/pki/resources/content/CAOverlay.xul
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/CAOverlay.xul,v
+retrieving revision 1.26
+diff -u -1 -0 -p -r1.26 CAOverlay.xul
+--- mozilla/security/manager/pki/resources/content/CAOverlay.xul	30 Oct 2005 11:21:44 -0000	1.26
++++ mozilla/security/manager/pki/resources/content/CAOverlay.xul	25 Sep 2007 21:37:02 -0000
+@@ -59,28 +59,32 @@
+                      persist="hidden width ordinal" flex="1"/>
+ <!--        <treecol id="certdbkeycol" collapsed="true" flex="1"/> -->
+       </treecols>
+       <treechildren ondblclick="viewCerts();"/>
+     </tree>
+ 
+     <separator class="thin"/>
+ 
+     <hbox>
+       <button id="ca_viewButton"
+-              label="&certmgr.view.label;"
++              label="&certmgr.view2.label;"
+               accesskey="&certmgr.view.accesskey;"
+               disabled="true" oncommand="viewCerts();"/>
+       <button id="ca_editButton"
+-              label="&certmgr.edit.label;"
++              label="&certmgr.edit2.label;"
+               accesskey="&certmgr.edit.accesskey;"
+               disabled="true" oncommand="editCerts();"/>
+       <button id="ca_addButton"
+-              label="&certmgr.restore.label;"
++              label="&certmgr.restore2.label;"
+               accesskey="&certmgr.restore.accesskey;"
+               oncommand="addCACerts();"/>
++      <button id="ca_exportButton"
++              label="&certmgr.export.label;"
++              accesskey="&certmgr.export.accesskey;"
++              disabled="true" oncommand="exportCerts();"/>
+       <button id="ca_deleteButton"
+-              label="&certmgr.delete.label;"
++              label="&certmgr.delete2.label;"
+               accesskey="&certmgr.delete.accesskey;"
+               disabled="true" oncommand="deleteCerts();"/>
+     </hbox>
+   </vbox>
+ </overlay>
+Index: mozilla/security/manager/pki/resources/content/MineOverlay.xul
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/MineOverlay.xul,v
+retrieving revision 1.27
+diff -u -1 -0 -p -r1.27 MineOverlay.xul
+--- mozilla/security/manager/pki/resources/content/MineOverlay.xul	15 Jun 2007 22:06:54 -0000	1.27
++++ mozilla/security/manager/pki/resources/content/MineOverlay.xul	25 Sep 2007 21:37:02 -0000
+@@ -75,32 +75,32 @@
+                      persist="hidden width ordinal" flex="1"/>
+ <!--        <treecol id="certdbkeycol" collapsed="true" flex="1"/> -->
+       </treecols>
+       <treechildren ondblclick="viewCerts();"/>
+     </tree>
+     
+     <separator class="thin"/>
+ 
+     <hbox>
+        <button id="mine_viewButton" class="normal" 
+-               label="&certmgr.view.label;"
++               label="&certmgr.view2.label;"
+                accesskey="&certmgr.view.accesskey;"
+                disabled="true" oncommand="viewCerts();"/>
+        <button id="mine_backupButton" class="normal" 
+-               label="&certmgr.backup.label;"
++               label="&certmgr.backup2.label;"
+                accesskey="&certmgr.backup.accesskey;"
+                disabled="true" oncommand="backupCerts();"/>
+        <button id="mine_backupAllButton" class="normal" 
+-               label="&certmgr.backupall.label;"
++               label="&certmgr.backupall2.label;"
+                accesskey="&certmgr.backupall.accesskey;"
+                oncommand="backupAllCerts();"/>
+        <button id="mine_restoreButton" class="normal" 
+-               label="&certmgr.restore.label;"
++               label="&certmgr.restore2.label;"
+                accesskey="&certmgr.restore.accesskey;"
+                oncommand="restoreCerts();"/>
+        <button id="mine_deleteButton" class="normal" 
+-               label="&certmgr.delete.label;"
++               label="&certmgr.delete2.label;"
+                accesskey="&certmgr.delete.accesskey;"
+                disabled="true" oncommand="deleteCerts();"/>
+     </hbox>
+   </vbox>
+ </overlay>
+Index: mozilla/security/manager/pki/resources/content/OrphanOverlay.xul
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/OrphanOverlay.xul,v
+retrieving revision 1.1
+diff -u -1 -0 -p -r1.1 OrphanOverlay.xul
+--- mozilla/security/manager/pki/resources/content/OrphanOverlay.xul	6 Dec 2006 16:16:52 -0000	1.1
++++ mozilla/security/manager/pki/resources/content/OrphanOverlay.xul	25 Sep 2007 21:37:02 -0000
+@@ -60,20 +60,24 @@
+                      persist="hidden width ordinal" flex="1"/>
+ <!--        <treecol id="certdbkeycol" collapsed="true" flex="1"/> -->
+       </treecols>
+       <treechildren ondblclick="viewCerts();"/>
+     </tree>
+     
+     <separator class="thin"/>
+ 
+     <hbox>
+        <button id="orphan_viewButton" class="normal" 
+-               label="&certmgr.view.label;"
++               label="&certmgr.view2.label;"
+                accesskey="&certmgr.view.accesskey;"
+                disabled="true" oncommand="viewCerts();"/>
++       <button id="orphan_exportButton" class="normal" 
++               label="&certmgr.export.label;"
++               accesskey="&certmgr.export.accesskey;"
++               disabled="true" oncommand="exportCerts();"/>
+        <button id="orphan_deleteButton" class="normal" 
+-               label="&certmgr.delete.label;"
++               label="&certmgr.delete2.label;"
+                accesskey="&certmgr.delete.accesskey;"
+                disabled="true" oncommand="deleteCerts();"/>
+     </hbox>
+   </vbox>
+ </overlay>
+Index: mozilla/security/manager/pki/resources/content/OthersOverlay.xul
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/OthersOverlay.xul,v
+retrieving revision 1.16
+diff -u -1 -0 -p -r1.16 OthersOverlay.xul
+--- mozilla/security/manager/pki/resources/content/OthersOverlay.xul	15 Jun 2007 22:06:54 -0000	1.16
++++ mozilla/security/manager/pki/resources/content/OthersOverlay.xul	25 Sep 2007 21:37:02 -0000
+@@ -66,28 +66,32 @@
+                  flex="1"/>
+ <!--        <treecol id="certdbkeycol" collapsed="true" flex="1"/> -->
+       </treecols>
+       <treechildren flex="1" ondblclick="viewCerts();"/>
+     </tree>
+     
+     <separator class="thin"/>
+ 
+     <hbox>
+       <button id="email_viewButton"
+-              label="&certmgr.view.label;"
++              label="&certmgr.view2.label;"
+               accesskey="&certmgr.view.accesskey;"
+               disabled="true" oncommand="viewCerts();"/>
+       <button id="email_editButton"
+-              label="&certmgr.edit.label;"
++              label="&certmgr.edit2.label;"
+               accesskey="&certmgr.edit.accesskey;"
+               disabled="true" oncommand="editCerts();"/>
+       <button id="email_addButton"
+-              label="&certmgr.restore.label;"
++              label="&certmgr.restore2.label;"
+               accesskey="&certmgr.restore.accesskey;"
+               oncommand="addEmailCert();"/>
++      <button id="email_exportButton"
++              label="&certmgr.export.label;"
++              accesskey="&certmgr.export.accesskey;"
++              disabled="true" oncommand="exportCerts();"/>
+       <button id="email_deleteButton"
+-              label="&certmgr.delete.label;"
++              label="&certmgr.delete2.label;"
+               accesskey="&certmgr.delete.accesskey;"
+               disabled="true" oncommand="deleteCerts();"/>
+     </hbox>
+   </vbox>
+ </overlay>
+Index: mozilla/security/manager/pki/resources/content/WebSitesOverlay.xul
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/WebSitesOverlay.xul,v
+retrieving revision 1.25
+diff -u -1 -0 -p -r1.25 WebSitesOverlay.xul
+--- mozilla/security/manager/pki/resources/content/WebSitesOverlay.xul	15 Jun 2007 22:06:54 -0000	1.25
++++ mozilla/security/manager/pki/resources/content/WebSitesOverlay.xul	25 Sep 2007 21:37:02 -0000
+@@ -65,28 +65,32 @@
+                  persist="hidden width ordinal" flex="1"/>
+ <!--        <treecol id="certdbkeycol" collapsed="true" flex="1"/> -->
+       </treecols>
+       <treechildren ondblclick="viewCerts();"/>
+     </tree>
+ 
+     <separator class="thin"/>
+ 
+     <hbox>
+       <button id="websites_viewButton"
+-              label="&certmgr.view.label;"
++              label="&certmgr.view2.label;"
+               accesskey="&certmgr.view.accesskey;"
+               disabled="true" oncommand="viewCerts();"/>
+       <button id="websites_editButton"
+-              label="&certmgr.edit.label;"
++              label="&certmgr.edit2.label;"
+               accesskey="&certmgr.edit.accesskey;"
+               disabled="true" oncommand="editCerts();"/>
+       <button id="websites_addButton"
+-              label="&certmgr.restore.label;"
++              label="&certmgr.restore2.label;"
+               accesskey="&certmgr.restore.accesskey;"
+               oncommand="addWebSiteCert();"/>
++      <button id="websites_exportButton"
++              label="&certmgr.export.label;"
++              accesskey="&certmgr.export.accesskey;"
++              disabled="true" oncommand="exportCerts();"/>
+       <button id="websites_deleteButton"
+-              label="&certmgr.delete.label;"
++              label="&certmgr.delete2.label;"
+               accesskey="&certmgr.delete.accesskey;"
+               disabled="true" oncommand="deleteCerts();"/>
+     </hbox>
+   </vbox>
+ </overlay>
+Index: mozilla/security/manager/pki/resources/content/certDump.xul
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/certDump.xul,v
+retrieving revision 1.14
+diff -u -1 -0 -p -r1.14 certDump.xul
+--- mozilla/security/manager/pki/resources/content/certDump.xul	25 Apr 2004 15:02:32 -0000	1.14
++++ mozilla/security/manager/pki/resources/content/certDump.xul	25 Sep 2007 21:37:02 -0000
+@@ -58,12 +58,19 @@
+             onselect="displaySelected();" hidecolumnpicker="true">
+     <treecols>
+       <treecol flex="1" id="certDataCol" primary="true" hideheader="true"/>
+     </treecols>
+     <treechildren/>
+   </tree>
+   
+   <label class="header" value="&certmgr.fields.label;"/>
+   <textbox id="certDumpVal"  multiline="true" rows="8"
+            readonly="true" style="font-family: -moz-fixed;"/>
++  
++  <separator class="thin"/>
++  <hbox>
++    <button id="export_cert" class="normal" label="&certmgr.export.label;"
++            accesskey="&certmgr.export.accesskey;"
++            oncommand="exportToFile(window, getCurrentCert());"/>
++  </hbox>
+ </vbox>
+ </overlay>
+Index: mozilla/security/manager/pki/resources/content/certManager.js
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/certManager.js,v
+retrieving revision 1.48
+diff -u -1 -0 -p -r1.48 certManager.js
+--- mozilla/security/manager/pki/resources/content/certManager.js	30 May 2007 23:13:28 -0000	1.48
++++ mozilla/security/manager/pki/resources/content/certManager.js	25 Sep 2007 21:37:02 -0000
+@@ -191,20 +191,22 @@ function ca_enableButtons()
+     }
+     if (i == nr) {
+       edit_toggle="false";
+     }
+   }
+ */
+   var enableViewButton=document.getElementById('ca_viewButton');
+   enableViewButton.setAttribute("disabled",toggle);
+   var enableEditButton=document.getElementById('ca_editButton');
+   enableEditButton.setAttribute("disabled",edit_toggle);
++  var enableExportButton=document.getElementById('ca_exportButton');
++  enableExportButton.setAttribute("disabled",toggle);
+   var enableDeleteButton=document.getElementById('ca_deleteButton');
+   enableDeleteButton.setAttribute("disabled",toggle);
+ }
+ 
+ function mine_enableButtons()
+ {
+   var items = userTreeView.selection;
+   var toggle="false";
+   if (items.getRangeCount() == 0) {
+     toggle="true";
+@@ -221,48 +223,54 @@ function websites_enableButtons()
+ {
+   var items = serverTreeView.selection;
+   var toggle="false";
+   if (items.getRangeCount() == 0) {
+     toggle="true";
+   }
+   var enableViewButton=document.getElementById('websites_viewButton');
+   enableViewButton.setAttribute("disabled",toggle);
+   var enableEditButton=document.getElementById('websites_editButton');
+   enableEditButton.setAttribute("disabled",toggle);
++  var enableExportButton=document.getElementById('websites_exportButton');
++  enableExportButton.setAttribute("disabled",toggle);
+   var enableDeleteButton=document.getElementById('websites_deleteButton');
+   enableDeleteButton.setAttribute("disabled",toggle);
+ }
+ 
+ function email_enableButtons()
+ {
+   var items = emailTreeView.selection;
+   var toggle="false";
+   if (items.getRangeCount() == 0) {
+     toggle="true";
+   }
+   var enableViewButton=document.getElementById('email_viewButton');
+   enableViewButton.setAttribute("disabled",toggle);
+   var enableEditButton=document.getElementById('email_editButton');
+   enableEditButton.setAttribute("disabled",toggle);
++  var enableExportButton=document.getElementById('email_exportButton');
++  enableExportButton.setAttribute("disabled",toggle);
+   var enableDeleteButton=document.getElementById('email_deleteButton');
+   enableDeleteButton.setAttribute("disabled",toggle);
+ }
+ 
+ function orphan_enableButtons()
+ {
+   var items = orphanTreeView.selection;
+   var toggle="false";
+   if (items.getRangeCount() == 0) {
+     toggle="true";
+   }
+   var enableViewButton=document.getElementById('orphan_viewButton');
+   enableViewButton.setAttribute("disabled",toggle);
++  var enableExportButton=document.getElementById('orphan_exportButton');
++  enableExportButton.setAttribute("disabled",toggle);
+   var enableDeleteButton=document.getElementById('orphan_deleteButton');
+   enableDeleteButton.setAttribute("disabled",toggle);
+ }
+ 
+ function backupCerts()
+ {
+   getSelectedCerts();
+   var numcerts = selected_certs.length;
+   if (!numcerts)
+     return;
+@@ -327,20 +335,32 @@ function restoreCerts()
+ 
+     var certcache = Components.classes[nsNSSCertCache].createInstance(nsINSSCertCache);
+     certcache.cacheAllCerts();
+     userTreeView.loadCertsFromCache(certcache, nsIX509Cert.USER_CERT);
+     userTreeView.selection.clearSelection();
+     caTreeView.loadCertsFromCache(certcache, nsIX509Cert.CA_CERT);
+     caTreeView.selection.clearSelection();
+   }
+ }
+ 
++function exportCerts()
++{
++  getSelectedCerts();
++  var numcerts = selected_certs.length;
++  if (!numcerts)
++    return;
++
++  for (var t=0; t<numcerts; t++) {
++    exportToFile(window, selected_certs[t]);
++  }
++}
++
+ function deleteCerts()
+ {
+   getSelectedCerts();
+   var numcerts = selected_certs.length;
+   if (!numcerts)
+     return;
+ 
+   var params = Components.classes[nsDialogParamBlock].createInstance(nsIDialogParamBlock);
+   
+   var bundle = srGetStrBundle("chrome://pippki/locale/pippki.properties");
+Index: mozilla/security/manager/pki/resources/content/crlManager.xul
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/crlManager.xul,v
+retrieving revision 1.25
+diff -u -1 -0 -p -r1.25 crlManager.xul
+--- mozilla/security/manager/pki/resources/content/crlManager.xul	23 Jun 2007 14:47:16 -0000	1.25
++++ mozilla/security/manager/pki/resources/content/crlManager.xul	25 Sep 2007 21:37:02 -0000
+@@ -90,17 +90,17 @@
+             oncommand="DeleteCrlSelected();"/>
+     <button id="editPrefs" class="push" disabled="true"
+             label="&validation.advanced.label;"
+             accesskey="&validation.advanced.accesskey;"
+             oncommand="EditAutoUpdatePrefs();"/>
+     <button id="updateCRL" class="push" disabled="true"
+             label="&validation.updatecrl.label;"
+             accesskey="&validation.updatecrl.accesskey;"
+             oncommand="UpdateCRL();"/>
+     <button id="importCRL" class="push"
+-            label="&certmgr.restore.label;"
++            label="&certmgr.restore2.label;"
+             accesskey="&certmgr.restore.accesskey;"
+             oncommand="ImportCRL();"/>
+     <spacer flex="2"/>
+     <button dlgtype="accept"/>
+   </hbox>
+ </dialog>
+Index: mozilla/security/manager/pki/resources/content/pippki.js
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/pippki.js,v
+retrieving revision 1.3
+diff -u -1 -0 -p -r1.3 pippki.js
+--- mozilla/security/manager/pki/resources/content/pippki.js	25 Apr 2004 15:02:32 -0000	1.3
++++ mozilla/security/manager/pki/resources/content/pippki.js	25 Sep 2007 21:37:02 -0000
+@@ -15,20 +15,21 @@
+  *
+  * The Original Code is mozilla.org code.
+  *
+  * The Initial Developer of the Original Code is
+  * Netscape Communications Corporation.
+  * Portions created by the Initial Developer are Copyright (C) 1998
+  * the Initial Developer. All Rights Reserved.
+  *
+  * Contributor(s):
+  *   Javier Delgadillo <javi@netscape.com>
++ *   Kaspar Brand <mozcontrib@velox.ch>
+  *
+  * Alternatively, the contents of this file may be used under the terms of
+  * either the GNU General Public License Version 2 or later (the "GPL"), or
+  * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
+  * in which case the provisions of the GPL or the LGPL are applicable instead
+  * of those above. If you wish to allow use of your version of this file only
+  * under the terms of either the GPL or the LGPL, and not to allow others to
+  * use your version of this file under the terms of the MPL, indicate your
+  * decision by deleting the provisions above and replace them with the notice
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+@@ -54,10 +55,140 @@ function setText(id, value) {
+ const nsICertificateDialogs = Components.interfaces.nsICertificateDialogs;
+ const nsCertificateDialogs = "@mozilla.org/nsCertificateDialogs;1"
+ 
+ function viewCertHelper(parent, cert) {
+   if (!cert)
+     return;
+ 
+   var cd = Components.classes[nsCertificateDialogs].getService(nsICertificateDialogs);
+   cd.viewCert(parent, cert);
+ }
++
++function getDERString(cert)
++{
++  var length = {};
++  var derArray = cert.getRawDER(length);
++  var derString = '';
++  for (var i = 0; i < derArray.length; i++) {
++    derString += String.fromCharCode(derArray[i]);
++  }
++  return derString;
++}
++
++function getPKCS7String(cert, chainMode)
++{
++  var length = {};
++  cert.QueryInterface(Components.interfaces.nsIX509Cert3);
++  var pkcs7Array = cert.exportAsCMS(chainMode, length);
++  var pkcs7String = '';
++  for (var i = 0; i < pkcs7Array.length; i++) {
++    pkcs7String += String.fromCharCode(pkcs7Array[i]);
++  }
++  return pkcs7String;
++}
++
++function getPEMString(cert)
++{
++  var derb64 = btoa(getDERString(cert));
++  // Wrap the Base64 string into lines of 64 characters, 
++  // with CRLF line breaks (as specified in RFC 1421).
++  var wrapped = derb64.replace(/(\S{64}(?!$))/g, "$1\r\n");
++  return "-----BEGIN CERTIFICATE-----\r\n"
++         + wrapped
++         + "\r\n-----END CERTIFICATE-----\r\n";
++}
++ 
++function alertPromptService(title, message)
++{
++  var ps = null;
++  var ps = Components.classes["@mozilla.org/embedcomp/prompt-service;1"].
++           getService(Components.interfaces.nsIPromptService);
++  ps.alert(window, title, message);
++}
++
++function exportToFile(parent, cert)
++{
++  var bundle = srGetStrBundle("chrome://pippki/locale/pippki.properties");
++  if (!cert)
++    return;
++
++  var nsIFilePicker = Components.interfaces.nsIFilePicker;
++  var fp = Components.classes["@mozilla.org/filepicker;1"].
++           createInstance(nsIFilePicker);
++  fp.init(parent, bundle.GetStringFromName("SaveCertAs"),
++          nsIFilePicker.modeSave);
++  var filename = cert.commonName;
++  if (!filename.length)
++    filename = cert.windowTitle;
++  // remove all whitespace from the default filename
++  fp.defaultString = filename.replace(/\s*/g,'');
++  fp.defaultExtension = "crt";
++  fp.appendFilter(bundle.GetStringFromName("CertFormatBase64"), "*.crt; *.pem");
++  fp.appendFilter(bundle.GetStringFromName("CertFormatBase64Chain"), "*.crt; *.pem");
++  fp.appendFilter(bundle.GetStringFromName("CertFormatDER"), "*.der");
++  fp.appendFilter(bundle.GetStringFromName("CertFormatPKCS7"), "*.p7c");
++  fp.appendFilter(bundle.GetStringFromName("CertFormatPKCS7Chain"), "*.p7c");
++  fp.appendFilters(nsIFilePicker.filterAll);
++  var res = fp.show();
++  if (res != nsIFilePicker.returnOK && res != nsIFilePicker.returnReplace)
++    return;
++
++  var content = '';
++  switch (fp.filterIndex) {
++    case 1:
++      content = getPEMString(cert);
++      var chain = cert.getChain();
++      for (var i = 1; i < chain.length; i++)
++        content += getPEMString(chain.queryElementAt(i, Components.interfaces.nsIX509Cert));
++      break;
++    case 2:
++      content = getDERString(cert);
++      break;
++    case 3:
++      content = getPKCS7String(cert, Components.interfaces.nsIX509Cert3.CMS_CHAIN_MODE_CertOnly);
++      break;
++    case 4:
++      content = getPKCS7String(cert, Components.interfaces.nsIX509Cert3.CMS_CHAIN_MODE_CertChainWithRoot);
++      break;
++    case 0:
++    default:
++      content = getPEMString(cert);
++      break;
++  }
++  var msg;
++  var written = 0;
++  try {
++    var file = Components.classes["@mozilla.org/file/local;1"].
++               createInstance(Components.interfaces.nsILocalFile);
++    file.initWithPath(fp.file.path);
++    var fos = Components.classes["@mozilla.org/network/file-output-stream;1"].
++              createInstance(Components.interfaces.nsIFileOutputStream);
++    // flags: PR_WRONLY | PR_CREATE_FILE | PR_TRUNCATE
++    fos.init(file, 0x02 | 0x08 | 0x20, 00644, 0);
++    written = fos.write(content, content.length);
++    fos.close();
++  }
++  catch(e) {
++    switch (e.result) {
++      case Components.results.NS_ERROR_FILE_ACCESS_DENIED:
++        msg = bundle.GetStringFromName("writeFileAccessDenied");
++        break;
++      case Components.results.NS_ERROR_FILE_IS_LOCKED:
++        msg = bundle.GetStringFromName("writeFileIsLocked");
++        break;
++      case Components.results.NS_ERROR_FILE_NO_DEVICE_SPACE:
++      case Components.results.NS_ERROR_FILE_DISK_FULL:
++        msg = bundle.GetStringFromName("writeFileNoDeviceSpace");
++        break;
++      default:
++        msg = e.message;
++        break;
++    }
++  }
++  if (written != content.length) {
++    if (!msg.length)
++      msg = bundle.GetStringFromName("writeFileUnknownError");
++    alertPromptService(bundle.GetStringFromName("writeFileFailure"),
++                       bundle.formatStringFromName("writeFileFailed",
++                         [ fp.file.path, msg ], 2));
++  }
++}
+Index: mozilla/security/manager/pki/resources/content/viewCertDetails.js
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/viewCertDetails.js,v
+retrieving revision 1.30
+diff -u -1 -0 -p -r1.30 viewCertDetails.js
+--- mozilla/security/manager/pki/resources/content/viewCertDetails.js	15 Jun 2007 22:09:24 -0000	1.30
++++ mozilla/security/manager/pki/resources/content/viewCertDetails.js	25 Sep 2007 21:37:02 -0000
+@@ -16,20 +16,21 @@
+  * The Initial Developer of the Original Code is
+  * Netscape Communications Corporation.
+  * Portions created by the Initial Developer are Copyright (C) 2001
+  * the Initial Developer. All Rights Reserved.
+  *
+  * Contributor(s):
+  *   Bob Lord <lord@netscape.com>
+  *   Ian McGreer <mcgreer@netscape.com>
+  *   Javier Delgadillo <javi@netscape.com>
+  *   Kai Engert <kengert@redhat.com>
++ *   Kaspar Brand <mozcontrib@velox.ch>
+  *
+  * Alternatively, the contents of this file may be used under the terms of
+  * either the GNU General Public License Version 2 or later (the "GPL"), or
+  * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
+  * in which case the provisions of the GPL or the LGPL are applicable instead
+  * of those above. If you wish to allow use of your version of this file only
+  * under the terms of either the GPL or the LGPL, and not to allow others to
+  * use your version of this file under the terms of the MPL, indicate your
+  * decision by deleting the provisions above and replace them with the notice
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+@@ -314,10 +315,36 @@ function getProxyOnUIThread(aObject, aIn
+             getService().mainThread;
+ 
+     var proxyMgr = Components.
+             classes["@mozilla.org/xpcomproxy;1"].
+             getService(Components.interfaces.nsIProxyObjectManager);
+ 
+     return proxyMgr.getProxyForObject(mainThread,
+             aInterface, aObject, 5);
+     // 5 == NS_PROXY_ALWAYS | NS_PROXY_SYNC
+ }
++
++function getCurrentCert()
++{
++  var realIndex;
++  var tree = document.getElementById('treesetDump');
++  if (tree.view.selection.isSelected(tree.currentIndex)
++      && document.getElementById('prettyprint_tab').selected) {
++    /* if the user manually selected a cert on the Details tab,
++       then take that one  */
++    realIndex = tree.currentIndex;    
++  } else {
++    /* otherwise, take the one at the bottom of the chain
++       (i.e. the one of the end-entity, unless we're displaying
++       CA certs) */
++    realIndex = tree.view.rowCount - 1;
++  }
++  if (realIndex >= 0) {
++    var item = tree.contentView.getItemAtIndex(realIndex);
++    var dbKey = item.firstChild.firstChild.getAttribute('display');
++    var certdb = Components.classes[nsX509CertDB].getService(nsIX509CertDB);
++    var cert = certdb.findCertByDBKey(dbKey,null);
++    return cert;
++  }
++  /* shouldn't really happen */
++  return null;
++}
+Index: mozilla/security/manager/ssl/public/nsIX509Cert3.idl
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/public/nsIX509Cert3.idl,v
+retrieving revision 1.1
+diff -u -1 -0 -p -r1.1 nsIX509Cert3.idl
+--- mozilla/security/manager/ssl/public/nsIX509Cert3.idl	4 Apr 2006 06:41:36 -0000	1.1
++++ mozilla/security/manager/ssl/public/nsIX509Cert3.idl	25 Sep 2007 21:37:02 -0000
+@@ -39,30 +39,50 @@
+ 
+ interface nsIX509Cert;
+ interface nsICertVerificationListener;
+ 
+ /**
+  * Extending nsIX509Cert
+  * 
+  * TODO: nsIX509Cert3 should be derived from nsIX509Cert2
+  *       (and nsIX509Cert2 derived from nsIX509Cert)
+  */
+-[scriptable, uuid(402aee39-653c-403f-8be1-6d1824223bf9)]
++[scriptable, uuid(89d9f248-1160-4935-9f99-2bdbf67b5849)]
+ interface nsIX509Cert3 : nsISupports {
+ 
+   /**
++   *  Constants for specifying the chain mode when exporting a certificate
++   */
++  const unsigned long CMS_CHAIN_MODE_CertOnly = 1;
++  const unsigned long CMS_CHAIN_MODE_CertChain = 2;
++  const unsigned long CMS_CHAIN_MODE_CertChainWithRoot = 3;
++
++  /**
+    *  Async version of nsIX509Cert::getUsagesArray()
+    *
+    *  Will not block, will request results asynchronously,
+    *  availability of results will be notified.
+    */ 
+   void requestUsagesArrayAsync(in nsICertVerificationListener cvl);
++
++  /**
++   *  Obtain the certificate wrapped in a PKCS#7 SignedData structure,
++   *  with or without the certificate chain
++   *
++   *  @param chainMode Whether to include the chain (with or without the root),
++                       see CMS_CHAIN_MODE constants.
++   *  @param length The number of bytes of the PKCS#7 data.
++   *  @param data The bytes representing the PKCS#7 wrapped certificate.
++   */
++  void exportAsCMS(in unsigned long chainMode,
++                   out unsigned long length,
++                   [retval, array, size_is(length)] out octet data);
+ };
+ 
+ [scriptable, uuid(2fd0a785-9f2d-4327-8871-8c3e0783891d)]
+ interface nsICertVerificationResult : nsISupports {
+ 
+   /**
+    *  This interface reflects a container of
+    *  verification results. Call will not block.
+    *
+    *  Obtain an array of human readable strings describing
+Index: mozilla/security/manager/ssl/src/nsNSSCertificate.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSCertificate.cpp,v
+retrieving revision 1.128
+diff -u -1 -0 -p -r1.128 nsNSSCertificate.cpp
+--- mozilla/security/manager/ssl/src/nsNSSCertificate.cpp	23 Aug 2007 18:59:12 -0000	1.128
++++ mozilla/security/manager/ssl/src/nsNSSCertificate.cpp	25 Sep 2007 21:37:03 -0000
+@@ -36,20 +36,21 @@
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "prmem.h"
+ #include "prerror.h"
+ #include "prprf.h"
+ 
+ #include "nsNSSComponent.h" // for PIPNSS string bundle calls.
++#include "nsNSSCleaner.h"
+ #include "nsCOMPtr.h"
+ #include "nsIMutableArray.h"
+ #include "nsNSSCertificate.h"
+ #include "nsNSSCertValidity.h"
+ #include "nsPKCS12Blob.h"
+ #include "nsPK11TokenDB.h"
+ #include "nsIX509Cert.h"
+ #include "nsIX509Cert3.h"
+ #include "nsISMimeCert.h"
+ #include "nsNSSASN1Object.h"
+@@ -79,27 +80,35 @@ extern "C" {
+ #include "certdb.h"
+ #include "cert.h"
+ #include "secerr.h"
+ #include "nssb64.h"
+ #include "secasn1.h"
+ #include "secder.h"
+ }
+ #include "ssl.h"
+ #include "ocsp.h"
+ #include "plbase64.h"
++#include "cms.h"
++#include "cert.h"
+ 
+ #ifdef PR_LOGGING
+ extern PRLogModuleInfo* gPIPNSSLog;
+ #endif
+ 
+ static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID);
+ 
++NSSCleanupAutoPtrClass(CERTCertificateList, CERT_DestroyCertificateList)
++NSSCleanupAutoPtrClass(CERTCertificate, CERT_DestroyCertificate)
++NSSCleanupAutoPtrClass(NSSCMSMessage, NSS_CMSMessage_Destroy)
++NSSCleanupAutoPtrClass_WithParam(PLArenaPool, PORT_FreeArena, FalseParam, PR_FALSE)
++NSSCleanupAutoPtrClass(NSSCMSSignedData, NSS_CMSSignedData_Destroy)
++
+ // This is being stored in an PRUint32 that can otherwise
+ // only take values from nsIX509Cert's list of cert types.
+ // As nsIX509Cert is frozen, we choose a value not contained
+ // in the list to mean not yet initialized.
+ #define CERT_TYPE_NOT_YET_INITIALIZED (1 << 30)
+ 
+ /* nsNSSCertificate */
+ 
+ NS_IMPL_THREADSAFE_ISUPPORTS4(nsNSSCertificate, nsIX509Cert,
+                                                 nsIX509Cert2,
+@@ -960,20 +969,151 @@ nsNSSCertificate::GetRawDER(PRUint32 *aL
+     if (*aArray) {
+       memcpy(*aArray, mCert->derCert.data, mCert->derCert.len);
+       *aLength = mCert->derCert.len;
+       return NS_OK;
+     }
+   }
+   *aLength = 0;
+   return NS_ERROR_FAILURE;
+ }
+ 
++NS_IMETHODIMP
++nsNSSCertificate::ExportAsCMS(PRUint32 chainMode,
++                              PRUint32 *aLength, PRUint8 **aArray)
++{
++  NS_ENSURE_ARG(aLength);
++  NS_ENSURE_ARG(aArray);
++
++  nsNSSShutDownPreventionLock locker;
++  if (isAlreadyShutDown())
++    return NS_ERROR_NOT_AVAILABLE;
++
++  if (!mCert)
++    return NS_ERROR_FAILURE;
++
++  switch (chainMode) {
++    case nsIX509Cert3::CMS_CHAIN_MODE_CertOnly:
++    case nsIX509Cert3::CMS_CHAIN_MODE_CertChain:
++    case nsIX509Cert3::CMS_CHAIN_MODE_CertChainWithRoot:
++      break;
++    default:
++      return NS_ERROR_INVALID_ARG;
++  };
++
++  PLArenaPool *arena = PORT_NewArena(1024);
++  PLArenaPoolCleanerFalseParam arenaCleaner(arena);
++  if (!arena) {
++    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
++           ("nsNSSCertificate::ExportAsCMS - out of memory\n"));
++    return NS_ERROR_OUT_OF_MEMORY;
++  }
++
++  NSSCMSMessage *cmsg = NSS_CMSMessage_Create(nsnull);
++  NSSCMSMessageCleaner cmsgCleaner(cmsg);
++  if (!cmsg) {
++    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
++           ("nsNSSCertificate::ExportAsCMS - can't create CMS message\n"));
++    return NS_ERROR_OUT_OF_MEMORY;
++  }
++
++  /*
++   * first, create SignedData with the certificate only (no chain)
++   */
++  NSSCMSSignedData *sigd = NSS_CMSSignedData_CreateCertsOnly(cmsg, mCert, PR_FALSE);
++  NSSCMSSignedDataCleaner sigdCleaner(sigd);
++  if (!sigd) {
++    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
++           ("nsNSSCertificate::ExportAsCMS - can't create SignedData\n"));
++    return NS_ERROR_FAILURE;
++  }
++
++  /*
++   * Calling NSS_CMSSignedData_CreateCertsOnly() will not allow us
++   * to specify the inclusion of the root, but CERT_CertChainFromCert() does.
++   * Since CERT_CertChainFromCert() also includes the certificate itself,
++   * we have to start at the issuing cert (to avoid duplicate certs
++   * in the SignedData).
++   */
++  if (chainMode == nsIX509Cert3::CMS_CHAIN_MODE_CertChain ||
++      chainMode == nsIX509Cert3::CMS_CHAIN_MODE_CertChainWithRoot) {
++    CERTCertificate *issuerCert = CERT_FindCertIssuer(mCert, PR_Now(), certUsageAnyCA);
++    CERTCertificateCleaner issuerCertCleaner(issuerCert);
++    /*
++     * the issuerCert of a self signed root is the cert itself,
++     * so make sure we're not adding duplicates, again
++     */
++    if (issuerCert && issuerCert != mCert) {
++      PRBool includeRoot = 
++        (chainMode == nsIX509Cert3::CMS_CHAIN_MODE_CertChainWithRoot);
++      CERTCertificateList *certChain = CERT_CertChainFromCert(issuerCert, certUsageAnyCA, includeRoot);
++      CERTCertificateListCleaner certChainCleaner(certChain);
++      if (certChain) {
++        if (NSS_CMSSignedData_AddCertList(sigd, certChain) == SECSuccess) {
++          certChainCleaner.detach();
++        }
++        else {
++          PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
++                 ("nsNSSCertificate::ExportAsCMS - can't add chain\n"));
++          return NS_ERROR_FAILURE;
++        }
++      }
++      else { 
++        /* try to add the issuerCert, at least */
++        if (NSS_CMSSignedData_AddCertificate(sigd, issuerCert)
++            == SECSuccess) {
++          issuerCertCleaner.detach();
++        }
++        else {
++          PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
++                 ("nsNSSCertificate::ExportAsCMS - can't add issuer cert\n"));
++          return NS_ERROR_FAILURE;
++        }
++      }
++    }
++  }
++
++  NSSCMSContentInfo *cinfo = NSS_CMSMessage_GetContentInfo(cmsg);
++  if (NSS_CMSContentInfo_SetContent_SignedData(cmsg, cinfo, sigd)
++       == SECSuccess) {
++    sigdCleaner.detach();
++  }
++  else {
++    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
++           ("nsNSSCertificate::ExportAsCMS - can't attach SignedData\n"));
++    return NS_ERROR_FAILURE;
++  }
++
++  SECItem certP7 = { siBuffer, nsnull, 0 };
++  NSSCMSEncoderContext *ecx = NSS_CMSEncoder_Start(cmsg, nsnull, nsnull, &certP7, arena,
++                                                   nsnull, nsnull, nsnull, nsnull, nsnull,
++                                                   nsnull);
++  if (!ecx) {
++    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
++           ("nsNSSCertificate::ExportAsCMS - can't create encoder context\n"));
++    return NS_ERROR_FAILURE;
++  }
++
++  if (NSS_CMSEncoder_Finish(ecx) != SECSuccess) {
++    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
++           ("nsNSSCertificate::ExportAsCMS - failed to add encoded data\n"));
++    return NS_ERROR_FAILURE;
++  }
++
++  *aArray = (PRUint8*)nsMemory::Alloc(certP7.len);
++  if (!*aArray)
++    return NS_ERROR_OUT_OF_MEMORY;
++
++  memcpy(*aArray, certP7.data, certP7.len);
++  *aLength = certP7.len;
++  return NS_OK;
++}
++
+ CERTCertificate *
+ nsNSSCertificate::GetCert()
+ {
+   nsNSSShutDownPreventionLock locker;
+   if (isAlreadyShutDown())
+     return nsnull;
+ 
+   return (mCert) ? CERT_DupCertificate(mCert) : nsnull;
+ }
+ 
+Index: mozilla/security/manager/ssl/src/nsNSSCleaner.h
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSCleaner.h,v
+retrieving revision 1.4
+diff -u -1 -0 -p -r1.4 nsNSSCleaner.h
+--- mozilla/security/manager/ssl/src/nsNSSCleaner.h	29 Sep 2006 00:50:46 -0000	1.4
++++ mozilla/security/manager/ssl/src/nsNSSCleaner.h	25 Sep 2007 21:37:03 -0000
+@@ -94,32 +94,34 @@ private:                                
+   nsstype *&object;                                \
+ public:                                            \
+   nsstype##Cleaner(nsstype *&a_object)             \
+     :object(a_object) {}                           \
+   ~nsstype##Cleaner() {                            \
+     if (object) {                                  \
+       cleanfunc(object);                           \
+       object = nsnull;                             \
+     }                                              \
+   }                                                \
++  void detach() {object=nsnull;}                   \
+ };
+ 
+ #define NSSCleanupAutoPtrClass_WithParam(nsstype, cleanfunc, namesuffix, paramvalue) \
+ class nsstype##Cleaner##namesuffix                 \
+ {                                                  \
+ private:                                           \
+   nsstype##Cleaner##namesuffix(const nsstype##Cleaner##namesuffix &); \
+   nsstype##Cleaner##namesuffix();                                     \
+   void operator=(const nsstype##Cleaner##namesuffix &);               \
+   nsstype *&object;                                \
+ public:                                            \
+   nsstype##Cleaner##namesuffix(nsstype *&a_object) \
+     :object(a_object) {}                           \
+   ~nsstype##Cleaner##namesuffix() {                \
+     if (object) {                                  \
+       cleanfunc(object, paramvalue);               \
+       object = nsnull;                             \
+     }                                              \
+   }                                                \
++  void detach() {object=nsnull;}                   \
+ };
+ 
+ #endif

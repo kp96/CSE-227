@@ -1,0 +1,37 @@
+diff --git a/content/base/src/nsNodeUtils.cpp b/content/base/src/nsNodeUtils.cpp
+--- a/content/base/src/nsNodeUtils.cpp
++++ b/content/base/src/nsNodeUtils.cpp
+@@ -352,29 +352,33 @@ nsNodeUtils::GetUserData(nsINode *aNode,
+   return NS_OK;
+ }
+ 
+ struct NS_STACK_CLASS nsHandlerData
+ {
+   PRUint16 mOperation;
+   nsCOMPtr<nsIDOMNode> mSource;
+   nsCOMPtr<nsIDOMNode> mDest;
++  nsCxPusher mPusher;
+ };
+ 
+ static void
+ CallHandler(void *aObject, nsIAtom *aKey, void *aHandler, void *aData)
+ {
+   nsHandlerData *handlerData = static_cast<nsHandlerData*>(aData);
+   nsCOMPtr<nsIDOMUserDataHandler> handler =
+     static_cast<nsIDOMUserDataHandler*>(aHandler);
+   nsINode *node = static_cast<nsINode*>(aObject);
+   nsCOMPtr<nsIVariant> data =
+     static_cast<nsIVariant*>(node->GetProperty(DOM_USER_DATA, aKey));
+   NS_ASSERTION(data, "Handler without data?");
+ 
++  if (!handlerData->mPusher.RePush(node)) {
++    return;
++  }
+   nsAutoString key;
+   aKey->ToString(key);
+   handler->Handle(handlerData->mOperation, key, data, handlerData->mSource,
+                   handlerData->mDest);
+ }
+ 
+ /* static */
+ nsresult

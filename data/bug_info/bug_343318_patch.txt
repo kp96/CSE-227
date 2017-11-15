@@ -1,0 +1,16 @@
+Index: security/manager/pki/resources/jar.mn
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/jar.mn,v
+retrieving revision 1.49
+diff -u -r1.49 jar.mn
+--- security/manager/pki/resources/jar.mn	22 May 2006 14:33:09 -0000	1.49
++++ security/manager/pki/resources/jar.mn	1 Jul 2006 10:49:47 -0000
+@@ -14,7 +14,7 @@
+     content/pippki/pref-ssl.xul              (content/pref-ssl.xul)
+     content/pippki/pref-certs.xul            (content/pref-certs.xul)
+     content/pippki/PageInfoOverlay.xul       (content/PageInfoOverlay.xul)
+-    content/pippki/newserver.js              (content/newserver.js)
++*   content/pippki/newserver.js              (content/newserver.js)
+ *   content/pippki/newserver.xul             (content/newserver.xul)
+     content/pippki/downloadcert.js           (content/downloadcert.js)
+ *   content/pippki/downloadcert.xul          (content/downloadcert.xul)

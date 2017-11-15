@@ -1,0 +1,35 @@
+diff --git a/netwerk/base/src/nsSocketTransport2.cpp b/netwerk/base/src/nsSocketTransport2.cpp
+--- a/netwerk/base/src/nsSocketTransport2.cpp
++++ b/netwerk/base/src/nsSocketTransport2.cpp
+@@ -1587,22 +1587,29 @@ nsSocketTransport::OnSocketDetached(PRFi
+     // the transport lock) possibly closing the socket. Also release our
+     // listeners to break potential refcount cycles.
+     {
+         nsAutoLock lock(mLock);
+         if (mFD) {
+             ReleaseFD_Locked(mFD);
+             // flag mFD as unusable; this prevents other consumers from 
+             // acquiring a reference to mFD.
+             mFDconnected = PR_FALSE;
+         }
+-        mCallbacks = nsnull;
+-        mEventSink = nsnull;
++
++        // We must release mCallbacks and mEventSink to avoid memory leak
++        // but only when RecoveFromError() above failed. Otherwise we lose
++        // link with UI and security callbacks on next connection attempt 
++        // round. That would lead e.g. to a broken certificate exception page.
++        if (NS_FAILED(mCondition)) {
++            mCallbacks = nsnull;
++            mEventSink = nsnull;
++        }
+     }
+ }
+ 
+ //-----------------------------------------------------------------------------
+ // xpcom api
+ 
+ NS_IMPL_THREADSAFE_ISUPPORTS4(nsSocketTransport,
+                               nsISocketTransport,
+                               nsITransport,
+                               nsIDNSListener,

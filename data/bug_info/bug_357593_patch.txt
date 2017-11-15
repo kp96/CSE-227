@@ -1,0 +1,64 @@
+Index: security/manager/locales/en-US/chrome/pipnss/pipnss.properties
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/locales/en-US/chrome/pipnss/pipnss.properties,v
+retrieving revision 1.33
+diff -u -1 -0 -d -p -r1.33 pipnss.properties
+--- security/manager/locales/en-US/chrome/pipnss/pipnss.properties	4 Apr 2008 09:11:41 -0000	1.33
++++ security/manager/locales/en-US/chrome/pipnss/pipnss.properties	14 Apr 2008 10:45:59 -0000
+@@ -116,20 +116,22 @@ CertDumpATV=Attribute Type and Value
+ CertDumpAVACountry=C
+ CertDumpAVAState=ST
+ CertDumpAVALocality=L
+ CertDumpAVAOrg=O
+ CertDumpAVAOU=OU
+ CertDumpAVACN=CN
+ CertDumpUserID=UID
+ CertDumpPK9Email=E
+ CertDumpAVADN=DN
+ CertDumpAVADC=DC
++CertDumpSurname=Surname
++CertDumpGivenName=Given Name
+ CertDumpValidity=Validity
+ CertDumpNotBefore=Not Before
+ CertDumpNotAfter=Not After
+ CertDumpSPKI=Subject Public Key Info
+ CertDumpSPKIAlg=Subject Public Key Algorithm
+ CertDumpAlgID=Algorithm Identifier
+ CertDumpParams=Algorithm Parameters
+ CertDumpRSAEncr=PKCS #1 RSA Encryption
+ CertDumpRSATemplate=Modulus (%S bits):\n%S\nExponent (%S bits):\n%S
+ CertDumpIssuerUniqueID=Issuer Unique ID
+Index: security/manager/ssl/src/nsNSSCertHelper.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSCertHelper.cpp,v
+retrieving revision 1.33
+diff -u -1 -0 -d -p -r1.33 nsNSSCertHelper.cpp
+--- security/manager/ssl/src/nsNSSCertHelper.cpp	14 Dec 2007 17:39:30 -0000	1.33
++++ security/manager/ssl/src/nsNSSCertHelper.cpp	14 Apr 2008 10:46:01 -0000
+@@ -325,20 +325,26 @@ GetOIDText(SECItem *oid, nsINSSComponent
+     break;
+   case SEC_OID_AVA_DN_QUALIFIER:
+     bundlekey = "CertDumpAVADN";
+     break;
+   case SEC_OID_AVA_DC:
+     bundlekey = "CertDumpAVADC";
+     break;
+   case SEC_OID_AVA_STATE_OR_PROVINCE:
+     bundlekey = "CertDumpAVAState";
+     break;
++  case SEC_OID_AVA_SURNAME:
++    bundlekey = "CertDumpSurname";
++    break;
++  case SEC_OID_AVA_GIVEN_NAME:
++    bundlekey = "CertDumpGivenName";
++    break;
+   case SEC_OID_X509_SUBJECT_DIRECTORY_ATTR:
+     bundlekey = "CertDumpSubjectDirectoryAttr";
+     break;
+   case SEC_OID_X509_SUBJECT_KEY_ID:
+     bundlekey = "CertDumpSubjectKeyID";
+     break;
+   case SEC_OID_X509_KEY_USAGE:
+     bundlekey = "CertDumpKeyUsage";
+     break;
+   case SEC_OID_X509_SUBJECT_ALT_NAME:

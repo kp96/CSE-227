@@ -1,0 +1,174 @@
+# HG changeset patch
+# User Gavin Sharp <gavin@gavinsharp.com>
+# Date 1331751347 25200
+# Node ID 909bcb35a37909659a4087935890a7a565967028
+# Parent  8435929c680adb5b5d061956e15b8be817655d33
+Bug 732413: make DISALLOW_INHERIT_PRINCIPAL flag passed to checkLoadURI effective even when the source principal is the system principal
+
+diff --git a/caps/src/nsScriptSecurityManager.cpp b/caps/src/nsScriptSecurityManager.cpp
+--- a/caps/src/nsScriptSecurityManager.cpp
++++ b/caps/src/nsScriptSecurityManager.cpp
+@@ -1395,47 +1395,47 @@ nsScriptSecurityManager::CheckLoadURIWit
+     NS_ENSURE_FALSE(aFlags & ~(nsIScriptSecurityManager::LOAD_IS_AUTOMATIC_DOCUMENT_REPLACEMENT |
+                                nsIScriptSecurityManager::ALLOW_CHROME |
+                                nsIScriptSecurityManager::DISALLOW_SCRIPT |
+                                nsIScriptSecurityManager::DISALLOW_INHERIT_PRINCIPAL),
+                     NS_ERROR_UNEXPECTED);
+     NS_ENSURE_ARG_POINTER(aPrincipal);
+     NS_ENSURE_ARG_POINTER(aTargetURI);
+ 
++    // If DISALLOW_INHERIT_PRINCIPAL is set, we prevent loading of URIs which
++    // would do such inheriting.  That would be URIs that do not have their own
++    // security context.
++    if (aFlags & nsIScriptSecurityManager::DISALLOW_INHERIT_PRINCIPAL) {
++        nsresult rv =
++            DenyAccessIfURIHasFlags(aTargetURI,
++                                    nsIProtocolHandler::URI_INHERITS_SECURITY_CONTEXT);
++        NS_ENSURE_SUCCESS(rv, rv);
++    }
++
+     if (aPrincipal == mSystemPrincipal) {
+         // Allow access
+         return NS_OK;
+     }
+-    
++
+     nsCOMPtr<nsIURI> sourceURI;
+     aPrincipal->GetURI(getter_AddRefs(sourceURI));
+     if (!sourceURI) {
+         NS_ERROR("Non-system principals passed to CheckLoadURIWithPrincipal "
+                  "must have a URI!");
+         return NS_ERROR_UNEXPECTED;
+     }
+     
+     // Automatic loads are not allowed from certain protocols.
+     if (aFlags & nsIScriptSecurityManager::LOAD_IS_AUTOMATIC_DOCUMENT_REPLACEMENT) {
+         nsresult rv =
+             DenyAccessIfURIHasFlags(sourceURI,
+                                     nsIProtocolHandler::URI_FORBIDS_AUTOMATIC_DOCUMENT_REPLACEMENT);
+         NS_ENSURE_SUCCESS(rv, rv);
+     }
+ 
+-    // If DISALLOW_INHERIT_PRINCIPAL is set, we prevent loading of URIs which
+-    // would do such inheriting.  That would be URIs that do not have their own
+-    // security context.
+-    if (aFlags & nsIScriptSecurityManager::DISALLOW_INHERIT_PRINCIPAL) {
+-        nsresult rv =
+-            DenyAccessIfURIHasFlags(aTargetURI,
+-                                    nsIProtocolHandler::URI_INHERITS_SECURITY_CONTEXT);
+-        NS_ENSURE_SUCCESS(rv, rv);
+-    }
+-
+     // If either URI is a nested URI, get the base URI
+     nsCOMPtr<nsIURI> sourceBaseURI = NS_GetInnermostURI(sourceURI);
+     nsCOMPtr<nsIURI> targetBaseURI = NS_GetInnermostURI(aTargetURI);
+ 
+     //-- get the target scheme
+     nsCAutoString targetScheme;
+     nsresult rv = targetBaseURI->GetScheme(targetScheme);
+     if (NS_FAILED(rv)) return rv;
+diff --git a/caps/tests/mochitest/Makefile.in b/caps/tests/mochitest/Makefile.in
+--- a/caps/tests/mochitest/Makefile.in
++++ b/caps/tests/mochitest/Makefile.in
+@@ -43,18 +43,19 @@ VPATH		= @srcdir@
+ relativesrcdir  = caps/tests/mochitest
+ 
+ include $(DEPTH)/config/autoconf.mk
+ include $(topsrcdir)/config/rules.mk
+ 
+ _TEST_FILES = 	test_bug423375.html \
+                 test_bug246699.html \
+                 test_bug292789.html \
+-		test_bug470804.html \
+-		$(NULL)
++                test_bug470804.html \
++                test_disallowInheritPrincipal.html \
++                $(NULL)
+ 
+ test_bug292789.html : % : %.in
+ 	$(PYTHON) $(topsrcdir)/config/Preprocessor.py \
+ 	     $(AUTOMATION_PPARGS) $(DEFINES) $(ACDEFINES) $< > $@
+ 
+ GARBAGE += test_bug292789.html
+ 
+ libs:: $(_TEST_FILES)
+diff --git a/caps/tests/mochitest/test_bug470804.html b/caps/tests/mochitest/test_disallowInheritPrincipal.html
+copy from caps/tests/mochitest/test_bug470804.html
+copy to caps/tests/mochitest/test_disallowInheritPrincipal.html
+--- a/caps/tests/mochitest/test_bug470804.html
++++ b/caps/tests/mochitest/test_disallowInheritPrincipal.html
+@@ -1,43 +1,61 @@
+ <!DOCTYPE HTML>
+ <html>
+ <!--
+-https://bugzilla.mozilla.org/show_bug.cgi?id=470804
++https://bugzilla.mozilla.org/show_bug.cgi?id=732413
+ -->
+ <head>
+-  <title>Test for Bug 470804</title>
++  <title>Test for Bug 732413</title>
+   <script type="application/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
+   <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css"/>
+ </head>
+ <body>
+-<a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id=470804">Mozilla Bug 470804</a>
++<a target="_blank" href="https://bugzilla.mozilla.org/show_bug.cgi?id=732413">Mozilla Bug 732413</a>
+ <p id="display"></p>
+ <div id="content" style="display: none">
+ 
+ </div>
+ <pre id="test">
+ <script type="application/javascript">
+ 
+-/** Test for Bug 470804
+-    Passing a null targetURL to checkLoadURIWithPrincipal shouldn't crash
++/** Test for Bug 732413
++    Passing DISALLOW_INHERIT_PRINCIPAL flag should be effective even if
++    aPrincipal is the system principal.
+  **/
+ 
+ netscape.security.PrivilegeManager.enablePrivilege('UniversalXPConnect');
+ const nsIScriptSecurityManager = Components.interfaces.nsIScriptSecurityManager;
+ var secMan = Components.classes["@mozilla.org/scriptsecuritymanager;1"]
+                        .getService(nsIScriptSecurityManager);
+-var principal = SpecialPowers.getNodePrincipal(document);
+-isnot(principal, undefined, "Should have a principal");
+-isnot(principal, null, "Should have a non-null principal");
+-is(secMan.isSystemPrincipal(principal), false,
+-   "Shouldn't have system principal here");
++var sysPrincipal = secMan.getSystemPrincipal();
++isnot(sysPrincipal, undefined, "Should have a principal");
++isnot(sysPrincipal, null, "Should have a non-null principal");
++is(secMan.isSystemPrincipal(sysPrincipal), true,
++   "Should have system principal here");
++
++
++var ioService = Components.classes["@mozilla.org/network/io-service;1"].
++                getService(Components.interfaces.nsIIOService);
++var inheritingURI = ioService.newURI("javascript:1+1", null, null);
++
++// First try a normal call to checkLoadURIWithPrincipal
+ try {
+-  secMan.checkLoadURIWithPrincipal(principal, null,
++  secMan.checkLoadURIWithPrincipal(sysPrincipal, inheritingURI,
+                                    nsIScriptSecurityManager.STANDARD);
++  ok(true, "checkLoadURI allowed the load");
+ } catch (e) {
+-  // throwing is fine, it's just crashing that's bad
++  ok(false, "checkLoadURI failed unexpectedly: " + e);
+ }
+-ok(true, "Survival", "We should get here without crashing");
++
++// Now call checkLoadURIWithPrincipal with DISALLOW_INHERIT_PRINCIPAL
++try {
++  secMan.checkLoadURIWithPrincipal(sysPrincipal, inheritingURI,
++                                   nsIScriptSecurityManager.DISALLOW_INHERIT_PRINCIPAL);
++  ok(false, "checkLoadURI allowed the load unexpectedly");
++} catch (e) {
++  ok(true, "checkLoadURI prevented load of principal-inheriting URI");
++}
++
+ </script>
+ </pre>
+ </body>
+ </html>

@@ -1,0 +1,277 @@
+diff --git a/security/manager/boot/src/nsSecureBrowserUIImpl.cpp b/security/manager/boot/src/nsSecureBrowserUIImpl.cpp
+--- a/security/manager/boot/src/nsSecureBrowserUIImpl.cpp
++++ b/security/manager/boot/src/nsSecureBrowserUIImpl.cpp
+@@ -474,21 +474,22 @@ void nsSecureBrowserUIImpl::ResetStateTr
+   mDocumentRequestsInProgress = 0;
+   if (mTransferringRequests.ops) {
+     PL_DHashTableFinish(&mTransferringRequests);
+     mTransferringRequests.ops = nsnull;
+   }
+   PL_DHashTableInit(&mTransferringRequests, &gMapOps, nsnull,
+                     sizeof(RequestHashEntry), 16);
+ }
+ 
+ nsresult
+-nsSecureBrowserUIImpl::EvaluateAndUpdateSecurityState(nsIRequest* aRequest, nsISupports *info)
++nsSecureBrowserUIImpl::EvaluateAndUpdateSecurityState(nsIRequest* aRequest, nsISupports *info,
++                                                      PRBool withNewLocation)
+ {
+   /* I explicitly ignore the camelCase variable naming style here,
+      I want to make it clear these are temp variables that relate to the 
+      member variables with the same suffix.*/
+ 
+   PRUint32 temp_NewToplevelSecurityState = nsIWebProgressListener::STATE_IS_INSECURE;
+   PRBool temp_NewToplevelIsEV = PR_FALSE;
+ 
+   PRBool updateStatus = PR_FALSE;
+   nsCOMPtr<nsISupports> temp_SSLStatus;
+@@ -538,21 +539,22 @@ nsSecureBrowserUIImpl::EvaluateAndUpdate
+     }
+     if (updateTooltip) {
+       mInfoTooltip = temp_InfoTooltip;
+     }
+     PR_LOG(gSecureDocLog, PR_LOG_DEBUG,
+            ("SecureUI:%p: remember securityInfo %p\n", this,
+             info));
+     mCurrentToplevelSecurityInfo = info;
+   }
+ 
+-  return UpdateSecurityState(aRequest);
++  return UpdateSecurityState(aRequest, withNewLocation, 
++                             updateStatus, updateTooltip);
+ }
+ 
+ void
+ nsSecureBrowserUIImpl::UpdateSubrequestMembers(nsISupports *securityInfo)
+ {
+   // For wyciwyg channels in subdocuments we only update our
+   // subrequest state members.
+   PRUint32 reqState = GetSecurityStateFromSecurityInfo(securityInfo);
+ 
+   // the code above this line should run without a lock
+@@ -1119,21 +1121,21 @@ nsSecureBrowserUIImpl::OnStateChange(nsI
+       {
+         mToplevelEventSink = temp_ToplevelEventSink;
+       }
+       --mDocumentRequestsInProgress;
+     }
+ 
+     if (allowSecurityStateChange && requestHasTransferedData) {
+       // Data has been transferred for the single toplevel
+       // request. Evaluate the security state.
+ 
+-      return EvaluateAndUpdateSecurityState(aRequest, securityInfo);
++      return EvaluateAndUpdateSecurityState(aRequest, securityInfo, PR_FALSE);
+     }
+     
+     return NS_OK;
+   }
+   
+   if (aProgressStateFlags & STATE_STOP
+       &&
+       aProgressStateFlags & STATE_IS_REQUEST)
+   {
+     if (!isSubDocumentRelevant)
+@@ -1157,52 +1159,62 @@ nsSecureBrowserUIImpl::OnStateChange(nsI
+       //
+       // We skip updating the security state in this case.
+ 
+       PRBool temp_NewToplevelSecurityStateKnown;
+       {
+         nsAutoMonitor lock(mMonitor);
+         temp_NewToplevelSecurityStateKnown = mNewToplevelSecurityStateKnown;
+       }
+ 
+       if (temp_NewToplevelSecurityStateKnown)
+-        return UpdateSecurityState(aRequest);
++        return UpdateSecurityState(aRequest, PR_FALSE, PR_FALSE, PR_FALSE);
+     }
+ 
+     return NS_OK;
+   }
+ 
+   return NS_OK;
+ }
+ 
+ // I'm keeping this as a separate function, in order to simplify the review
+ // for bug 412456. We should inline this in a follow up patch.
+ void nsSecureBrowserUIImpl::ObtainEventSink(nsIChannel *channel, 
+                                             nsCOMPtr<nsISecurityEventSink> &sink)
+ {
+   if (!sink)
+     NS_QueryNotificationCallbacks(channel, sink);
+ }
+ 
+-nsresult nsSecureBrowserUIImpl::UpdateSecurityState(nsIRequest* aRequest)
++nsresult nsSecureBrowserUIImpl::UpdateSecurityState(nsIRequest* aRequest, 
++                                                    PRBool withNewLocation, 
++                                                    PRBool withUpdateStatus, 
++                                                    PRBool withUpdateTooltip)
+ {
+   lockIconState warnSecurityState = lis_no_security;
+   PRBool showWarning = PR_FALSE;
++  nsresult rv = NS_OK;
+ 
+-  UpdateMyFlags(showWarning, warnSecurityState);
+-  return TellTheWorld(showWarning, warnSecurityState, aRequest);
++  PRBool flagsChanged = UpdateMyFlags(showWarning, warnSecurityState);
++
++  if (flagsChanged || withNewLocation || withUpdateStatus || withUpdateTooltip)
++    rv = TellTheWorld(showWarning, warnSecurityState, aRequest);
++
++  return rv;
+ }
+ 
+ // must not fail, by definition, only trivial assignments
+ // or string operations are allowed
+-void nsSecureBrowserUIImpl::UpdateMyFlags(PRBool &showWarning, lockIconState &warnSecurityState)
++// returns true if our overall state has changed and we must send out notifications
++PRBool nsSecureBrowserUIImpl::UpdateMyFlags(PRBool &showWarning, lockIconState &warnSecurityState)
+ {
+   nsAutoMonitor lock(mMonitor);
++  PRBool mustTellTheWorld = PR_FALSE;
+ 
+   lockIconState newSecurityState;
+ 
+   if (mNewToplevelSecurityState & STATE_IS_SECURE)
+   {
+     if (mNewToplevelSecurityState & STATE_SECURE_LOW
+         ||
+         mNewToplevelSecurityState & STATE_SECURE_MED)
+     {
+       if (mSubRequestsBrokenSecurity
+@@ -1248,22 +1260,22 @@ void nsSecureBrowserUIImpl::UpdateMyFlag
+     newSecurityState = lis_no_security;
+   }
+ 
+   PR_LOG(gSecureDocLog, PR_LOG_DEBUG,
+          ("SecureUI:%p: UpdateSecurityState:  old-new  %d - %d\n", this,
+          mNotifiedSecurityState, newSecurityState
+           ));
+ 
+   if (mNotifiedSecurityState != newSecurityState)
+   {
+-    // must show alert
+-    
++    mustTellTheWorld = PR_TRUE;
++
+     // we'll treat "broken" exactly like "insecure",
+     // i.e. we do not show alerts when switching between broken and insecure
+ 
+     /*
+       from                 to           shows alert
+     ------------------------------     ---------------
+ 
+     no or broken -> no or broken    => <NOTHING SHOWN>
+ 
+     no or broken -> mixed           => mixed alert
+@@ -1320,21 +1332,26 @@ void nsSecureBrowserUIImpl::UpdateMyFlag
+     
+     mNotifiedSecurityState = newSecurityState;
+ 
+     if (lis_no_security == newSecurityState)
+     {
+       mSSLStatus = nsnull;
+       mInfoTooltip.Truncate();
+     }
+   }
+ 
+-  mNotifiedToplevelIsEV = mNewToplevelIsEV;
++  if (mNotifiedToplevelIsEV != mNewToplevelIsEV) {
++    mustTellTheWorld = PR_TRUE;
++    mNotifiedToplevelIsEV = mNewToplevelIsEV;
++  }
++
++  return mustTellTheWorld;
+ }
+ 
+ nsresult nsSecureBrowserUIImpl::TellTheWorld(PRBool showWarning, 
+                                              lockIconState warnSecurityState, 
+                                              nsIRequest* aRequest)
+ {
+   nsCOMPtr<nsISecurityEventSink> temp_ToplevelEventSink;
+   lockIconState temp_NotifiedSecurityState;
+   PRBool temp_NotifiedToplevelIsEV;
+ 
+@@ -1450,21 +1467,21 @@ nsSecureBrowserUIImpl::OnLocationChange(
+   nsCOMPtr<nsIDOMWindow> windowForProgress;
+   aWebProgress->GetDOMWindow(getter_AddRefs(windowForProgress));
+ 
+   nsCOMPtr<nsISupports> securityInfo;
+   nsCOMPtr<nsIChannel> channel(do_QueryInterface(aRequest));
+   if (channel)
+     channel->GetSecurityInfo(getter_AddRefs(securityInfo));
+ 
+   if (windowForProgress.get() == window.get()) {
+     // For toplevel channels, update the security state right away.
+-    return EvaluateAndUpdateSecurityState(aRequest, securityInfo);
++    return EvaluateAndUpdateSecurityState(aRequest, securityInfo, PR_TRUE);
+   }
+ 
+   // For channels in subdocuments we only update our subrequest state members.
+   UpdateSubrequestMembers(securityInfo);
+ 
+   // Care for the following scenario:
+ 
+   // A new toplevel document load might have already started, but the security
+   // state of the new toplevel document might not yet be known.
+   // 
+@@ -1474,21 +1491,21 @@ nsSecureBrowserUIImpl::OnLocationChange(
+   //
+   // We skip updating the security state in this case.
+ 
+   PRBool temp_NewToplevelSecurityStateKnown;
+   {
+     nsAutoMonitor lock(mMonitor);
+     temp_NewToplevelSecurityStateKnown = mNewToplevelSecurityStateKnown;
+   }
+ 
+   if (temp_NewToplevelSecurityStateKnown)
+-    return UpdateSecurityState(aRequest);
++    return UpdateSecurityState(aRequest, PR_TRUE, PR_FALSE, PR_FALSE);
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsSecureBrowserUIImpl::OnStatusChange(nsIWebProgress* aWebProgress,
+                                       nsIRequest* aRequest,
+                                       nsresult aStatus,
+                                       const PRUnichar* aMessage)
+ {
+diff --git a/security/manager/boot/src/nsSecureBrowserUIImpl.h b/security/manager/boot/src/nsSecureBrowserUIImpl.h
+--- a/security/manager/boot/src/nsSecureBrowserUIImpl.h
++++ b/security/manager/boot/src/nsSecureBrowserUIImpl.h
+@@ -120,27 +120,29 @@ protected:
+   PRPackedBool mIsViewSource;
+ 
+   nsXPIDLString mInfoTooltip;
+   PRInt32 mDocumentRequestsInProgress;
+   PRInt32 mSubRequestsHighSecurity;
+   PRInt32 mSubRequestsLowSecurity;
+   PRInt32 mSubRequestsBrokenSecurity;
+   PRInt32 mSubRequestsNoSecurity;
+ 
+   static nsresult MapInternalToExternalState(PRUint32* aState, lockIconState lock, PRBool ev);
+-  nsresult UpdateSecurityState(nsIRequest* aRequest);
+-  void UpdateMyFlags(PRBool &showWarning, lockIconState &warnSecurityState);
++  nsresult UpdateSecurityState(nsIRequest* aRequest, PRBool withNewLocation,
++                               PRBool withUpdateStatus, PRBool withUpdateTooltip);
++  PRBool UpdateMyFlags(PRBool &showWarning, lockIconState &warnSecurityState);
+   nsresult TellTheWorld(PRBool showWarning, 
+                         lockIconState warnSecurityState, 
+                         nsIRequest* aRequest);
+ 
+-  nsresult EvaluateAndUpdateSecurityState(nsIRequest* aRequest, nsISupports *info);
++  nsresult EvaluateAndUpdateSecurityState(nsIRequest* aRequest, nsISupports *info,
++                                          PRBool withNewLocation);
+   void UpdateSubrequestMembers(nsISupports *securityInfo);
+ 
+   void ObtainEventSink(nsIChannel *channel, 
+                        nsCOMPtr<nsISecurityEventSink> &sink);
+ 
+   nsCOMPtr<nsISupports> mSSLStatus;
+   nsCOMPtr<nsISupports> mCurrentToplevelSecurityInfo;
+ 
+   void GetBundleString(const PRUnichar* name, nsAString &outString);
+   

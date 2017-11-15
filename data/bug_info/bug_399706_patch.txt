@@ -1,0 +1,99 @@
+Index: mozilla/security/manager/ssl/src/nsNSSCertificate.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSCertificate.cpp,v
+retrieving revision 1.130
+diff -u -1 -0 -p -r1.130 nsNSSCertificate.cpp
+--- mozilla/security/manager/ssl/src/nsNSSCertificate.cpp	13 Oct 2007 07:46:12 -0000	1.130
++++ mozilla/security/manager/ssl/src/nsNSSCertificate.cpp	15 Oct 2007 20:48:03 -0000
+@@ -435,57 +435,61 @@ nsNSSCertificate::FormatUIStrings(const 
+     if (NS_SUCCEEDED(GetKeyUsagesString(mCert, nssComponent, temp1)) && !temp1.IsEmpty()) {
+       details.AppendLiteral("  ");
+       if (NS_SUCCEEDED(nssComponent->GetPIPNSSBundleString("CertDumpKeyUsage", info))) {
+         details.Append(info);
+         details.AppendLiteral(": ");
+       }
+       details.Append(temp1);
+       details.Append(PRUnichar('\n'));
+     }
+ 
+-    PRUint32 num;
+-    PRUnichar **emailAddr = NULL;
+-    if (NS_SUCCEEDED(GetEmailAddresses(&num, &emailAddr)) && num > 0) {
+-      details.AppendLiteral("  ");
+-      if (NS_SUCCEEDED(nssComponent->GetPIPNSSBundleString("CertInfoEmail", info))) {
+-        details.Append(info);
+-        details.AppendLiteral(": ");
++    nsAutoString firstEmail;
++    const char *aWalkAddr;
++    for (aWalkAddr = CERT_GetFirstEmailAddress(mCert)
++         ;
++         aWalkAddr
++         ;
++         aWalkAddr = CERT_GetNextEmailAddress(mCert, aWalkAddr))
++    {
++      NS_ConvertUTF8toUTF16 email(aWalkAddr);
++      if (email.IsEmpty())
++        continue;
++
++      if (firstEmail.IsEmpty()) {
++        /*
++         * If the first email address from the subject DN is also present
++         * in the subjectAltName extension, GetEmailAddresses() will return
++         * it twice (as received from NSS). Remember the first address so that
++         * we can filter out duplicates later on.
++         */
++        firstEmail = email;
++
++        details.AppendLiteral("  ");
++        if (NS_SUCCEEDED(nssComponent->GetPIPNSSBundleString("CertInfoEmail", info))) {
++          details.Append(info);
++          details.AppendLiteral(": ");
++        }
++        details.Append(email);
+       }
+-      details.Append(*emailAddr);
+-
+-      /*
+-       * If the first email address from the subject DN is also present
+-       * in the subjectAltName extension, GetEmailAddresses() will return
+-       * it twice (as received from NSS). Remember the first address so that
+-       * we can filter out duplicates later on.
+-       */
+-      PRUnichar *firstEmail = *emailAddr;
+-      emailAddr++;
+-      num--;
+-
+-      /* append remaining addresses */
+-      while (num > 0) {
+-        if (!nsDependentString(firstEmail).Equals(nsDependentString(*emailAddr))) {
++      else {
++        // Append current address if it's different from the first one.
++        if (!firstEmail.Equals(email)) {
+           details.AppendLiteral(", ");
+-          details.Append(*emailAddr);
++          details.Append(email);
+         }
+-        nsMemory::Free(*emailAddr);
+-        *emailAddr = nsnull;
+-        emailAddr++;
+-        num--;
+       }
++    }
+ 
++    if (!firstEmail.IsEmpty()) {
++      // We got at least one email address, so we want a newline
+       details.Append(PRUnichar('\n'));
+-      nsMemory::Free(firstEmail);
+     }
+-    nsMemory::Free(emailAddr);
+-    emailAddr = nsnull;
+ 
+     if (NS_SUCCEEDED(nssComponent->GetPIPNSSBundleString("CertInfoIssuedBy", info))) {
+       details.Append(info);
+       details.Append(PRUnichar(' '));
+ 
+       if (NS_SUCCEEDED(x509Proxy->GetIssuerName(temp1)) && !temp1.IsEmpty()) {
+         details.Append(temp1);
+       }
+ 
+       details.Append(PRUnichar('\n'));

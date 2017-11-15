@@ -1,0 +1,33 @@
+Index: system-headers
+===================================================================
+RCS file: /cvs/mozilla/config/system-headers,v
+retrieving revision 3.7
+diff -p -u -1 -2 -r3.7 system-headers
+--- system-headers	25 Aug 2006 14:02:07 -0000	3.7
++++ system-headers	29 Oct 2006 02:05:27 -0000
+@@ -492,24 +492,25 @@ pcfs/pc_dir.h
+ Pgenerr.h
+ PGenErr.h
+ Ph.h
+ photon/Pg.h
+ photon/PhProto.h
+ photon/PhRender.h
+ photon/PpProto.h
+ photon/PtProgress.h
+ photon/PtServer.h
+ photon/PtWebClient.h
+ photon/PxImage.h
+ pk11func.h
++pk11pub.h
+ pkcs11t.h
+ PLStringFuncs.h
+ PMApplication.h
+ pmddim.h
+ poll.h
+ Polygon.h
+ portable.h
+ Power.h
+ PP_ClassHeaders.cp
+ PP_Constants.h
+ PPCToolbox.h
+ PP_DebugHeaders.cp

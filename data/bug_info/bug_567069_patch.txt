@@ -1,0 +1,374 @@
+Fix bug 567069.
+
+diff --git a/js/src/jsdbgapi.cpp b/js/src/jsdbgapi.cpp
+--- a/js/src/jsdbgapi.cpp
++++ b/js/src/jsdbgapi.cpp
+@@ -1,10 +1,10 @@
+ /* -*- Mode: C++; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+- * vim: set ts=8 sw=4 et tw=78:
++ * vim: set ts=8 sw=4 et tw=99:
+  *
+  * ***** BEGIN LICENSE BLOCK *****
+  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
+  *
+  * The contents of this file are subject to the Mozilla Public License Version
+  * 1.1 (the "License"); you may not use this file except in compliance with
+  * the License. You may obtain a copy of the License at
+  * http://www.mozilla.org/MPL/
+@@ -1532,16 +1532,89 @@ JS_PutPropertyDescArray(JSContext *cx, J
+         if (pd[i].flags & JSPD_ALIAS)
+             js_RemoveRoot(cx->runtime, &pd[i].alias);
+     }
+     cx->free(pd);
+ }
+ 
+ /************************************************************************/
+ 
++static bool
++SetupFakeFrame(JSContext *cx, ExecuteFrameGuard &frame, JSFrameRegs &regs, JSObject *scopeobj)
++{
++    JSFunction *fun = GET_FUNCTION_PRIVATE(cx, scopeobj);
++    JS_ASSERT(fun->minArgs() == 0 && !fun->isInterpreted() && fun->u.n.extra == 0);
++
++    const uintN vplen = 2;
++    const uintN nfixed = 0;
++    if (!cx->stack().getExecuteFrame(cx, js_GetTopStackFrame(cx), vplen, nfixed, frame))
++        return false;
++
++    jsval *vp = frame.getvp();
++    PodZero(vp, vplen);
++    vp[0] = OBJECT_TO_JSVAL(scopeobj);
++
++    JSStackFrame *fp = frame.getFrame();
++    PodZero(fp);
++    fp->fun = fun;
++    fp->argv = vp + 2;
++    fp->scopeChain = scopeobj->getGlobal();
++
++    regs.pc = NULL;
++    regs.sp = fp->slots();
++
++    cx->stack().pushExecuteFrame(cx, frame, regs, NULL);
++    return true;
++}
++
++JS_FRIEND_API(JSBool)
++js_SafeGetPropertyById(JSContext *cx, JSObject *obj, JSObject *scopeobj, jsid id, jsval *vp)
++{
++    ExecuteFrameGuard frame;
++    JSFrameRegs regs;
++
++    if (!SetupFakeFrame(cx, frame, regs, scopeobj))
++        return false;
++
++    bool ok = JS_GetPropertyById(cx, obj, id, vp);
++    frame.getFrame()->putActivationObjects(cx);
++    return ok;
++}
++
++JS_FRIEND_API(JSBool)
++js_SafeSetPropertyById(JSContext *cx, JSObject *obj, JSObject *scopeobj, jsid id, jsval *vp)
++{
++    ExecuteFrameGuard frame;
++    JSFrameRegs regs;
++
++    if (!SetupFakeFrame(cx, frame, regs, scopeobj))
++        return false;
++
++    bool ok = JS_SetPropertyById(cx, obj, id, vp);
++    frame.getFrame()->putActivationObjects(cx);
++    return ok;
++}
++
++JS_FRIEND_API(JSBool)
++js_SafeCallFunctionValue(JSContext *cx, JSObject *obj, JSObject *scopeobj, jsval funval,
++                         uintN argc, jsval *argv, jsval *rval)
++{
++    ExecuteFrameGuard frame;
++    JSFrameRegs regs;
++
++    if (!SetupFakeFrame(cx, frame, regs, scopeobj))
++        return false;
++
++    bool ok = JS_CallFunctionValue(cx, obj, funval, argc, argv, rval);
++    frame.getFrame()->putActivationObjects(cx);
++    return ok;
++}
++
++/************************************************************************/
++
+ JS_PUBLIC_API(JSBool)
+ JS_SetDebuggerHandler(JSRuntime *rt, JSDebuggerHandler handler, void *closure)
+ {
+     rt->globalDebugHooks.debuggerHandler = handler;
+     rt->globalDebugHooks.debuggerHandlerData = closure;
+     return JS_TRUE;
+ }
+ 
+diff --git a/js/src/jsdbgapi.h b/js/src/jsdbgapi.h
+--- a/js/src/jsdbgapi.h
++++ b/js/src/jsdbgapi.h
+@@ -1,10 +1,10 @@
+ /* -*- Mode: C; tab-width: 8; indent-tabs-mode: nil; c-basic-offset: 4 -*-
+- * vim: set ts=8 sw=4 et tw=78:
++ * vim: set ts=8 sw=4 et tw=99:
+  *
+  * ***** BEGIN LICENSE BLOCK *****
+  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
+  *
+  * The contents of this file are subject to the Mozilla Public License Version
+  * 1.1 (the "License"); you may not use this file except in compliance with
+  * the License. You may obtain a copy of the License at
+  * http://www.mozilla.org/MPL/
+@@ -332,16 +332,28 @@ JS_GetPropertyDesc(JSContext *cx, JSObje
+ extern JS_PUBLIC_API(JSBool)
+ JS_GetPropertyDescArray(JSContext *cx, JSObject *obj, JSPropertyDescArray *pda);
+ 
+ extern JS_PUBLIC_API(void)
+ JS_PutPropertyDescArray(JSContext *cx, JSPropertyDescArray *pda);
+ 
+ /************************************************************************/
+ 
++extern JS_FRIEND_API(JSBool)
++js_SafeGetPropertyById(JSContext *cx, JSObject *obj, JSObject *scopeobj, jsid id, jsval *vp);
++
++extern JS_FRIEND_API(JSBool)
++js_SafeSetPropertyById(JSContext *cx, JSObject *obj, JSObject *scopeobj, jsid id, jsval *vp);
++
++extern JS_FRIEND_API(JSBool)
++js_SafeCallFunctionValue(JSContext *cx, JSObject *obj, JSObject *scopeobj, jsval funval,
++                         uintN argc, jsval *argv, jsval *rval);
++
++/************************************************************************/
++
+ extern JS_PUBLIC_API(JSBool)
+ JS_SetDebuggerHandler(JSRuntime *rt, JSDebuggerHandler hook, void *closure);
+ 
+ extern JS_PUBLIC_API(JSBool)
+ JS_SetSourceHandler(JSRuntime *rt, JSSourceHandler handler, void *closure);
+ 
+ extern JS_PUBLIC_API(JSBool)
+ JS_SetExecuteHook(JSRuntime *rt, JSInterpreterHook hook, void *closure);
+diff --git a/js/src/xpconnect/src/XPCSafeJSObjectWrapper.cpp b/js/src/xpconnect/src/XPCSafeJSObjectWrapper.cpp
+--- a/js/src/xpconnect/src/XPCSafeJSObjectWrapper.cpp
++++ b/js/src/xpconnect/src/XPCSafeJSObjectWrapper.cpp
+@@ -188,16 +188,18 @@ CanCallerAccess(JSContext *cx, JSObject 
+ }
+ 
+ // Reserved slot indexes on safe wrappers.
+ 
+ // Slot for holding on to the principal to use if a principal other
+ // than that of the unsafe object is desired for this wrapper
+ // (nsIPrincipal, strong reference).
+ static const PRUint32 sPrincipalSlot = sNumSlots;
++static const PRUint32 sScopeFunSlot = sNumSlots + 1;
++static const PRUint32 sSJOWSlots = sNumSlots + 2;
+ 
+ // Returns a weak reference.
+ static nsIPrincipal *
+ FindObjectPrincipals(JSContext *cx, JSObject *safeObj, JSObject *innerObj)
+ {
+   // Check if we have a cached principal first.
+   jsval v;
+   if (!JS_GetReservedSlot(cx, safeObj, sPrincipalSlot, &v)) {
+@@ -247,17 +249,17 @@ namespace XPCSafeJSObjectWrapper {
+ 
+ // JS class for XPCSafeJSObjectWrapper (and this doubles as the
+ // constructor for XPCSafeJSObjectWrapper for the moment too...)
+ 
+ JSExtendedClass SJOWClass = {
+   // JSClass (JSExtendedClass.base) initialization
+   { "XPCSafeJSObjectWrapper",
+     JSCLASS_NEW_RESOLVE | JSCLASS_IS_EXTENDED |
+-    JSCLASS_HAS_RESERVED_SLOTS(XPCWrapper::sNumSlots + 1),
++    JSCLASS_HAS_RESERVED_SLOTS(sSJOWSlots),
+     XPC_SJOW_AddProperty, XPC_SJOW_DelProperty,
+     XPC_SJOW_GetProperty, XPC_SJOW_SetProperty,
+     XPC_SJOW_Enumerate,   (JSResolveOp)XPC_SJOW_NewResolve,
+     XPC_SJOW_Convert,     XPC_SJOW_Finalize,
+     nsnull,               XPC_SJOW_CheckAccess,
+     XPC_SJOW_Call,        XPC_SJOW_Create,
+     nsnull,               nsnull,
+     nsnull,               nsnull
+@@ -382,16 +384,50 @@ GetUnsafeObject(JSContext *cx, JSObject 
+     return nsnull;
+   }
+ 
+   return JSVAL_IS_OBJECT(v) ? JSVAL_TO_OBJECT(v) : nsnull;
+ }
+ 
+ } // namespace XPCSafeJSObjectWrapper
+ 
++static JSBool
++DummyNative(JSContext *cx, JSObject *obj, uintN argc, jsval *argv, jsval *rval)
++{
++  return JS_TRUE;
++}
++
++static JSObject *
++GetScopeFunction(JSContext *cx, JSObject *outerObj)
++{
++  jsval v;
++  if (!JS_GetReservedSlot(cx, outerObj, sScopeFunSlot, &v)) {
++    return nsnull;
++  }
++
++  if (JSVAL_IS_OBJECT(v)) {
++    return JSVAL_TO_OBJECT(v);
++  }
++
++  JSObject *unsafeObj = GetUnsafeObject(cx, outerObj);
++  JSFunction *fun = JS_NewFunction(cx, DummyNative, 0, 0,
++                                   JS_GetGlobalForObject(cx, unsafeObj),
++                                   "SJOWContentBoundary");
++  if (!fun) {
++    return nsnull;
++  }
++
++  JSObject *funobj = JS_GetFunctionObject(fun);
++  if (!JS_SetReservedSlot(cx, outerObj, sScopeFunSlot, OBJECT_TO_JSVAL(funobj))) {
++    return nsnull;
++  }
++
++  return funobj;
++}
++
+ // Wrap a JS value in a safe wrapper of a function wrapper if
+ // needed. Note that rval must point to something rooted when calling
+ // this function.
+ static JSBool
+ WrapJSValue(JSContext *cx, JSObject *obj, jsval val, jsval *rval)
+ {
+   JSBool ok = JS_TRUE;
+ 
+@@ -596,16 +632,21 @@ XPC_SJOW_GetOrSetProperty(JSContext *cx,
+   }
+ 
+   // Check that the caller can access the unsafe object.
+   if (!CanCallerAccess(cx, obj, unsafeObj)) {
+     // CanCallerAccess() already threw for us.
+     return JS_FALSE;
+   }
+ 
++  JSObject *scopeFun = GetScopeFunction(cx, obj);
++  if (!scopeFun) {
++    return JS_FALSE;
++  }
++
+   {
+     SafeCallGuard guard(cx, FindObjectPrincipals(cx, obj, unsafeObj));
+     if (!guard.ready()) {
+       return JS_FALSE;
+     }
+ 
+     jsid interned_id;
+     if (!JS_ValueToId(cx, id, &interned_id)) {
+@@ -615,18 +656,18 @@ XPC_SJOW_GetOrSetProperty(JSContext *cx,
+     if (aIsSet &&
+         !JSVAL_IS_PRIMITIVE(*vp) &&
+         !RewrapObject(cx, JS_GetGlobalForObject(cx, unsafeObj),
+                       JSVAL_TO_OBJECT(*vp), UNKNOWN, vp)) {
+       return JS_FALSE;
+     }
+ 
+     JSBool ok = aIsSet
+-                ? JS_SetPropertyById(cx, unsafeObj, interned_id, vp)
+-                : JS_GetPropertyById(cx, unsafeObj, interned_id, vp);
++                ? js_SafeSetPropertyById(cx, unsafeObj, scopeFun, interned_id, vp)
++                : js_SafeGetPropertyById(cx, unsafeObj, scopeFun, interned_id, vp);
+     if (!ok) {
+       return JS_FALSE;
+     }
+   }
+ 
+   return WrapJSValue(cx, obj, *vp, vp);
+ }
+ 
+@@ -815,16 +856,21 @@ XPC_SJOW_Call(JSContext *cx, JSObject *o
+   // Check that the caller can access the unsafe object on which the
+   // call is being made, and the actual function we're about to call.
+   if (!CanCallerAccess(cx, safeObj, unsafeObj) ||
+       !CanCallerAccess(cx, nsnull, funToCall)) {
+     // CanCallerAccess() already threw for us.
+     return JS_FALSE;
+   }
+ 
++  JSObject *scopeFun = GetScopeFunction(cx, safeObj);
++  if (!scopeFun) {
++    return JS_FALSE;
++  }
++
+   {
+     SafeCallGuard guard(cx, FindObjectPrincipals(cx, safeObj, funToCall));
+ 
+     JSObject *scope = JS_GetGlobalForObject(cx, funToCall);
+     for (uintN i = 0; i < argc; ++i) {
+       // NB: Passing NONE for a hint here.
+       if (!JSVAL_IS_PRIMITIVE(argv[i]) &&
+           !RewrapObject(cx, scope, JSVAL_TO_OBJECT(argv[i]), NONE, &argv[i])) {
+@@ -832,18 +878,19 @@ XPC_SJOW_Call(JSContext *cx, JSObject *o
+       }
+     }
+ 
+     jsval v;
+     if (!RewrapObject(cx, scope, callThisObj, NONE, &v)) {
+       return JS_FALSE;
+     }
+ 
+-    if (!JS_CallFunctionValue(cx, JSVAL_TO_OBJECT(v), OBJECT_TO_JSVAL(funToCall),
+-                              argc, argv, rval)) {
++    if (!js_SafeCallFunctionValue(cx, JSVAL_TO_OBJECT(v), scopeFun,
++                                  OBJECT_TO_JSVAL(funToCall), argc, argv,
++                                  rval)) {
+       return JS_FALSE;
+     }
+   }
+ 
+   return WrapJSValue(cx, safeObj, *rval, rval);
+ }
+ 
+ static JSBool
+@@ -892,16 +939,21 @@ XPC_SJOW_Create(JSContext *cx, JSObject 
+   JSObject *unsafeObj = GetUnsafeObject(cx, callee);
+ 
+   // Check that the caller can access the unsafe object.
+   if (!CanCallerAccess(cx, callee, unsafeObj)) {
+     // CanCallerAccess() already threw for us.
+     return JS_FALSE;
+   }
+ 
++  JSObject *scopeFun = GetScopeFunction(cx, callee);
++  if (!scopeFun) {
++    return JS_FALSE;
++  }
++
+   {
+     SafeCallGuard guard(cx, FindObjectPrincipals(cx, callee, unsafeObj));
+     if (!guard.ready()) {
+       return JS_FALSE;
+     }
+ 
+     JSObject *scope = JS_GetGlobalForObject(cx, unsafeObj);
+     for (uintN i = 0; i < argc; ++i) {
+@@ -912,18 +964,19 @@ XPC_SJOW_Create(JSContext *cx, JSObject 
+       }
+     }
+ 
+     jsval v;
+     if (!RewrapObject(cx, scope, obj, NONE, &v)) {
+       return JS_FALSE;
+     }
+ 
+-    if (!JS_CallFunctionValue(cx, JSVAL_TO_OBJECT(v), OBJECT_TO_JSVAL(unsafeObj),
+-                              argc, argv, rval)) {
++    if (!js_SafeCallFunctionValue(cx, JSVAL_TO_OBJECT(v), scopeFun,
++                                  OBJECT_TO_JSVAL(unsafeObj), argc, argv,
++                                  rval)) {
+       return JS_FALSE;
+     }
+   }
+ 
+   return WrapJSValue(cx, callee, *rval, rval);
+ }
+ 
+ static JSBool

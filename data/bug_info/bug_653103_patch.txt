@@ -1,0 +1,66 @@
+diff -r 23be2a8ad627 mail/base/content/mailWindowOverlay.js
+--- a/mail/base/content/mailWindowOverlay.js	Mon May 02 15:50:56 2011 +0100
++++ b/mail/base/content/mailWindowOverlay.js	Wed May 04 09:26:23 2011 -0500
+@@ -2763,14 +2763,23 @@
+ {
+   // This property should really be called skipPhishingWarning or something
+   // like that, but it's too late to change that now.
+   // This property is used to supress the phishing bar for the message.
+   setMsgHdrPropertyAndReload("notAPhishMessage", 1);
+ }
+ 
++/**
++ *  Allow disabling the scam feature for all messages until lists are in place.
++ */
++function DisablePhishingWarning()
++{
++  Application.prefs.setValue("mail.phishing.detection.enabled", false);
++  ReloadMessage();
++}
++
+ function setMsgHdrPropertyAndReload(aProperty, aValue)
+ {
+   // we want to get the msg hdr for the currently selected message
+   // change the appropiate property on it then reload the message
+   var msgHdr = gMessageDisplay.displayedMessage;
+   if (msgHdr)
+   {
+diff -r 23be2a8ad627 mail/base/content/mailWindowOverlay.xul
+--- a/mail/base/content/mailWindowOverlay.xul	Mon May 02 15:50:56 2011 +0100
++++ b/mail/base/content/mailWindowOverlay.xul	Wed May 04 09:26:23 2011 -0500
+@@ -1936,14 +1936,16 @@
+ <deck id="msgNotificationBar" selectedIndex="0" collapsed="true">
+   <hbox id="msgNotificationNoStatus"/>
+ 
+   <hbox id="phishingBar" class="msgNotificationBar" align="center">
+     <image id="phishingBarImage"/>
+     <vbox flex="1">
+       <description flex="1" class="msgNotificationBarText">&phishingBarMessage2.label;</description>
++      <label id="disablePhishingWarning" class="msgNotificaton-smallText text-link"
++             value="&disablePhishingWarning1.label;" onclick="DisablePhishingWarning();"/>
+       <label id="reportPhishingError" value="&reportPhishingError1.label;" class="msgNotificaton-smallText text-link" collapsed="true"/>
+     </vbox>
+     <button label="&removePhishingBarButton1.label;" oncommand="IgnorePhishingWarning();"/>
+   </hbox>
+ 
+   <hbox id="junkBar" class="msgNotificationBar" align="center">
+     <image id="junkBarImage"/>
+diff -r 23be2a8ad627 mail/locales/en-US/chrome/messenger/messenger.dtd
+--- a/mail/locales/en-US/chrome/messenger/messenger.dtd	Mon May 02 15:50:56 2011 +0100
++++ b/mail/locales/en-US/chrome/messenger/messenger.dtd	Wed May 04 09:26:23 2011 -0500
+@@ -754,14 +754,15 @@
+ <!-- Remote Content Bar -->
+ <!ENTITY remoteContentMessage2.label "To protect your privacy, &brandShortName; has blocked remote content in this message.">
+ <!ENTITY loadRemoteContentButton3.label "Show Remote Content">
+ 
+ <!-- Phishing Bar -->
+ <!ENTITY phishingBarMessage2.label "This message may be a scam.">
+ <!ENTITY removePhishingBarButton1.label "Ignore Warning">
++<!ENTITY disablePhishingWarning1.label "Disable scam detection for all messages">
+ <!ENTITY reportPhishingError1.label "This message doesn't appear to be a scam.">
+ 
+ <!-- MDN Bar -->
+ <!ENTITY mdnBarMessage.label "The sender of this message has asked to be notified when you read this message. Do you wish to notify the sender?">
+ <!ENTITY mdnBarIgnoreButton.label "Ignore Request">
+ <!ENTITY mdnBarSendButton.label "Send Receipt">
+ 

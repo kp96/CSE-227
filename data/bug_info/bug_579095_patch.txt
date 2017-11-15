@@ -1,0 +1,22 @@
+diff -b -U8 a/browser/base/content/browser.js b/browser/base/content/browser.js
+--- a/browser/base/content/browser.js 2010-07-27 08:07:02.946781500 +0900
++++ b/browser/base/content/browser.js 2010-07-27 08:07:40.277916700 +0900
+@@ -7025,17 +7025,17 @@
+     // Push the appropriate strings out to the UI
+     this._identityBox.tooltipText = tooltip;
+     this._identityIconLabel.value = icon_label;
+     this._identityIconCountryLabel.value = icon_country_label;
+     // Set cropping and direction
+     this._identityIconLabel.crop = icon_country_label ? "end" : "center";
+     this._identityIconLabel.parentNode.style.direction = icon_labels_dir;
+     // Hide completely if the organization label is empty
+-    this._identityIconLabel.parentNode.hidden = icon_label ? false : true;
++    this._identityIconLabel.parentNode.collapsed = icon_label ? false : true;
+   },
+
+   /**
+    * Set up the title and content messages for the identity message popup,
+    * based on the specified mode, and the details of the SSL cert, where
+    * applicable
+    *
+    * @param newMode The newly set identity mode.  Should be one of the IDENTITY_MODE_* constants.

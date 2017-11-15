@@ -1,0 +1,385 @@
+Index: security/manager/ssl/src/nsNSSCertificate.h
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSCertificate.h,v
+retrieving revision 1.33
+diff -u -p -d -8 -r1.33 nsNSSCertificate.h
+--- security/manager/ssl/src/nsNSSCertificate.h	4 Apr 2006 13:14:40 -0000	1.33
++++ security/manager/ssl/src/nsNSSCertificate.h	7 Aug 2007 04:05:43 -0000
+@@ -1,8 +1,9 @@
++/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* ***** BEGIN LICENSE BLOCK *****
+  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
+  *
+  * The contents of this file are subject to the Mozilla Public License Version
+  * 1.1 (the "License"); you may not use this file except in compliance with
+  * the License. You may obtain a copy of the License at
+  * http://www.mozilla.org/MPL/
+  *
+@@ -44,37 +45,44 @@
+ #include "nsIX509Cert2.h"
+ #include "nsIX509Cert3.h"
+ #include "nsIX509CertDB.h"
+ #include "nsIX509CertList.h"
+ #include "nsIASN1Object.h"
+ #include "nsISMimeCert.h"
+ #include "nsNSSShutDown.h"
+ #include "nsISimpleEnumerator.h"
++#include "nsISerializable.h"
++#include "nsIClassInfo.h"
+ 
+ #include "nsNSSCertHeader.h"
+ 
+ class nsINSSComponent;
+ class nsIASN1Sequence;
+ 
+ /* Certificate */
+ class nsNSSCertificate : public nsIX509Cert,
+                          public nsIX509Cert2,
+                          public nsIX509Cert3,
+                          public nsISMimeCert,
++                         public nsISerializable,
++                         public nsIClassInfo,
+                          public nsNSSShutDownObject
+ {
+ public:
+   NS_DECL_ISUPPORTS
+   NS_DECL_NSIX509CERT
+   NS_DECL_NSIX509CERT2
+   NS_DECL_NSIX509CERT3
+   NS_DECL_NSISMIMECERT
++  NS_DECL_NSISERIALIZABLE
++  NS_DECL_NSICLASSINFO
+ 
+   nsNSSCertificate(CERTCertificate *cert);
++  nsNSSCertificate();
+   /* from a request? */
+   virtual ~nsNSSCertificate();
+   nsresult FormatUIStrings(const nsAutoString &nickname, nsAutoString &nickWithSerial, nsAutoString &details);
+   static nsNSSCertificate* ConstructFromDER(char *certDER, int derLen);
+ 
+   static char* defaultServerNickname(CERTCertificate* cert);
+ 
+ private:
+@@ -83,16 +91,17 @@ private:
+   PRUint32         mCertType;
+   nsCOMPtr<nsIASN1Object> mASN1Structure;
+   nsresult CreateASN1Struct();
+   nsresult CreateTBSCertificateASN1Struct(nsIASN1Sequence **retSequence,
+                                           nsINSSComponent *nssComponent);
+   nsresult GetSortableDate(PRTime aTime, nsAString &_aSortableDate);
+   virtual void virtualDestroyNSSReference();
+   void destructorSafeDestroyNSSReference();
++  PRBool InitFromDER(char* certDER, int derLen);  // return false on failure
+ };
+ 
+ class nsNSSCertList: public nsIX509CertList
+ {
+ public:
+   NS_DECL_ISUPPORTS
+   NS_DECL_NSIX509CERTLIST
+ 
+@@ -122,12 +131,16 @@ private:
+                             (((unsigned long)((x)[1])) << 16) | \
+                             (((unsigned long)((x)[2])) <<  8) | \
+                              ((unsigned long)((x)[3])) )
+ #define NS_NSS_PUT_LONG(src,dest) (dest)[0] = (((src) >> 24) & 0xff); \
+                                   (dest)[1] = (((src) >> 16) & 0xff); \
+                                   (dest)[2] = (((src) >>  8) & 0xff); \
+                                   (dest)[3] = ((src) & 0xff); 
+ 
+-
+-
++#define NS_X509CERT_CID { /* 660a3226-915c-4ffb-bb20-8985a632df05 */   \
++    0x660a3226,                                                        \
++    0x915c,                                                            \
++    0x4ffb,                                                            \
++    { 0xbb, 0x20, 0x89, 0x85, 0xa6, 0x32, 0xdf, 0x05 }                 \
++  }
+ 
+ #endif /* _NS_NSSCERTIFICATE_H_ */
+Index: security/manager/ssl/src/nsNSSCertificate.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSCertificate.cpp,v
+retrieving revision 1.127
+diff -u -p -d -8 -r1.127 nsNSSCertificate.cpp
+--- security/manager/ssl/src/nsNSSCertificate.cpp	25 Jul 2007 22:57:51 -0000	1.127
++++ security/manager/ssl/src/nsNSSCertificate.cpp	7 Aug 2007 04:05:35 -0000
+@@ -1,8 +1,9 @@
++/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+ /* ***** BEGIN LICENSE BLOCK *****
+  * Version: MPL 1.1/GPL 2.0/LGPL 2.1
+  *
+  * The contents of this file are subject to the Mozilla Public License Version
+  * 1.1 (the "License"); you may not use this file except in compliance with
+  * the License. You may obtain a copy of the License at
+  * http://www.mozilla.org/MPL/
+  *
+@@ -63,16 +64,19 @@
+ #include "nsAutoLock.h"
+ #include "nsUsageArrayHelper.h"
+ #include "nsICertificateDialogs.h"
+ #include "nsNSSCertHelper.h"
+ #include "nsISupportsPrimitives.h"
+ #include "nsUnicharUtils.h"
+ #include "nsThreadUtils.h"
+ #include "nsCertVerificationThread.h"
++#include "nsIObjectOutputStream.h"
++#include "nsIObjectInputStream.h"
++#include "nsIProgrammingLanguage.h"
+ 
+ #include "nspr.h"
+ extern "C" {
+ #include "pk11func.h"
+ #include "certdb.h"
+ #include "cert.h"
+ #include "secerr.h"
+ #include "nssb64.h"
+@@ -100,49 +104,69 @@ static NS_DEFINE_CID(kNSSComponentCID, N
+ NS_IMPL_THREADSAFE_ISUPPORTS4(nsNSSCertificate, nsIX509Cert,
+                                                 nsIX509Cert2,
+                                                 nsIX509Cert3,
+                                                 nsISMimeCert)
+ 
+ nsNSSCertificate*
+ nsNSSCertificate::ConstructFromDER(char *certDER, int derLen)
+ {
++  nsNSSCertificate* newObject = new nsNSSCertificate();
++  if (!newObject->InitFromDER(certDER, derLen)) {
++    delete newObject;
++    newObject = nsnull;
++  }
++
++  return newObject;
++}
++
++PRBool
++nsNSSCertificate::InitFromDER(char *certDER, int derLen)
++{
+   nsNSSShutDownPreventionLock locker;
++  if (isAlreadyShutDown())
++    return PR_FALSE;
+ 
+   if (!certDER || !derLen)
+-    return nsnull;
++    return PR_FALSE;
+ 
+   CERTCertificate *aCert = CERT_DecodeCertFromPackage(certDER, derLen);
+   
+   if (!aCert)
+-    return nsnull;
++    return PR_FALSE;
+ 
+   if(aCert->dbhandle == nsnull)
+   {
+     aCert->dbhandle = CERT_GetDefaultCertDB();
+   }
+ 
+-  nsNSSCertificate *newObject = new nsNSSCertificate(aCert);
+-  CERT_DestroyCertificate(aCert);
+-  return newObject;
++  mCert = aCert;
++  return PR_TRUE;
+ }
+ 
+ nsNSSCertificate::nsNSSCertificate(CERTCertificate *cert) : 
+                                            mCert(nsnull),
+                                            mPermDelete(PR_FALSE),
+                                            mCertType(CERT_TYPE_NOT_YET_INITIALIZED)
+ {
+   nsNSSShutDownPreventionLock locker;
+   if (isAlreadyShutDown())
+     return;
+ 
+   if (cert) 
+     mCert = CERT_DupCertificate(cert);
+ }
+ 
++nsNSSCertificate::nsNSSCertificate() : 
++  mCert(nsnull),
++  mPermDelete(PR_FALSE),
++  mCertType(CERT_TYPE_NOT_YET_INITIALIZED)
++{
++}
++
+ nsNSSCertificate::~nsNSSCertificate()
+ {
+   nsNSSShutDownPreventionLock locker;
+   if (isAlreadyShutDown())
+     return;
+ 
+   destructorSafeDestroyNSSReference();
+   shutdown(calledFromObject);
+@@ -926,17 +950,17 @@ nsNSSCertificate::GetTokenName(nsAString
+ 
+ NS_IMETHODIMP
+ nsNSSCertificate::GetRawDER(PRUint32 *aLength, PRUint8 **aArray)
+ {
+   nsNSSShutDownPreventionLock locker;
+   if (isAlreadyShutDown())
+     return NS_ERROR_NOT_AVAILABLE;
+ 
+-  if (mCert) {
++  if (mCert){ 
+     *aArray = (PRUint8*)nsMemory::Alloc(mCert->derCert.len);
+     if (*aArray) {
+       memcpy(*aArray, mCert->derCert.data, mCert->derCert.len);
+       *aLength = mCert->derCert.len;
+       return NS_OK;
+     }
+   }
+   *aLength = 0;
+@@ -1465,8 +1489,105 @@ nsNSSCertListEnumerator::GetNext(nsISupp
+   }
+ 
+   *_retval = nssCert;
+   NS_ADDREF(*_retval);
+ 
+   CERT_RemoveCertListNode(node);
+   return NS_OK;
+ }
++
++NS_IMETHODIMP
++nsNSSCertificate::Write(nsIObjectOutputStream* aStream)
++{
++  NS_ENSURE_STATE(mCert);
++  nsresult rv = aStream->Write32(mCert->derCert.len);
++  if (NS_FAILED(rv)) {
++    return rv;
++  }
++  
++  return aStream->WriteByteArray(mCert->derCert.data, mCert->derCert.len);
++}
++
++NS_IMETHODIMP
++nsNSSCertificate::Read(nsIObjectInputStream* aStream)
++{
++  NS_ENSURE_STATE(!mCert);
++  
++  PRUint32 len;
++  nsresult rv = aStream->Read32(&len);
++  if (NS_FAILED(rv)) {
++    return rv;
++  }
++
++  nsXPIDLCString str;
++  rv = aStream->ReadBytes(len, getter_Copies(str));
++  if (NS_FAILED(rv)) {
++    return rv;
++  }
++
++  if (!InitFromDER(const_cast<char*>(str.get()), len)) {
++    return NS_ERROR_UNEXPECTED;
++  }
++
++  return NS_OK;
++}
++
++NS_IMETHODIMP 
++nsNSSCertificate::GetInterfaces(PRUint32 *count, nsIID * **array)
++{
++  *count = 0;
++  *array = nsnull;
++  return NS_OK;
++}
++
++NS_IMETHODIMP 
++nsNSSCertificate::GetHelperForLanguage(PRUint32 language, nsISupports **_retval)
++{
++  *_retval = nsnull;
++  return NS_OK;
++}
++
++NS_IMETHODIMP 
++nsNSSCertificate::GetContractID(char * *aContractID)
++{
++  *aContractID = nsnull;
++  return NS_OK;
++}
++
++NS_IMETHODIMP 
++nsNSSCertificate::GetClassDescription(char * *aClassDescription)
++{
++  *aClassDescription = nsnull;
++  return NS_OK;
++}
++
++NS_IMETHODIMP 
++nsNSSCertificate::GetClassID(nsCID * *aClassID)
++{
++  *aClassID = (nsCID*) nsMemory::Alloc(sizeof(nsCID));
++  if (!*aClassID)
++    return NS_ERROR_OUT_OF_MEMORY;
++  return GetClassIDNoAlloc(*aClassID);
++}
++
++NS_IMETHODIMP 
++nsNSSCertificate::GetImplementationLanguage(PRUint32 *aImplementationLanguage)
++{
++  *aImplementationLanguage = nsIProgrammingLanguage::CPLUSPLUS;
++  return NS_OK;
++}
++
++NS_IMETHODIMP 
++nsNSSCertificate::GetFlags(PRUint32 *aFlags)
++{
++  *aFlags = nsIClassInfo::THREADSAFE;
++  return NS_OK;
++}
++
++static NS_DEFINE_CID(kNSSCertificateCID, NS_X509CERT_CID);
++
++NS_IMETHODIMP 
++nsNSSCertificate::GetClassIDNoAlloc(nsCID *aClassIDNoAlloc)
++{
++  *aClassIDNoAlloc = kNSSCertificateCID;
++  return NS_OK;
++}
+Index: security/manager/ssl/src/nsNSSModule.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSModule.cpp,v
+retrieving revision 1.40
+diff -u -p -d -8 -r1.40 nsNSSModule.cpp
+--- security/manager/ssl/src/nsNSSModule.cpp	17 Feb 2007 03:47:59 -0000	1.40
++++ security/manager/ssl/src/nsNSSModule.cpp	7 Aug 2007 03:56:29 -0000
+@@ -165,16 +165,17 @@ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR_INIT(
+ // All other classes must have this set to PR_FALSE.
+ 
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(PR_FALSE, nsSSLSocketProvider)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(PR_FALSE, nsTLSSocketProvider)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(PR_FALSE, nsSecretDecoderRing)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(PR_FALSE, nsPK11TokenDB)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(PR_FALSE, nsPKCS11ModuleDB)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR_INIT(PR_FALSE, PSMContentListener, init)
++NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(PR_FALSE, nsNSSCertificate)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(PR_FALSE, nsNSSCertificateDB)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(PR_FALSE, nsNSSCertCache)
+ #ifdef MOZ_XUL
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(PR_FALSE, nsCertTree)
+ #endif
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(PR_FALSE, nsCrypto)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(PR_FALSE, nsPkcs11)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(PR_FALSE, nsCMSSecureMessage)
+@@ -294,16 +295,23 @@ static const nsModuleComponentInfo compo
+   {
+     "Generic Certificate Content Handler",
+     NS_PSMCONTENTLISTEN_CID,
+     NS_PSMCONTENTLISTEN_CONTRACTID,
+     PSMContentListenerConstructor
+   },
+ 
+   {
++    "X509 Certificate",
++    NS_X509CERT_CID,
++    nsnull,
++    nsNSSCertificateConstructor
++  },
++  
++  {
+     "X509 Certificate Database",
+     NS_X509CERTDB_CID,
+     NS_X509CERTDB_CONTRACTID,
+     nsNSSCertificateDBConstructor
+   },
+ 
+   {
+     "NSS Certificate Cache",

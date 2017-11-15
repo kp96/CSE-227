@@ -1,0 +1,238 @@
+# HG changeset patch
+# Parent bc6dbd36adec5b2e0e35638a2f9398599f28af1e
+# User Mounir Lamouri <mounir.lamouri@gmail.com>
+# Date 1342498067 25200
+
+diff --git a/caps/idl/nsIScriptSecurityManager.idl b/caps/idl/nsIScriptSecurityManager.idl
+--- a/caps/idl/nsIScriptSecurityManager.idl
++++ b/caps/idl/nsIScriptSecurityManager.idl
+@@ -108,25 +108,16 @@ interface nsIScriptSecurityManager : nsI
+      * load as well); if any of the versions of this URI is not allowed, this
+      * function will return error code NS_ERROR_DOM_BAD_URI.
+      */
+     void checkLoadURIStrWithPrincipal(in nsIPrincipal aPrincipal,
+                                       in AUTF8String uri,
+                                       in unsigned long flags);
+ 
+     /**
+-     * Same as CheckLoadURI but takes string arguments for ease of use
+-     * by scripts
+-     *
+-     * @deprecated Use checkLoadURIStrWithPrincipal instead of this function.
+-     */
+-    [deprecated] void checkLoadURIStr(in AUTF8String from, in AUTF8String uri,
+-                                      in unsigned long flags);
+-
+-    /**
+      * Check that the function 'funObj' is allowed to run on 'targetObj'
+      *
+      * Will return error code NS_ERROR_DOM_SECURITY_ERR if the function
+      * should not run
+      *
+      * @param cx The current active JavaScript context.
+      * @param funObj The function trying to run..
+      * @param targetObj The object the function will run on.
+diff --git a/caps/src/nsScriptSecurityManager.cpp b/caps/src/nsScriptSecurityManager.cpp
+--- a/caps/src/nsScriptSecurityManager.cpp
++++ b/caps/src/nsScriptSecurityManager.cpp
+@@ -1589,40 +1589,16 @@ nsScriptSecurityManager::ReportError(JSC
+ #ifdef DEBUG
+         fprintf(stderr, "%s\n", NS_LossyConvertUTF16toASCII(message).get());
+ #endif
+     }
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+-nsScriptSecurityManager::CheckLoadURIStr(const nsACString& aSourceURIStr,
+-                                         const nsACString& aTargetURIStr,
+-                                         PRUint32 aFlags)
+-{
+-    // FIXME: bug 327244 -- this function should really die...  Really truly.
+-    nsCOMPtr<nsIURI> source;
+-    nsresult rv = NS_NewURI(getter_AddRefs(source), aSourceURIStr,
+-                            nsnull, nsnull, sIOService);
+-    NS_ENSURE_SUCCESS(rv, rv);
+-
+-    // Note: this is not _quite_ right if aSourceURI has
+-    // NS_NULLPRINCIPAL_SCHEME, but we'll just extract the scheme in
+-    // CheckLoadURIWithPrincipal anyway, so this is good enough.  This method
+-    // really needs to go away....
+-    nsCOMPtr<nsIPrincipal> sourcePrincipal;
+-    rv = CreateCodebasePrincipal(source,
+-                                 getter_AddRefs(sourcePrincipal));
+-    NS_ENSURE_SUCCESS(rv, rv);
+-
+-    return CheckLoadURIStrWithPrincipal(sourcePrincipal, aTargetURIStr,
+-                                        aFlags);
+-}
+-
+-NS_IMETHODIMP
+ nsScriptSecurityManager::CheckLoadURIStrWithPrincipal(nsIPrincipal* aPrincipal,
+                                                       const nsACString& aTargetURIStr,
+                                                       PRUint32 aFlags)
+ {
+     nsresult rv;
+     nsCOMPtr<nsIURI> target;
+     rv = NS_NewURI(getter_AddRefs(target), aTargetURIStr,
+                    nsnull, nsnull, sIOService);
+diff --git a/content/base/src/contentAreaDropListener.js b/content/base/src/contentAreaDropListener.js
+--- a/content/base/src/contentAreaDropListener.js
++++ b/content/base/src/contentAreaDropListener.js
+@@ -61,39 +61,39 @@ ContentAreaDropListener.prototype =
+ 
+     // Strip leading and trailing whitespace, then try to create a
+     // URI from the dropped string. If that succeeds, we're
+     // dropping a URI and we need to do a security check to make
+     // sure the source document can load the dropped URI.
+     uriString = uriString.replace(/^\s*|\s*$/g, '');
+ 
+     let uri;
++    let ioService = Cc["@mozilla.org/network/io-service;1"];
++                      .getService(Components.interfaces.nsIIOService);
+     try {
+       // Check that the uri is valid first and return an empty string if not.
+       // It may just be plain text and should be ignored here
+-      uri = Cc["@mozilla.org/network/io-service;1"].
+-              getService(Components.interfaces.nsIIOService).
+-              newURI(uriString, null, null);
++      uri = ioService.newURI(uriString, null, null);
+     } catch (ex) { }
+     if (!uri)
+       return uriString;
+ 
+     // uriString is a valid URI, so do the security check.
+     let secMan = Cc["@mozilla.org/scriptsecuritymanager;1"].
+                    getService(Ci.nsIScriptSecurityManager);
+     let sourceNode = dataTransfer.mozSourceNode;
+     let flags = secMan.STANDARD;
+     if (disallowInherit)
+       flags |= secMan.DISALLOW_INHERIT_PRINCIPAL;
+ 
+     // Use file:/// as the default uri so that drops of file URIs are always allowed
+-    if (sourceNode)
+-      secMan.checkLoadURIStrWithPrincipal(sourceNode.nodePrincipal, uriString, flags);
+-    else
+-      secMan.checkLoadURIStr("file:///", uriString, flags);
++    let principal = sourceNode ? sourceNode.principal
++                               : secMan.getCodebasePrincipal(ioService.newURI("file:///", null, null));
++
++    secMan.checkLoadURIStrWithPrincipal(principal, uriString, flags);
+ 
+     return uriString;
+   },
+ 
+   canDropLink: function(aEvent, aAllowSameDocument)
+   {
+     let dataTransfer = aEvent.dataTransfer;
+     let types = dataTransfer.types;
+diff --git a/ipc/testshell/XPCShellEnvironment.cpp b/ipc/testshell/XPCShellEnvironment.cpp
+--- a/ipc/testshell/XPCShellEnvironment.cpp
++++ b/ipc/testshell/XPCShellEnvironment.cpp
+@@ -725,24 +725,16 @@ NS_IMETHODIMP
+ FullTrustSecMan::CheckLoadURIStrWithPrincipal(nsIPrincipal *aPrincipal,
+                                               const nsACString & uri,
+                                               PRUint32 flags)
+ {
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+-FullTrustSecMan::CheckLoadURIStr(const nsACString & from,
+-                                 const nsACString & uri,
+-                                 PRUint32 flags)
+-{
+-    return NS_OK;
+-}
+-
+-NS_IMETHODIMP
+ FullTrustSecMan::CheckFunctionAccess(JSContext * cx,
+                                      void * funObj,
+                                      void * targetObj)
+ {
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+diff --git a/js/xpconnect/shell/xpcshell.cpp b/js/xpconnect/shell/xpcshell.cpp
+--- a/js/xpconnect/shell/xpcshell.cpp
++++ b/js/xpconnect/shell/xpcshell.cpp
+@@ -1343,24 +1343,16 @@ FullTrustSecMan::CheckLoadURI(nsIURI *fr
+ NS_IMETHODIMP
+ FullTrustSecMan::CheckLoadURIStrWithPrincipal(nsIPrincipal *aPrincipal,
+                                               const nsACString & uri,
+                                               PRUint32 flags)
+ {
+     return NS_OK;
+ }
+ 
+-/* void checkLoadURIStr (in AUTF8String from, in AUTF8String uri, in unsigned long flags); */
+-NS_IMETHODIMP
+-FullTrustSecMan::CheckLoadURIStr(const nsACString & from,
+-                                 const nsACString & uri, PRUint32 flags)
+-{
+-    return NS_OK;
+-}
+-
+ /* [noscript] void checkFunctionAccess (in JSContextPtr cx, in voidPtr funObj, in voidPtr targetObj); */
+ NS_IMETHODIMP
+ FullTrustSecMan::CheckFunctionAccess(JSContext * cx, void * funObj,
+                                      void * targetObj)
+ {
+     return NS_OK;
+ }
+ 
+diff --git a/toolkit/content/nsDragAndDrop.js b/toolkit/content/nsDragAndDrop.js
+--- a/toolkit/content/nsDragAndDrop.js
++++ b/toolkit/content/nsDragAndDrop.js
+@@ -560,21 +560,20 @@ var nsDragAndDrop = {
+       // sure the source document can load the dropped URI. We don't
+       // so much care about creating the real URI here
+       // (i.e. encoding differences etc don't matter), we just want
+       // to know if aDraggedText really is a URI.
+ 
+       aDraggedText = aDraggedText.replace(/^\s*|\s*$/g, '');
+ 
+       var uri;
+-
++      var ioService = Components.classes["@mozilla.org/network/io-service;1"]
++                                .getService(Components.interfaces.nsIIOService);
+       try {
+-        uri = Components.classes["@mozilla.org/network/io-service;1"]
+-                        .getService(Components.interfaces.nsIIOService)
+-                        .newURI(aDraggedText, null, null);
++        uri = ioService.newURI(aDraggedText, null, null);
+       } catch (e) {
+       }
+ 
+       if (!uri)
+         return;
+ 
+       // aDraggedText is a URI, do the security check.
+       const nsIScriptSecurityManager = Components.interfaces
+@@ -583,21 +582,22 @@ var nsDragAndDrop = {
+                              .getService(nsIScriptSecurityManager);
+ 
+       if (!aDragSession)
+         aDragSession = this.mDragService.getCurrentSession();
+ 
+       var sourceDoc = aDragSession.sourceDocument;
+       // Use "file:///" as the default sourceURI so that drops of file:// URIs
+       // are always allowed.
+-      var sourceURI = sourceDoc ? sourceDoc.documentURI : "file:///";
++      var principal = sourceDoc ? sourceDoc.nodePrincipal
++                                : secMan.getCodebasePrincipal(ioService.newURI("file:///", null, null));
+ 
+       try {
+-        secMan.checkLoadURIStr(sourceURI, aDraggedText,
+-                               nsIScriptSecurityManager.STANDARD);
++        secMan.checkLoadURIStrWithPrincipal(principal, aDraggedText,
++                                            nsIScriptSecurityManager.STANDARD);
+       } catch (e) {
+         // Stop event propagation right here.
+         aEvent.stopPropagation();
+ 
+         throw "Drop of " + aDraggedText + " denied.";
+       }
+     }
+ };

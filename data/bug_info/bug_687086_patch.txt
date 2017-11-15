@@ -1,0 +1,958 @@
+# HG changeset patch
+# User Sid Stamm <sstamm@mozilla.com>
+# Date 1350334498 25200
+# Node ID 842dcb6c5ee030d9259a24d3530f64f6e61abd22
+# Parent 2f63e2f90d5c735d620b0fd43ed30a452bde6915
+Bug 687086 - change nsIContentSecurityPolicy to return two values, shouldBlock and shouldReportViolation. r=bz
+
+diff -r 2f63e2f90d5c caps/src/nsScriptSecurityManager.cpp
+--- a/caps/src/nsScriptSecurityManager.cpp	Thu Mar 28 09:38:18 2013 -0600
++++ b/caps/src/nsScriptSecurityManager.cpp	Thu Mar 28 11:55:39 2013 -0700
+@@ -477,38 +477,36 @@ nsScriptSecurityManager::ContentSecurity
+     rv = subjectPrincipal->GetCsp(getter_AddRefs(csp));
+     NS_ASSERTION(NS_SUCCEEDED(rv), "CSP: Failed to get CSP from principal.");
+ 
+     // don't do anything unless there's a CSP
+     if (!csp)
+         return JS_TRUE;
+ 
+     bool evalOK = true;
+-    rv = csp->GetAllowsEval(&evalOK);
++    bool reportViolation = false;
++    rv = csp->GetAllowsEval(&reportViolation, &evalOK);
+ 
+     if (NS_FAILED(rv))
+     {
+         NS_WARNING("CSP: failed to get allowsEval");
+         return JS_TRUE; // fail open to not break sites.
+     }
+ 
+-    if (!evalOK) {
+-        // get the script filename, script sample, and line number
+-        // to log with the violation
++    if (reportViolation) {
+         nsAutoString fileName;
+         unsigned lineNum = 0;
+         NS_NAMED_LITERAL_STRING(scriptSample, "call to eval() or related function blocked by CSP");
+ 
+         JSScript *script;
+         if (JS_DescribeScriptedCaller(cx, &script, &lineNum)) {
+             if (const char *file = JS_GetScriptFilename(cx, script)) {
+                 CopyUTF8toUTF16(nsDependentCString(file), fileName);
+             }
+         }
+-
+         csp->LogViolationDetails(nsIContentSecurityPolicy::VIOLATION_TYPE_EVAL,
+                                  fileName,
+                                  scriptSample,
+                                  lineNum);
+     }
+ 
+     return evalOK;
+ }
+diff -r 2f63e2f90d5c content/base/public/nsIContentSecurityPolicy.idl
+--- a/content/base/public/nsIContentSecurityPolicy.idl	Thu Mar 28 09:38:18 2013 -0600
++++ b/content/base/public/nsIContentSecurityPolicy.idl	Thu Mar 28 11:55:39 2013 -0700
+@@ -4,21 +4,21 @@
+ 
+ #include "nsISupports.idl"
+ 
+ interface nsIURI;
+ interface nsIHttpChannel;
+ interface nsIDocShell;
+ 
+ /**
+- * nsIContentSecurityPolicy  
++ * nsIContentSecurityPolicy
+  * Describes an XPCOM component used to model an enforce CSPs.
+  */
+ 
+-[scriptable, uuid(d1680bb4-1ac0-4772-9437-1188375e44f2)]
++[scriptable, uuid(91E1F257-914C-4D4F-902C-F67F772839AB)]
+ interface nsIContentSecurityPolicy : nsISupports
+ {
+ 
+   /**
+    * Set to true when the CSP has been read in and parsed and is ready to
+    * enforce.  This is a barrier for the nsDocument so it doesn't load any
+    * sub-content until either it knows that a CSP is ready or will not be used.
+    */
+@@ -32,24 +32,40 @@ interface nsIContentSecurityPolicy : nsI
+ 
+   /**
+    * A read-only string version of the policy for debugging.
+    */
+   readonly attribute AString policy;
+ 
+   /**
+    * Whether this policy allows in-page script.
++   * @param shouldReportViolation
++   *     Whether or not the use of inline script should be reported.
++   *     This function always returns "true" for report-only policies, but when
++   *     the report-only policy is violated, shouldReportViolation is true as
++   *     well.
++   * @return
++   *     Whether or not the effects of the inline script should be allowed
++   *     (block the compilation if false).
+    */
+-  readonly attribute boolean allowsInlineScript;
++  boolean getAllowsInlineScript(out boolean shouldReportViolation);
+ 
+   /**
+    * whether this policy allows eval and eval-like functions
+    * such as setTimeout("code string", time).
++   * @param shouldReportViolation
++   *     Whether or not the use of eval should be reported.
++   *     This function always returns "true" for report-only policies, but when
++   *     the report-only policy is violated, shouldReportViolation is true as
++   *     well.
++   * @return
++   *     Whether or not the effects of the eval call should be allowed
++   *     (block the call if false).
+    */
+-  readonly attribute boolean allowsEval;
++  boolean getAllowsEval(out boolean shouldReportViolation);
+ 
+   /**
+    * Log policy violation on the Error Console and send a report if a report-uri
+    * is present in the policy
+    *
+    * @param violationType
+    *     one of the VIOLATION_TYPE_* constants, e.g. inline-script or eval
+    * @param sourceFile
+@@ -73,17 +89,17 @@ interface nsIContentSecurityPolicy : nsI
+    * @param blockedURI
+    *     the URI that violated the policy
+    * @param violatedDirective
+    *     the directive that was violated.
+    * @param scriptSample
+    *     a sample of the violating inline script
+    * @param lineNum
+    *     source line number of the violation (if available)
+-   * @return 
++   * @return
+    *     nothing.
+    */
+   void sendReports(in AString blockedURI,
+                    in AString violatedDirective,
+                    in AString scriptSample,
+                    in int32_t lineNum);
+ 
+   /**
+diff -r 2f63e2f90d5c content/base/src/contentSecurityPolicy.js
+--- a/content/base/src/contentSecurityPolicy.js	Thu Mar 28 09:38:18 2013 -0600
++++ b/content/base/src/contentSecurityPolicy.js	Thu Mar 28 11:55:39 2013 -0700
+@@ -123,21 +123,29 @@ ContentSecurityPolicy.prototype = {
+   set isInitialized (foo) {
+     this._isInitialized = foo;
+   },
+ 
+   get policy () {
+     return this._policy.toString();
+   },
+ 
+-  get allowsInlineScript() {
++  getAllowsInlineScript: function(shouldReportViolation) {
++    // report it?
++    shouldReportViolation.value = !this._policy.allowsInlineScripts;
++
++    // allow it to execute?
+     return this._reportOnlyMode || this._policy.allowsInlineScripts;
+   },
+ 
+-  get allowsEval() {
++  getAllowsEval: function(shouldReportViolation) {
++    // report it?
++    shouldReportViolation.value = !this._policy.allowsEvalInScripts;
++
++    // allow it to execute?
+     return this._reportOnlyMode || this._policy.allowsEvalInScripts;
+   },
+ 
+   /**
+    * Log policy violation on the Error Console and send a report if a report-uri
+    * is present in the policy
+    *
+    * @param aViolationType
+diff -r 2f63e2f90d5c content/base/src/nsScriptLoader.cpp
+--- a/content/base/src/nsScriptLoader.cpp	Thu Mar 28 09:38:18 2013 -0600
++++ b/content/base/src/nsScriptLoader.cpp	Thu Mar 28 11:55:39 2013 -0700
+@@ -608,22 +608,22 @@ nsScriptLoader::ProcessScriptElement(nsI
+   }
+ 
+   nsCOMPtr<nsIContentSecurityPolicy> csp;
+   rv = mDocument->NodePrincipal()->GetCsp(getter_AddRefs(csp));
+   NS_ENSURE_SUCCESS(rv, false);
+ 
+   if (csp) {
+     PR_LOG(gCspPRLog, PR_LOG_DEBUG, ("New ScriptLoader i ****with CSP****"));
+-    bool inlineOK;
+-    rv = csp->GetAllowsInlineScript(&inlineOK);
++    bool inlineOK = true;
++    bool reportViolations = false;
++    rv = csp->GetAllowsInlineScript(&reportViolations, &inlineOK);
+     NS_ENSURE_SUCCESS(rv, false);
+ 
+-    if (!inlineOK) {
+-      PR_LOG(gCspPRLog, PR_LOG_DEBUG, ("CSP blocked inline scripts (2)"));
++    if (reportViolations) {
+       // gather information to log with violation report
+       nsIURI* uri = mDocument->GetDocumentURI();
+       nsAutoCString asciiSpec;
+       uri->GetAsciiSpec(asciiSpec);
+       nsAutoString scriptText;
+       aElement->GetScriptText(scriptText);
+ 
+       // cap the length of the script sample at 40 chars
+@@ -631,16 +631,20 @@ nsScriptLoader::ProcessScriptElement(nsI
+         scriptText.Truncate(40);
+         scriptText.Append(NS_LITERAL_STRING("..."));
+       }
+ 
+       csp->LogViolationDetails(nsIContentSecurityPolicy::VIOLATION_TYPE_INLINE_SCRIPT,
+                                NS_ConvertUTF8toUTF16(asciiSpec),
+                                scriptText,
+                                aElement->GetScriptLineNumber());
++    }
++
++    if (!inlineOK) {
++      PR_LOG(gCspPRLog, PR_LOG_DEBUG, ("CSP blocked inline scripts (2)"));
+       return false;
+     }
+   }
+ 
+   // Inline scripts ignore ther CORS mode and are always CORS_NONE
+   request = new nsScriptLoadRequest(aElement, version, CORS_NONE);
+   request->mJSVersion = version;
+   request->mLoading = false;
+diff -r 2f63e2f90d5c content/base/test/file_CSP_evalscript_main.html^headers^
+--- a/content/base/test/file_CSP_evalscript_main.html^headers^	Thu Mar 28 09:38:18 2013 -0600
++++ b/content/base/test/file_CSP_evalscript_main.html^headers^	Thu Mar 28 11:55:39 2013 -0700
+@@ -1,2 +1,2 @@
+ Cache-Control: no-cache
+-X-Content-Security-Policy: allow 'self'
++X-Content-Security-Policy: default-src 'self'
+diff -r 2f63e2f90d5c content/base/test/file_CSP_evalscript_main.js
+--- a/content/base/test/file_CSP_evalscript_main.js	Thu Mar 28 09:38:18 2013 -0600
++++ b/content/base/test/file_CSP_evalscript_main.js	Thu Mar 28 11:55:39 2013 -0700
+@@ -3,88 +3,103 @@
+ function logResult(str, passed) {
+   var elt = document.createElement('div');
+   var color = passed ? "#cfc;" : "#fcc";
+   elt.setAttribute('style', 'background-color:' + color + '; width:100%; border:1px solid black; padding:3px; margin:4px;');
+   elt.innerHTML = str;
+   document.body.appendChild(elt);
+ }
+ 
++window._testResults = {};
+ 
+ // callback for when stuff is allowed by CSP
+ var onevalexecuted = (function(window) {
+     return function(shouldrun, what, data) {
++      window._testResults[what] = "ran";
+       window.parent.scriptRan(shouldrun, what, data);
+       logResult((shouldrun ? "PASS: " : "FAIL: ") + what + " : " + data, shouldrun);
+     };})(window);
+ 
+ // callback for when stuff is blocked
+ var onevalblocked = (function(window) {
+     return function(shouldrun, what, data) {
++      window._testResults[what] = "blocked";
+       window.parent.scriptBlocked(shouldrun, what, data);
+       logResult((shouldrun ? "FAIL: " : "PASS: ") + what + " : " + data, !shouldrun);
+     };})(window);
+ 
+ 
+ // Defer until document is loaded so that we can write the pretty result boxes
+ // out.
+ addEventListener('load', function() {
+ 
+-  // setTimeout(String) test  -- should pass
+-  try {
+-    setTimeout('onevalexecuted(false, "setTimeout(String)", "setTimeout with a string was enabled.");', 10);
+-  } catch (e) {
+-    onevalblocked(false, "setTimeout(String)",
+-                  "setTimeout with a string was blocked");
++  // setTimeout(String) test -- mutate something in the window._testResults
++  // obj, then check it.
++  {
++    var str_setTimeoutWithStringRan = 'onevalexecuted(false, "setTimeout(String)", "setTimeout with a string was enabled.");';
++    function fcn_setTimeoutWithStringCheck() {
++      if (this._testResults["setTimeout(String)"] !== "ran") {
++        onevalblocked(false, "setTimeout(String)",
++                      "setTimeout with a string was blocked");
++      }
++    }
++    setTimeout(fcn_setTimeoutWithStringCheck.bind(window), 10);
++    setTimeout(str_setTimeoutWithStringRan, 10);
+   }
+ 
+-  // setTimeout(function) test  -- should pass
+-  try {
+-    setTimeout(function() {
+-          onevalexecuted(true, "setTimeout(function)",
+-                        "setTimeout with a function was enabled.")
+-        }, 10);
+-  } catch (e) {
+-    onevalblocked(true, "setTimeout(function)",
+-                  "setTimeout with a function was blocked");
++  // setTimeout(function) test -- mutate something in the window._testResults
++  // obj, then check it.
++  {
++    function fcn_setTimeoutWithFunctionRan() {
++      onevalexecuted(true, "setTimeout(function)",
++                    "setTimeout with a function was enabled.")
++    }
++    function fcn_setTimeoutWithFunctionCheck() {
++      if (this._testResults["setTimeout(function)"] !== "ran") {
++        onevalblocked(true, "setTimeout(function)",
++                      "setTimeout with a function was blocked");
++      }
++    }
++    setTimeout(fcn_setTimeoutWithFunctionRan.bind(window), 10);
++    setTimeout(fcn_setTimeoutWithFunctionCheck.bind(window), 10);
+   }
+ 
+-  // eval() test
++  // eval() test -- should throw exception as per spec
+   try {
+     eval('onevalexecuted(false, "eval(String)", "eval() was enabled.");');
+   } catch (e) {
+     onevalblocked(false, "eval(String)",
+                   "eval() was blocked");
+   }
+ 
+-  // eval(foo,bar) test
++  // eval(foo,bar) test -- should throw exception as per spec
+   try {
+     eval('onevalexecuted(false, "eval(String,scope)", "eval() was enabled.");',1);
+   } catch (e) {
+     onevalblocked(false, "eval(String,object)",
+                   "eval() with scope was blocked");
+   }
+ 
+-  // [foo,bar].sort(eval) test
++  // [foo,bar].sort(eval) test -- should throw exception as per spec
+   try {
+     ['onevalexecuted(false, "[String, obj].sort(eval)", "eval() was enabled.");',1].sort(eval);
+   } catch (e) {
+     onevalblocked(false, "[String, obj].sort(eval)",
+                   "eval() with scope via sort was blocked");
+   }
+ 
+-  // [].sort.call([foo,bar], eval) test
++  // [].sort.call([foo,bar], eval) test -- should throw exception as per spec
+   try {
+     [].sort.call(['onevalexecuted(false, "[String, obj].sort(eval)", "eval() was enabled.");',1], eval);
+   } catch (e) {
+     onevalblocked(false, "[].sort.call([String, obj], eval)",
+                   "eval() with scope via sort/call was blocked");
+   }
+ 
+-  // new Function() test
++  // new Function() test -- should throw exception as per spec
+   try {
+     var fcn = new Function('onevalexecuted(false, "new Function(String)", "new Function(String) was enabled.");');
+     fcn();
+   } catch (e) {
+     onevalblocked(false, "new Function(String)",
+                   "new Function(String) was blocked.");
+   }
+ 
+diff -r 2f63e2f90d5c content/base/test/unit/test_cspreports.js
+--- a/content/base/test/unit/test_cspreports.js	Thu Mar 28 09:38:18 2013 -0600
++++ b/content/base/test/unit/test_cspreports.js	Thu Mar 28 11:55:39 2013 -0700
+@@ -40,27 +40,31 @@ function makeReportHandler(testpath, mes
+ 
+     dump("GOT REPORT:\n" + JSON.stringify(reportObj) + "\n");
+     dump("TESTPATH:    " + testpath + "\n");
+     dump("EXPECTED:  \n" + JSON.stringify(expectedJSON) + "\n\n");
+ 
+     for (var i in expectedJSON)
+       do_check_eq(expectedJSON[i], reportObj['csp-report'][i]);
+ 
+-    // self-destroy
+     testsToFinish--;
+     httpServer.registerPathHandler(testpath, null);
+     if (testsToFinish < 1)
+       httpServer.stop(do_test_finished);
+     else
+       do_test_finished();
+   };
+ }
+ 
+-function makeTest(id, expectedJSON, callback) {
++/**
++ * Everything created by this assumes it will cause a report.  If you want to
++ * add a test here that will *not* cause a report to go out, you're gonna have
++ * to make sure the test cleans up after itself.
++ */
++function makeTest(id, expectedJSON, useReportOnlyPolicy, callback) {
+   testsToFinish++;
+   do_test_pending();
+ 
+   // set up a new CSP instance for each test.
+   var csp = Cc["@mozilla.org/contentsecuritypolicy;1"]
+               .createInstance(Ci.nsIContentSecurityPolicy);
+   var policy = "allow 'none'; " +
+                "report-uri " + REPORT_SERVER_URI +
+@@ -74,16 +78,19 @@ function makeTest(id, expectedJSON, call
+   dump("Created test " + id + " : " + policy + "\n\n");
+ 
+   // make the reports seem authentic by "binding" them to a channel.
+   csp.scanRequestData(selfchan);
+ 
+   // Load up the policy
+   csp.refinePolicy(policy, selfuri, false);
+ 
++  // set as report-only if that's the case
++  if (useReportOnlyPolicy) csp.reportOnlyMode = true;
++
+   // prime the report server
+   var handler = makeReportHandler("/test" + id, "Test " + id, expectedJSON);
+   httpServer.registerPathHandler("/test" + id, handler);
+ 
+   //trigger the violation
+   callback(csp);
+ }
+ 
+@@ -91,37 +98,87 @@ function run_test() {
+   var selfuri = NetUtil.newURI(REPORT_SERVER_URI +
+                                ":" + REPORT_SERVER_PORT +
+                                "/foo/self");
+ 
+   httpServer = new HttpServer();
+   httpServer.start(REPORT_SERVER_PORT);
+ 
+   // test that inline script violations cause a report.
+-  makeTest(0, {"blocked-uri": "self"},
++  makeTest(0, {"blocked-uri": "self"}, false,
+       function(csp) {
+-        if(!csp.allowsInlineScript) {
+-          // force the logging, since the getter doesn't.
+-          csp.logViolationDetails(Ci.nsIContentSecurityPolicy.VIOLATION_TYPE_INLINE_SCRIPT,
+-                                  selfuri.asciiSpec,
+-                                  "script sample",
+-                                  0);
+-        }
++        let inlineOK = true, oReportViolation = {};
++        inlineOK = csp.getAllowsInlineScript(oReportViolation);
++
++        // this is not a report only policy, so it better block inline scripts
++        do_check_false(inlineOK);
++        // ... and cause reports to go out
++        do_check_true(oReportViolation.value);
++
++        // force the logging, since the getter doesn't.
++        csp.logViolationDetails(Ci.nsIContentSecurityPolicy.VIOLATION_TYPE_INLINE_SCRIPT,
++                                selfuri.asciiSpec,
++                                "script sample",
++                                0);
+       });
+ 
+-  makeTest(1, {"blocked-uri": "self"},
++  // test that eval violations cause a report.
++  makeTest(1, {"blocked-uri": "self"}, false,
+       function(csp) {
+-        if(!csp.allowsEval) {
+-          // force the logging, since the getter doesn't.
+-          csp.logViolationDetails(Ci.nsIContentSecurityPolicy.VIOLATION_TYPE_INLINE_SCRIPT,
+-                                  selfuri.asciiSpec,
+-                                  "script sample",
+-                                  1);
+-        }
++        let evalOK = true, oReportViolation = {};
++        evalOK = csp.getAllowsEval(oReportViolation);
++
++        // this is not a report only policy, so it better block eval
++        do_check_false(evalOK);
++        // ... and cause reports to go out
++        do_check_true(oReportViolation.value);
++
++        // force the logging, since the getter doesn't.
++        csp.logViolationDetails(Ci.nsIContentSecurityPolicy.VIOLATION_TYPE_INLINE_SCRIPT,
++                                selfuri.asciiSpec,
++                                "script sample",
++                                1);
+       });
+ 
+-  makeTest(2, {"blocked-uri": "http://blocked.test/foo.js"},
++  makeTest(2, {"blocked-uri": "http://blocked.test/foo.js"}, false,
+       function(csp) {
++        // shouldLoad creates and sends out the report here.
+         csp.shouldLoad(Ci.nsIContentPolicy.TYPE_SCRIPT,
+                       NetUtil.newURI("http://blocked.test/foo.js"),
+                       null, null, null, null);
+       });
++
++  // test that inline script violations cause a report in report-only policy
++  makeTest(3, {"blocked-uri": "self"}, true,
++      function(csp) {
++        let inlineOK = true, oReportViolation = {};
++        inlineOK = csp.getAllowsInlineScript(oReportViolation);
++
++        // this is a report only policy, so it better allow inline scripts
++        do_check_true(inlineOK);
++        // ... but still cause reports to go out
++        do_check_true(oReportViolation.value);
++
++        // force the logging, since the getter doesn't.
++        csp.logViolationDetails(Ci.nsIContentSecurityPolicy.VIOLATION_TYPE_INLINE_SCRIPT,
++                                selfuri.asciiSpec,
++                                "script sample",
++                                3);
++      });
++
++  // test that eval violations cause a report in report-only policy
++  makeTest(4, {"blocked-uri": "self"}, true,
++      function(csp) {
++        let evalOK = true, oReportViolation = {};
++        evalOK = csp.getAllowsEval(oReportViolation);
++
++        // this is a report only policy, so it better allow eval
++        do_check_true(evalOK);
++        // ... but still cause reports to go out
++        do_check_true(oReportViolation.value);
++
++        // force the logging, since the getter doesn't.
++        csp.logViolationDetails(Ci.nsIContentSecurityPolicy.VIOLATION_TYPE_INLINE_SCRIPT,
++                                selfuri.asciiSpec,
++                                "script sample",
++                                4);
++      });
+ }
+diff -r 2f63e2f90d5c content/events/src/nsEventListenerManager.cpp
+--- a/content/events/src/nsEventListenerManager.cpp	Thu Mar 28 09:38:18 2013 -0600
++++ b/content/events/src/nsEventListenerManager.cpp	Thu Mar 28 11:55:39 2013 -0700
+@@ -664,21 +664,22 @@ nsEventListenerManager::SetEventHandler(
+       return NS_ERROR_DOM_SECURITY_ERR;
+     }
+ 
+     nsCOMPtr<nsIContentSecurityPolicy> csp;
+     rv = doc->NodePrincipal()->GetCsp(getter_AddRefs(csp));
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+     if (csp) {
+-      bool inlineOK;
+-      rv = csp->GetAllowsInlineScript(&inlineOK);
++      bool inlineOK = true;
++      bool reportViolations = false;
++      rv = csp->GetAllowsInlineScript(&reportViolations, &inlineOK);
+       NS_ENSURE_SUCCESS(rv, rv);
+ 
+-      if ( !inlineOK ) {
++      if (reportViolations) {
+         // gather information to log with violation report
+         nsIURI* uri = doc->GetDocumentURI();
+         nsAutoCString asciiSpec;
+         if (uri)
+           uri->GetAsciiSpec(asciiSpec);
+         nsAutoString scriptSample, attr, tagName(NS_LITERAL_STRING("UNKNOWN"));
+         aName->ToString(attr);
+         nsCOMPtr<nsIDOMNode> domNode(do_QueryInterface(mTarget));
+@@ -688,16 +689,20 @@ nsEventListenerManager::SetEventHandler(
+         scriptSample.Assign(attr);
+         scriptSample.AppendLiteral(" attribute on ");
+         scriptSample.Append(tagName);
+         scriptSample.AppendLiteral(" element");
+         csp->LogViolationDetails(nsIContentSecurityPolicy::VIOLATION_TYPE_INLINE_SCRIPT,
+                                  NS_ConvertUTF8toUTF16(asciiSpec),
+                                  scriptSample,
+                                  0);
++      }
++
++      // return early if CSP wants us to block inline scripts
++      if (!inlineOK) {
+         return NS_OK;
+       }
+     }
+   }
+ 
+   // This might be the first reference to this language in the global
+   // We must init the language before we attempt to fetch its context.
+   if (NS_FAILED(global->EnsureScriptEnvironment())) {
+diff -r 2f63e2f90d5c dom/base/nsJSTimeoutHandler.cpp
+--- a/dom/base/nsJSTimeoutHandler.cpp	Thu Mar 28 09:38:18 2013 -0600
++++ b/dom/base/nsJSTimeoutHandler.cpp	Thu Mar 28 11:55:39 2013 -0700
+@@ -240,26 +240,42 @@ nsJSScriptTimeoutHandler::Init(nsGlobalW
+     nsCOMPtr<nsIDocument> doc = do_QueryInterface(aWindow->GetExtantDocument());
+ 
+     if (doc) {
+       nsCOMPtr<nsIContentSecurityPolicy> csp;
+       nsresult rv = doc->NodePrincipal()->GetCsp(getter_AddRefs(csp));
+       NS_ENSURE_SUCCESS(rv, rv);
+ 
+       if (csp) {
+-        bool allowsEval;
+-        // this call will send violation reports as warranted (and return true if
+-        // reportOnly is set).
+-        rv = csp->GetAllowsEval(&allowsEval);
++        bool allowsEval = true;
++        bool reportViolation = false;
++        rv = csp->GetAllowsEval(&reportViolation, &allowsEval);
+         NS_ENSURE_SUCCESS(rv, rv);
+ 
++        if (reportViolation) {
++          // TODO : FIX DATA in violation report.
++          NS_NAMED_LITERAL_STRING(scriptSample, "call to eval() or related function blocked by CSP");
++
++          // Get the calling location.
++          uint32_t lineNum = 0;
++          const char *fileName;
++          nsAutoCString aFileName;
++          if (nsJSUtils::GetCallingLocation(cx, &fileName, &lineNum)) {
++            aFileName.Assign(fileName);
++          } else {
++            aFileName.Assign("unknown");
++          }
++
++          csp->LogViolationDetails(nsIContentSecurityPolicy::VIOLATION_TYPE_EVAL,
++                                  NS_ConvertUTF8toUTF16(aFileName),
++                                  scriptSample,
++                                  lineNum);
++        }
++
+         if (!allowsEval) {
+-          ::JS_ReportError(cx, "call to %s blocked by CSP",
+-                            *aIsInterval ? kSetIntervalStr : kSetTimeoutStr);
+-
+           // Note: Our only caller knows to turn NS_ERROR_DOM_TYPE_ERR into NS_OK.
+           return NS_ERROR_DOM_TYPE_ERR;
+         }
+       }
+     } // if there's no document, we don't have to do anything.
+ 
+     NS_HOLD_JS_OBJECTS(this, nsJSScriptTimeoutHandler);
+ 
+diff -r 2f63e2f90d5c dom/src/jsurl/nsJSProtocolHandler.cpp
+--- a/dom/src/jsurl/nsJSProtocolHandler.cpp	Thu Mar 28 09:38:18 2013 -0600
++++ b/dom/src/jsurl/nsJSProtocolHandler.cpp	Thu Mar 28 11:55:39 2013 -0700
+@@ -163,32 +163,37 @@ nsresult nsJSThunk::EvaluateScript(nsICh
+     nsresult rv;
+ 
+     // CSP check: javascript: URIs disabled unless "inline" scripts are
+     // allowed.
+     nsCOMPtr<nsIContentSecurityPolicy> csp;
+     rv = principal->GetCsp(getter_AddRefs(csp));
+     NS_ENSURE_SUCCESS(rv, rv);
+     if (csp) {
+-		bool allowsInline;
+-		rv = csp->GetAllowsInlineScript(&allowsInline);
+-		NS_ENSURE_SUCCESS(rv, rv);
++        bool allowsInline = true;
++        bool reportViolations = false;
++        rv = csp->GetAllowsInlineScript(&reportViolations, &allowsInline);
++        NS_ENSURE_SUCCESS(rv, rv);
+ 
+-      if (!allowsInline) {
+-          // gather information to log with violation report
+-          nsCOMPtr<nsIURI> uri;
+-          principal->GetURI(getter_AddRefs(uri));
+-          nsAutoCString asciiSpec;
+-          uri->GetAsciiSpec(asciiSpec);
+-		  csp->LogViolationDetails(nsIContentSecurityPolicy::VIOLATION_TYPE_INLINE_SCRIPT,
+-								   NS_ConvertUTF8toUTF16(asciiSpec),
+-								   NS_ConvertUTF8toUTF16(mURL),
+-                                   0);
++        if (reportViolations) {
++            // gather information to log with violation report
++            nsCOMPtr<nsIURI> uri;
++            principal->GetURI(getter_AddRefs(uri));
++            nsAutoCString asciiSpec;
++            uri->GetAsciiSpec(asciiSpec);
++            csp->LogViolationDetails(nsIContentSecurityPolicy::VIOLATION_TYPE_INLINE_SCRIPT,
++                                     NS_ConvertUTF8toUTF16(asciiSpec),
++                                     NS_ConvertUTF8toUTF16(mURL),
++                                     0);
++        }
++
++        //return early if inline scripts are not allowed
++        if (!allowsInline) {
+           return NS_ERROR_DOM_RETVAL_UNDEFINED;
+-      }
++        }
+     }
+ 
+     // Get the global object we should be running on.
+     nsIScriptGlobalObject* global = GetGlobalObject(aChannel);
+     if (!global) {
+         return NS_ERROR_FAILURE;
+     }
+ 
+diff -r 2f63e2f90d5c dom/workers/RuntimeService.cpp
+--- a/dom/workers/RuntimeService.cpp	Thu Mar 28 09:38:18 2013 -0600
++++ b/dom/workers/RuntimeService.cpp	Thu Mar 28 11:55:39 2013 -0700
+@@ -335,17 +335,17 @@ public:
+   {
+     AssertIsOnMainThread();
+ 
+     nsIContentSecurityPolicy* csp = mWorkerPrivate->GetCSP();
+     if (csp) {
+       NS_NAMED_LITERAL_STRING(scriptSample,
+          "Call to eval() or related function blocked by CSP.");
+       csp->LogViolationDetails(nsIContentSecurityPolicy::VIOLATION_TYPE_EVAL,
+-                                mFileName, scriptSample, mLineNum);
++                               mFileName, scriptSample, mLineNum);
+     }
+ 
+     nsRefPtr<LogViolationDetailsResponseRunnable> response =
+         new LogViolationDetailsResponseRunnable(mWorkerPrivate, mSyncQueueKey);
+     if (!response->Dispatch(nullptr)) {
+       NS_WARNING("Failed to dispatch response!");
+     }
+ 
+@@ -354,40 +354,38 @@ public:
+ };
+ 
+ JSBool
+ ContentSecurityPolicyAllows(JSContext* aCx)
+ {
+   WorkerPrivate* worker = GetWorkerPrivateFromContext(aCx);
+   worker->AssertIsOnWorkerThread();
+ 
+-  if (worker->IsEvalAllowed()) {
+-    return true;
++  if (worker->GetReportCSPViolations()) {
++    nsString fileName;
++    uint32_t lineNum = 0;
++
++    JSScript* script;
++    const char* file;
++    if (JS_DescribeScriptedCaller(aCx, &script, &lineNum) &&
++        (file = JS_GetScriptFilename(aCx, script))) {
++      fileName.AssignASCII(file);
++    } else {
++      JS_ReportPendingException(aCx);
++    }
++
++    nsRefPtr<LogViolationDetailsRunnable> runnable =
++        new LogViolationDetailsRunnable(worker, fileName, lineNum);
++
++    if (!runnable->Dispatch(aCx)) {
++      JS_ReportPendingException(aCx);
++    }
+   }
+ 
+-  nsString fileName;
+-  uint32_t lineNum = 0;
+-
+-  JSScript* script;
+-  const char* file;
+-  if (JS_DescribeScriptedCaller(aCx, &script, &lineNum) &&
+-      (file = JS_GetScriptFilename(aCx, script))) {
+-    fileName.AssignASCII(file);
+-  } else {
+-    JS_ReportPendingException(aCx);
+-  }
+-
+-  nsRefPtr<LogViolationDetailsRunnable> runnable =
+-      new LogViolationDetailsRunnable(worker, fileName, lineNum);
+-
+-  if (!runnable->Dispatch(aCx)) {
+-    JS_ReportPendingException(aCx);
+-  }
+-
+-  return false;
++  return worker->IsEvalAllowed();
+ }
+ 
+ void
+ CTypesActivityCallback(JSContext* aCx,
+                        js::CTypesActivityType aType)
+ {
+   WorkerPrivate* worker = GetWorkerPrivateFromContext(aCx);
+   worker->AssertIsOnWorkerThread();
+diff -r 2f63e2f90d5c dom/workers/WorkerPrivate.cpp
+--- a/dom/workers/WorkerPrivate.cpp	Thu Mar 28 09:38:18 2013 -0600
++++ b/dom/workers/WorkerPrivate.cpp	Thu Mar 28 11:55:39 2013 -0700
+@@ -1833,27 +1833,29 @@ WorkerPrivateParent<Derived>::WorkerPriv
+                                      bool aIsChromeWorker,
+                                      const nsACString& aDomain,
+                                      nsCOMPtr<nsPIDOMWindow>& aWindow,
+                                      nsCOMPtr<nsIScriptContext>& aScriptContext,
+                                      nsCOMPtr<nsIURI>& aBaseURI,
+                                      nsCOMPtr<nsIPrincipal>& aPrincipal,
+                                      nsCOMPtr<nsIChannel>& aChannel,
+                                      nsCOMPtr<nsIContentSecurityPolicy>& aCSP,
+-                                     bool aEvalAllowed)
++                                     bool aEvalAllowed,
++                                     bool aReportCSPViolations)
+ : EventTarget(aParent ? aCx : NULL), mMutex("WorkerPrivateParent Mutex"),
+   mCondVar(mMutex, "WorkerPrivateParent CondVar"),
+   mMemoryReportCondVar(mMutex, "WorkerPrivateParent Memory Report CondVar"),
+   mJSObject(aObject), mParent(aParent), mParentJSContext(aParentJSContext),
+   mScriptURL(aScriptURL), mDomain(aDomain), mBusyCount(0),
+   mParentStatus(Pending), mJSContextOptions(0),
+   mJSRuntimeHeapSize(0), mJSWorkerAllocationThreshold(3),
+   mGCZeal(0), mJSObjectRooted(false), mParentSuspended(false),
+   mIsChromeWorker(aIsChromeWorker), mPrincipalIsSystem(false),
+-  mMainThreadObjectsForgotten(false), mEvalAllowed(aEvalAllowed)
++  mMainThreadObjectsForgotten(false), mEvalAllowed(aEvalAllowed),
++  mReportCSPViolations(aReportCSPViolations)
+ {
+   MOZ_COUNT_CTOR(mozilla::dom::workers::WorkerPrivateParent);
+ 
+   if (aWindow) {
+     NS_ASSERTION(aWindow->IsInnerWindow(), "Should have inner window here!");
+   }
+ 
+   mWindow.swap(aWindow);
+@@ -2421,21 +2423,23 @@ WorkerPrivate::WorkerPrivate(JSContext* 
+                              const nsACString& aDomain,
+                              nsCOMPtr<nsPIDOMWindow>& aWindow,
+                              nsCOMPtr<nsIScriptContext>& aParentScriptContext,
+                              nsCOMPtr<nsIURI>& aBaseURI,
+                              nsCOMPtr<nsIPrincipal>& aPrincipal,
+                              nsCOMPtr<nsIChannel>& aChannel,
+                              nsCOMPtr<nsIContentSecurityPolicy>& aCSP,
+                              bool aEvalAllowed,
++                             bool aReportCSPViolations,
+                              bool aXHRParamsAllowed)
+ : WorkerPrivateParent<WorkerPrivate>(aCx, aObject, aParent, aParentJSContext,
+                                      aScriptURL, aIsChromeWorker, aDomain,
+                                      aWindow, aParentScriptContext, aBaseURI,
+-                                     aPrincipal, aChannel, aCSP, aEvalAllowed),
++                                     aPrincipal, aChannel, aCSP, aEvalAllowed,
++                                     aReportCSPViolations),
+   mJSContext(nullptr), mErrorHandlerRecursionCount(0), mNextTimeoutId(1),
+   mStatus(Pending), mSuspended(false), mTimerRunning(false),
+   mRunningExpiredTimeouts(false), mCloseHandlerStarted(false),
+   mCloseHandlerFinished(false), mMemoryReporterRunning(false),
+   mBlockedForMemoryReporter(false), mXHRParamsAllowed(aXHRParamsAllowed)
+ {
+   MOZ_COUNT_CTOR(mozilla::dom::workers::WorkerPrivate);
+ }
+@@ -2454,16 +2458,17 @@ WorkerPrivate::Create(JSContext* aCx, JS
+   nsCOMPtr<nsIURI> baseURI;
+   nsCOMPtr<nsIPrincipal> principal;
+   nsCOMPtr<nsIScriptContext> scriptContext;
+   nsCOMPtr<nsIDocument> document;
+   nsCOMPtr<nsPIDOMWindow> window;
+   nsCOMPtr<nsIContentSecurityPolicy> csp;
+ 
+   bool evalAllowed = true;
++  bool reportEvalViolations = false;
+ 
+   JSContext* parentContext;
+ 
+   bool xhrParamsAllowed = false;
+ 
+   if (aParent) {
+     aParent->AssertIsOnWorkerThread();
+ 
+@@ -2618,17 +2623,17 @@ WorkerPrivate::Create(JSContext* aCx, JS
+       NS_ERROR("Must be chrome or have an domain!");
+       return nullptr;
+     }
+ 
+     if (!GetContentSecurityPolicy(aCx, getter_AddRefs(csp))) {
+       return nullptr;
+     }
+ 
+-    if (csp && NS_FAILED(csp->GetAllowsEval(&evalAllowed))) {
++    if (csp && NS_FAILED(csp->GetAllowsEval(&reportEvalViolations, &evalAllowed))) {
+       NS_ERROR("CSP: failed to get allowsEval");
+       return nullptr;
+     }
+   }
+ 
+   size_t urlLength;
+   const jschar* urlChars = JS_GetStringCharsZAndLength(aCx, aScriptURL,
+                                                        &urlLength);
+@@ -2677,17 +2682,18 @@ WorkerPrivate::Create(JSContext* aCx, JS
+   if (NS_FAILED(rv)) {
+     scriptloader::ReportLoadError(aCx, scriptURL, rv, !aParent);
+     return nullptr;
+   }
+ 
+   nsRefPtr<WorkerPrivate> worker =
+     new WorkerPrivate(aCx, aObj, aParent, parentContext, scriptURL,
+                       aIsChromeWorker, domain, window, scriptContext, baseURI,
+-                      principal, channel, csp, evalAllowed, xhrParamsAllowed);
++                      principal, channel, csp, evalAllowed, reportEvalViolations,
++                      xhrParamsAllowed);
+ 
+   worker->SetIsDOMBinding();
+   worker->SetWrapper(aObj);
+ 
+   nsRefPtr<CompileScriptRunnable> compiler = new CompileScriptRunnable(worker);
+   if (!compiler->Dispatch(aCx)) {
+     return nullptr;
+   }
+diff -r 2f63e2f90d5c dom/workers/WorkerPrivate.h
+--- a/dom/workers/WorkerPrivate.h	Thu Mar 28 09:38:18 2013 -0600
++++ b/dom/workers/WorkerPrivate.h	Thu Mar 28 11:55:39 2013 -0700
+@@ -279,28 +279,30 @@ private:
+   uint32_t mJSWorkerAllocationThreshold;
+   uint8_t mGCZeal;
+   bool mJSObjectRooted;
+   bool mParentSuspended;
+   bool mIsChromeWorker;
+   bool mPrincipalIsSystem;
+   bool mMainThreadObjectsForgotten;
+   bool mEvalAllowed;
++  bool mReportCSPViolations;
+ 
+ protected:
+   WorkerPrivateParent(JSContext* aCx, JSObject* aObject, WorkerPrivate* aParent,
+                       JSContext* aParentJSContext, const nsAString& aScriptURL,
+                       bool aIsChromeWorker, const nsACString& aDomain,
+                       nsCOMPtr<nsPIDOMWindow>& aWindow,
+                       nsCOMPtr<nsIScriptContext>& aScriptContext,
+                       nsCOMPtr<nsIURI>& aBaseURI,
+                       nsCOMPtr<nsIPrincipal>& aPrincipal,
+                       nsCOMPtr<nsIChannel>& aChannel,
+                       nsCOMPtr<nsIContentSecurityPolicy>& aCSP,
+-                      bool aEvalAllowed);
++                      bool aEvalAllowed,
++                      bool aReportCSPViolations);
+ 
+   ~WorkerPrivateParent();
+ 
+ private:
+   Derived*
+   ParentAsWorkerPrivate() const
+   {
+     return static_cast<Derived*>(const_cast<WorkerPrivateParent*>(this));
+@@ -555,16 +557,22 @@ public:
+   }
+ 
+   void
+   SetEvalAllowed(bool aEvalAllowed)
+   {
+     mEvalAllowed = aEvalAllowed;
+   }
+ 
++  bool
++  GetReportCSPViolations() const
++  {
++    return mReportCSPViolations;
++  }
++
+   LocationInfo&
+   GetLocationInfo()
+   {
+     return mLocationInfo;
+   }
+ 
+   uint32_t
+   GetJSContextOptions() const
+@@ -889,17 +897,17 @@ private:
+   WorkerPrivate(JSContext* aCx, JSObject* aObject, WorkerPrivate* aParent,
+                 JSContext* aParentJSContext, const nsAString& aScriptURL,
+                 bool aIsChromeWorker, const nsACString& aDomain,
+                 nsCOMPtr<nsPIDOMWindow>& aWindow,
+                 nsCOMPtr<nsIScriptContext>& aScriptContext,
+                 nsCOMPtr<nsIURI>& aBaseURI, nsCOMPtr<nsIPrincipal>& aPrincipal,
+                 nsCOMPtr<nsIChannel>& aChannel,
+                 nsCOMPtr<nsIContentSecurityPolicy>& aCSP, bool aEvalAllowed,
+-                bool aXHRParamsAllowed);
++                bool aReportCSPViolations, bool aXHRParamsAllowed);
+ 
+   static bool
+   GetContentSecurityPolicy(JSContext *aCx,
+                            nsIContentSecurityPolicy** aCsp);
+ 
+   bool
+   Dispatch(WorkerRunnable* aEvent, EventQueue* aQueue);
+ 

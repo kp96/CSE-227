@@ -1,0 +1,15 @@
+$OpenBSD: patch-toolkit_library_Makefile_in,v 1.5 2011/03/30 21:39:14 landry Exp $
+--- toolkit/library/Makefile.in.orig	Sat Mar 19 00:34:11 2011
++++ toolkit/library/Makefile.in	Sat Apr  9 11:34:06 2011
+@@ -278,6 +284,11 @@ export:: $(RDF_UTIL_SRC_CPPSRCS) $(INTL_UNICHARUTIL_UT
+ 
+ ifdef MOZ_ENABLE_LIBXUL
+ include $(srcdir)/libxul-rules.mk
++endif
++
++ifeq ($(OS_ARCH),OpenBSD)
++# Needed by nsAuthGSSAPI
++OS_LIBS += -lkrb5 -lcrypto
+ endif
+ 
+ ifdef MOZ_JAVAXPCOM

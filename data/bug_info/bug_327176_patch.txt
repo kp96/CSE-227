@@ -1,0 +1,82 @@
+Index: caps/src/nsScriptSecurityManager.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/caps/src/nsScriptSecurityManager.cpp,v
+retrieving revision 1.284
+diff -u -p -d -8 -r1.284 nsScriptSecurityManager.cpp
+--- caps/src/nsScriptSecurityManager.cpp	7 Feb 2006 22:24:47 -0000	1.284
++++ caps/src/nsScriptSecurityManager.cpp	14 Feb 2006 19:39:24 -0000
+@@ -1688,29 +1688,16 @@ nsScriptSecurityManager::doGetSubjectPri
+         return nsnull;
+     }
+     return GetSubjectPrincipal(cx, rv);
+ }
+ 
+ NS_IMETHODIMP
+ nsScriptSecurityManager::GetSystemPrincipal(nsIPrincipal **result)
+ {
+-    if (!mSystemPrincipal)
+-    {
+-        nsRefPtr<nsSystemPrincipal> system = new nsSystemPrincipal();
+-        if (!system)
+-            return NS_ERROR_OUT_OF_MEMORY;
+-
+-        nsresult rv = system->Init();
+-        if (NS_FAILED(rv))
+-            return rv;
+-
+-        mSystemPrincipal = system;
+-    }
+-
+     NS_ADDREF(*result = mSystemPrincipal);
+ 
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsScriptSecurityManager::SubjectPrincipalIsSystem(PRBool* aIsSystem)
+ {
+@@ -3022,16 +3009,25 @@ nsresult nsScriptSecurityManager::Init()
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+     nsCOMPtr<nsIStringBundleService> bundleService = do_GetService(NS_STRINGBUNDLE_CONTRACTID, &rv);
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+     rv = bundleService->CreateBundle("chrome://global/locale/security/caps.properties", &sStrBundle);
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
++    // Create our system principal singleton
++    nsRefPtr<nsSystemPrincipal> system = new nsSystemPrincipal();
++    NS_ENSURE_TRUE(system, NS_ERROR_OUT_OF_MEMORY);
++
++    rv = system->Init();
++    NS_ENSURE_SUCCESS(rv, rv);
++
++    mSystemPrincipal = system;
++
+     //-- Register security check callback in the JS engine
+     //   Currently this is used to control access to function.caller
+     nsCOMPtr<nsIJSRuntimeService> runtimeService =
+         do_GetService("@mozilla.org/js/xpc/RuntimeService;1", &rv);
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+     rv = runtimeService->GetRuntime(&sRuntime);
+     NS_ENSURE_SUCCESS(rv, rv);
+@@ -3116,17 +3112,17 @@ nsScriptSecurityManager::GetScriptSecuri
+ // Currently this nsGenericFactory constructor is used only from FastLoad
+ // (XPCOM object deserialization) code, when "creating" the system principal
+ // singleton.
+ nsSystemPrincipal *
+ nsScriptSecurityManager::SystemPrincipalSingletonConstructor()
+ {
+     nsIPrincipal *sysprin = nsnull;
+     if (gScriptSecMan)
+-        gScriptSecMan->GetSystemPrincipal(&sysprin);
++        sysprin = gScriptSecMan->mSystemPrincipal;
+     return NS_STATIC_CAST(nsSystemPrincipal*, sysprin);
+ }
+ 
+ nsresult
+ nsScriptSecurityManager::InitPolicies()
+ {
+     // Clear any policies cached on XPConnect wrappers
+     NS_ENSURE_STATE(sXPConnect);

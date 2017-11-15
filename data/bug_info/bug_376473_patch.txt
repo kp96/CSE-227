@@ -1,0 +1,47 @@
+Index: toolkit/mozapps/downloads/src/nsHelperAppDlg.js.in
+===================================================================
+RCS file: /cvsroot/mozilla/toolkit/mozapps/downloads/src/nsHelperAppDlg.js.in,v
+retrieving revision 1.32.2.7
+diff -p -u -4 -r1.32.2.7 nsHelperAppDlg.js.in
+--- toolkit/mozapps/downloads/src/nsHelperAppDlg.js.in	18 Apr 2007 19:58:08 -0000	1.32.2.7
++++ toolkit/mozapps/downloads/src/nsHelperAppDlg.js.in	28 Jan 2008 06:09:14 -0000
+@@ -494,9 +494,9 @@ nsUnknownContentTypeDialog.prototype = {
+       this.mDialog.document.documentElement.getButton("accept").disabled = true;
+       const nsITimer = Components.interfaces.nsITimer;
+       this._timer = Components.classes["@mozilla.org/timer;1"]
+                               .createInstance(nsITimer);
+-      this._timer.initWithCallback(this, 250, nsITimer.TYPE_ONE_SHOT);
++      this._timer.initWithCallback(this, 1000, nsITimer.TYPE_ONE_SHOT);
+     },
+     
+     _timer: null,
+     notify: function (aTimer) {
+@@ -595,9 +595,9 @@ nsUnknownContentTypeDialog.prototype = {
+         return;
+       this._blurred = false;
+       if (this._delayExpired) {
+         var script = "document.documentElement.getButton('accept').disabled = false";
+-        this.mDialog.setTimeout(script, 250);
++        this.mDialog.setTimeout(script, 1000);
+       }
+     },
+ 
+     // Returns true if opening the default application makes sense.
+Index: toolkit/content/commonDialog.js
+===================================================================
+RCS file: /cvsroot/mozilla/toolkit/content/commonDialog.js,v
+retrieving revision 1.9.2.6
+diff -p -u -4 -r1.9.2.6 commonDialog.js
+--- toolkit/content/commonDialog.js	17 Aug 2006 07:07:14 -0000	1.9.2.6
++++ toolkit/content/commonDialog.js	28 Jan 2008 06:09:14 -0000
+@@ -220,9 +220,9 @@ function commonDialogFocus(aEvent)
+   if (gDelayExpired) {
+     var script = "document.documentElement.getButton('accept').disabled = false; ";
+     script += "document.documentElement.getButton('extra1').disabled = false; ";
+     script += "document.documentElement.getButton('extra2').disabled = false;";
+-    setTimeout(script, 250);
++    setTimeout(script, 1000);
+   }
+ }
+ 
+ function commonDialogReenableButtons()

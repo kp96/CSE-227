@@ -1,0 +1,181 @@
+diff --git a/netwerk/base/public/security-prefs.js b/netwerk/base/public/security-prefs.js
+--- a/netwerk/base/public/security-prefs.js
++++ b/netwerk/base/public/security-prefs.js
+@@ -4,16 +4,17 @@ pref("security.enable_ssl2",            
+ pref("security.enable_ssl3",             true);
+ pref("security.enable_tls",		 true);
+ pref("security.enable_tls_session_tickets", true);
+ 
+ pref("security.ssl.allow_unrestricted_renego_everywhere__temporarily_available_pref", false);
+ pref("security.ssl.renego_unrestricted_hosts", "");
+ pref("security.ssl.treat_unsafe_negotiation_as_broken", false);
+ pref("security.ssl.require_safe_negotiation",  false);
++pref("security.ssl.warn_missing_rfc5746",  1);
+ 
+ pref("security.ssl2.rc4_128", false);
+ pref("security.ssl2.rc2_128", false);
+ pref("security.ssl2.des_ede3_192", false);
+ pref("security.ssl2.des_64", false);
+ pref("security.ssl2.rc4_40", false);
+ pref("security.ssl2.rc2_40", false);
+ pref("security.ssl3.rsa_rc4_128_md5", true);
+diff --git a/security/manager/ssl/src/nsNSSCallbacks.cpp b/security/manager/ssl/src/nsNSSCallbacks.cpp
+--- a/security/manager/ssl/src/nsNSSCallbacks.cpp
++++ b/security/manager/ssl/src/nsNSSCallbacks.cpp
+@@ -871,25 +871,30 @@ void PR_CALLBACK HandshakeCallback(PRFil
+   else
+     secStatus = (nsIWebProgressListener::STATE_IS_SECURE |
+                  nsIWebProgressListener::STATE_SECURE_LOW);
+ 
+   PRBool siteSupportsSafeRenego;
+   if (SSL_HandshakeNegotiatedExtension(fd, ssl_renegotiation_info_xtn, &siteSupportsSafeRenego) != SECSuccess
+       || !siteSupportsSafeRenego) {
+ 
++    PRBool wantWarning = (nsSSLIOLayerHelpers::getWarnLevelMissingRFC5746() > 0);
++
+     nsNSSSocketInfo* infoObject = (nsNSSSocketInfo*) fd->higher->secret;
+-    nsCOMPtr<nsIConsoleService> console(do_GetService(NS_CONSOLESERVICE_CONTRACTID));
+-    if (infoObject && console) {
++    nsCOMPtr<nsIConsoleService> console;
++    if (wantWarning) {
++      console = do_GetService(NS_CONSOLESERVICE_CONTRACTID);
++    }
++    if (wantWarning && infoObject && console) {
+       nsXPIDLCString hostName;
+       infoObject->GetHostName(getter_Copies(hostName));
+ 
+       nsAutoString msg;
+       msg.Append(NS_ConvertASCIItoUTF16(hostName));
+-      msg.Append(NS_LITERAL_STRING(" : potentially vulnerable to CVE-2009-3555"));
++      msg.Append(NS_LITERAL_STRING(" : server does not support RFC 5746, see CVE-2009-3555"));
+ 
+       console->LogStringMessage(msg.get());
+     }
+     if (nsSSLIOLayerHelpers::treatUnsafeNegotiationAsBroken()) {
+       secStatus = nsIWebProgressListener::STATE_IS_BROKEN;
+     }
+   }
+ 
+diff --git a/security/manager/ssl/src/nsNSSComponent.cpp b/security/manager/ssl/src/nsNSSComponent.cpp
+--- a/security/manager/ssl/src/nsNSSComponent.cpp
++++ b/security/manager/ssl/src/nsNSSComponent.cpp
+@@ -1874,16 +1874,20 @@ nsNSSComponent::Init()
+     nsSSLIOLayerHelpers::setRenegoUnrestrictedSites(nsDependentCString(unrestricted_hosts));
+     nsMemory::Free(unrestricted_hosts);
+     unrestricted_hosts=nsnull;
+   }
+ 
+   PRBool enabled = PR_FALSE;
+   mPrefBranch->GetBoolPref("security.ssl.treat_unsafe_negotiation_as_broken", &enabled);
+   nsSSLIOLayerHelpers::setTreatUnsafeNegotiationAsBroken(enabled);
++
++  PRInt32 warnLevel = 1;
++  mPrefBranch->GetIntPref("security.ssl.warn_missing_rfc5746", &warnLevel);
++  nsSSLIOLayerHelpers::setWarnLevelMissingRFC5746(warnLevel);
+   
+   mClientAuthRememberService = new nsClientAuthRememberService;
+   if (mClientAuthRememberService)
+     mClientAuthRememberService->Init();
+ 
+   mSSLThread = new nsSSLThread();
+   if (mSSLThread)
+     mSSLThread->startThread();
+@@ -2222,16 +2226,20 @@ nsNSSComponent::Observe(nsISupports *aSu
+       mPrefBranch->GetCharPref("security.ssl.renego_unrestricted_hosts", &unrestricted_hosts);
+       if (unrestricted_hosts) {
+         nsSSLIOLayerHelpers::setRenegoUnrestrictedSites(nsDependentCString(unrestricted_hosts));
+         nsMemory::Free(unrestricted_hosts);
+       }
+     } else if (prefName.Equals("security.ssl.treat_unsafe_negotiation_as_broken")) {
+       mPrefBranch->GetBoolPref("security.ssl.treat_unsafe_negotiation_as_broken", &enabled);
+       nsSSLIOLayerHelpers::setTreatUnsafeNegotiationAsBroken(enabled);
++    } else if (prefName.Equals("security.ssl.warn_missing_rfc5746")) {
++      PRInt32 warnLevel = 1;
++      mPrefBranch->GetIntPref("security.ssl.warn_missing_rfc5746", &warnLevel);
++      nsSSLIOLayerHelpers::setWarnLevelMissingRFC5746(warnLevel);
+     } else if (prefName.Equals("security.OCSP.enabled")
+                || prefName.Equals("security.OCSP.require")) {
+       setOCSPOptions(mPrefBranch);
+     } else {
+       /* Look through the cipher table and set according to pref setting */
+       for (CipherPref* cp = CipherPrefs; cp->pref; ++cp) {
+         if (prefName.Equals(cp->pref)) {
+           mPrefBranch->GetBoolPref(cp->pref, &enabled);
+diff --git a/security/manager/ssl/src/nsNSSIOLayer.cpp b/security/manager/ssl/src/nsNSSIOLayer.cpp
+--- a/security/manager/ssl/src/nsNSSIOLayer.cpp
++++ b/security/manager/ssl/src/nsNSSIOLayer.cpp
+@@ -1989,16 +1989,17 @@ PRBool nsSSLIOLayerHelpers::nsSSLIOLayer
+ PRDescIdentity nsSSLIOLayerHelpers::nsSSLIOLayerIdentity;
+ PRIOMethods nsSSLIOLayerHelpers::nsSSLIOLayerMethods;
+ PRLock *nsSSLIOLayerHelpers::mutex = nsnull;
+ nsCStringHashSet *nsSSLIOLayerHelpers::mTLSIntolerantSites = nsnull;
+ nsCStringHashSet *nsSSLIOLayerHelpers::mTLSTolerantSites = nsnull;
+ nsPSMRememberCertErrorsTable *nsSSLIOLayerHelpers::mHostsWithCertErrors = nsnull;
+ nsCStringHashSet *nsSSLIOLayerHelpers::mRenegoUnrestrictedSites = nsnull;
+ PRBool nsSSLIOLayerHelpers::mTreatUnsafeNegotiationAsBroken = PR_FALSE;
++PRInt32 nsSSLIOLayerHelpers::mWarnLevelMissingRFC5746 = 1;
+ PRFileDesc *nsSSLIOLayerHelpers::mSharedPollableEvent = nsnull;
+ nsNSSSocketInfo *nsSSLIOLayerHelpers::mSocketOwningPollableEvent = nsnull;
+ PRBool nsSSLIOLayerHelpers::mPollableEventCurrentlySet = PR_FALSE;
+ 
+ static PRIntn _PSM_InvalidInt(void)
+ {
+     PR_ASSERT(!"I/O method is invalid");
+     PR_SetError(PR_INVALID_METHOD_ERROR, 0);
+@@ -2285,16 +2286,28 @@ void nsSSLIOLayerHelpers::setTreatUnsafe
+ }
+ 
+ PRBool nsSSLIOLayerHelpers::treatUnsafeNegotiationAsBroken()
+ {
+   nsAutoLock lock(mutex);
+   return mTreatUnsafeNegotiationAsBroken;
+ }
+ 
++void nsSSLIOLayerHelpers::setWarnLevelMissingRFC5746(PRInt32 level)
++{
++  nsAutoLock lock(mutex);
++  mWarnLevelMissingRFC5746 = level;
++}
++
++PRInt32 nsSSLIOLayerHelpers::getWarnLevelMissingRFC5746()
++{
++  nsAutoLock lock(mutex);
++  return mWarnLevelMissingRFC5746;
++}
++
+ nsresult
+ nsSSLIOLayerNewSocket(PRInt32 family,
+                       const char *host,
+                       PRInt32 port,
+                       const char *proxyHost,
+                       PRInt32 proxyPort,
+                       PRFileDesc **fd,
+                       nsISupports** info,
+diff --git a/security/manager/ssl/src/nsNSSIOLayer.h b/security/manager/ssl/src/nsNSSIOLayer.h
+--- a/security/manager/ssl/src/nsNSSIOLayer.h
++++ b/security/manager/ssl/src/nsNSSIOLayer.h
+@@ -284,20 +284,24 @@ public:
+ 
+   static PRLock *mutex;
+   static nsCStringHashSet *mTLSIntolerantSites;
+   static nsCStringHashSet *mTLSTolerantSites;
+   static nsPSMRememberCertErrorsTable* mHostsWithCertErrors;
+ 
+   static nsCStringHashSet *mRenegoUnrestrictedSites;
+   static PRBool mTreatUnsafeNegotiationAsBroken;
++  static PRInt32 mWarnLevelMissingRFC5746;
+ 
+   static void setTreatUnsafeNegotiationAsBroken(PRBool broken);
+   static PRBool treatUnsafeNegotiationAsBroken();
+ 
++  static void setWarnLevelMissingRFC5746(PRInt32 level);
++  static PRInt32 getWarnLevelMissingRFC5746();
++
+   static void getSiteKey(nsNSSSocketInfo *socketInfo, nsCSubstring &key);
+   static PRBool rememberPossibleTLSProblemSite(PRFileDesc* fd, nsNSSSocketInfo *socketInfo);
+   static void rememberTolerantSite(PRFileDesc* ssl_layer_fd, nsNSSSocketInfo *socketInfo);
+ 
+   static void addIntolerantSite(const nsCString &str);
+   static void removeIntolerantSite(const nsCString &str);
+   static PRBool isKnownAsIntolerantSite(const nsCString &str);
+ 

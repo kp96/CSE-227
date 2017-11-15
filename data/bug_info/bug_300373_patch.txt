@@ -1,0 +1,96 @@
+Index: manager/boot/src/Makefile.in
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/boot/src/Makefile.in,v
+retrieving revision 1.12
+diff -u -1 -0 -r1.12 Makefile.in
+--- manager/boot/src/Makefile.in	5 Apr 2005 14:50:01 -0000	1.12
++++ manager/boot/src/Makefile.in	11 Jul 2005 15:35:54 -0000
+@@ -46,20 +46,24 @@
+ 
+ MODULE		= pipboot
+ LIBRARY_NAME	= pipboot
+ IS_COMPONENT	= 1
+ MODULE_NAME	= BOOT
+ EXPORT_LIBRARY	= 1
+ META_COMPONENT	= crypto
+ GRE_MODULE	= 1
+ MOZILLA_INTERNAL_API = 1
+ 
++ifdef MINIMO
++FORCE_SHARED_LIB = 1
++endif
++
+ PACKAGE_FILE = pipboot.pkg
+ 
+ CPPSRCS = \
+ 	nsEntropyCollector.cpp \
+ 	nsSecureBrowserUIImpl.cpp \
+ 	nsBOOTModule.cpp \
+ 	nsSecurityWarningDialogs.cpp \
+ 	$(NULL)
+ 
+ REQUIRES	= nspr \
+Index: manager/pki/src/Makefile.in
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/src/Makefile.in,v
+retrieving revision 1.28
+diff -u -1 -0 -r1.28 Makefile.in
+--- manager/pki/src/Makefile.in	5 Apr 2005 14:50:02 -0000	1.28
++++ manager/pki/src/Makefile.in	11 Jul 2005 15:35:54 -0000
+@@ -47,20 +47,24 @@
+ 
+ MODULE		= pippki
+ LIBRARY_NAME	= pippki
+ IS_COMPONENT	= 1
+ MODULE_NAME	= PKI
+ EXPORT_LIBRARY	= 1
+ META_COMPONENT	= crypto
+ GRE_MODULE	= 1
+ MOZILLA_INTERNAL_API = 1
+ 
++ifdef MINIMO
++FORCE_SHARED_LIB = 1
++endif
++
+ PACKAGE_FILE = pippki.pkg
+ 
+ CPPSRCS = \
+ 	nsNSSDialogs.cpp \
+ 	nsPKIModule.cpp \
+ 	nsPKIParamBlock.cpp \
+         nsASN1Tree.cpp \
+         nsNSSDialogHelper.cpp \
+ 	nsFormSigningDialog.cpp \
+ 	$(NULL)
+Index: manager/ssl/src/Makefile.in
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/Makefile.in,v
+retrieving revision 1.63
+diff -u -1 -0 -r1.63 Makefile.in
+--- manager/ssl/src/Makefile.in	2 Jun 2005 01:17:17 -0000	1.63
++++ manager/ssl/src/Makefile.in	11 Jul 2005 15:35:54 -0000
+@@ -47,20 +47,24 @@
+ 
+ MODULE		= pipnss
+ LIBRARY_NAME	= pipnss
+ IS_COMPONENT	= 1
+ MODULE_NAME	= NSS
+ EXPORT_LIBRARY	= 1
+ META_COMPONENT	= crypto
+ GRE_MODULE	= 1
+ MOZILLA_INTERNAL_API = 1
+ 
++ifdef MINIMO
++FORCE_SHARED_LIB = 1
++endif
++
+ PACKAGE_FILE = pipnss.pkg
+ 
+ CPPSRCS = 				\
+ 	nsCipherInfo.cpp \
+ 	nsNSSCallbacks.cpp		\
+ 	nsNSSComponent.cpp		\
+ 	nsNSSIOLayer.cpp		\
+ 	nsNSSModule.cpp			\
+ 	nsSSLSocketProvider.cpp		\
+ 	nsTLSSocketProvider.cpp		\

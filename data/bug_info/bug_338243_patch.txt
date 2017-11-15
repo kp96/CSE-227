@@ -1,0 +1,115 @@
+Index: base/util/nsMsgIncomingServer.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/mailnews/base/util/nsMsgIncomingServer.cpp,v
+retrieving revision 1.238
+diff -u -p -8 -r1.238 nsMsgIncomingServer.cpp
+--- base/util/nsMsgIncomingServer.cpp	23 May 2006 17:16:01 -0000	1.238
++++ base/util/nsMsgIncomingServer.cpp	10 Sep 2006 17:01:24 -0000
+@@ -1824,17 +1824,18 @@ NS_IMETHODIMP nsMsgIncomingServer::GetSo
+   // socketType is set to default value. Look at isSecure setting
+   if (NS_FAILED(rv))
+   {
+     PRBool isSecure;
+     rv = GetBoolValue("isSecure", &isSecure);
+     if (NS_SUCCEEDED(rv) && isSecure)
+     {
+        *aSocketType = nsIMsgIncomingServer::useSSL;
+-       SetSocketType(*aSocketType);
++      // don't call virtual method in case overrides call GetSocketType
++      nsMsgIncomingServer::SetSocketType(*aSocketType);
+     }
+     else
+     {
+        getDefaultIntPref("socketType", aSocketType);
+     }
+   }
+   return rv;
+   
+Index: base/util/nsMsgIncomingServer.h
+===================================================================
+RCS file: /cvsroot/mozilla/mailnews/base/util/nsMsgIncomingServer.h,v
+retrieving revision 1.55
+diff -u -p -8 -r1.55 nsMsgIncomingServer.h
+--- base/util/nsMsgIncomingServer.h	30 Aug 2005 14:37:25 -0000	1.55
++++ base/util/nsMsgIncomingServer.h	10 Sep 2006 17:01:24 -0000
+@@ -105,19 +105,19 @@ protected:
+   nsresult InternalSetHostName(const char *aHostname, const char *prefName);
+ 
+   nsresult getProtocolInfo(nsIMsgProtocolInfo **aResult);
+   nsCOMPtr <nsIFileSpec> mFilterFile;
+   nsCOMPtr <nsIMsgFilterList> mFilterList;
+   // these allow us to handle duplicate incoming messages, e.g. delete them.
+   nsHashtable m_downloadedHdrs;
+   PRInt32  m_numMsgsDownloaded;
++  nsIPrefBranch *m_prefBranch;
+ static PRBool evictOldEntries(nsHashKey *aKey, void *element, void *aData);
+ private:
+-  nsIPrefBranch *m_prefBranch;
+   nsCString m_password;
+   PRUint32 m_biffState;
+   PRPackedBool m_serverBusy;
+   nsCOMPtr <nsISpamSettings> mSpamSettings;
+   nsCOMPtr<nsIMsgFilterPlugin> mFilterPlugin;  // XXX should be a list
+ 
+ protected:
+   PRPackedBool m_canHaveFilters;
+Index: imap/src/nsImapIncomingServer.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/mailnews/imap/src/nsImapIncomingServer.cpp,v
+retrieving revision 1.357
+diff -u -p -8 -r1.357 nsImapIncomingServer.cpp
+--- imap/src/nsImapIncomingServer.cpp	18 Jul 2006 02:42:07 -0000	1.357
++++ imap/src/nsImapIncomingServer.cpp	10 Sep 2006 17:01:27 -0000
+@@ -3571,16 +3571,27 @@ nsImapIncomingServer::GetShowAttachments
+   nsresult rv; 
+   nsCOMPtr<nsIPrefBranch> prefBranch = do_GetService(NS_PREFSERVICE_CONTRACTID, &rv);
+   NS_ENSURE_SUCCESS(rv,rv);
+   
+   prefBranch->GetBoolPref("mail.inline_attachments", aResult);
+   return NS_OK; // In case this pref is not set we need to return NS_OK.
+ }
+ 
++NS_IMETHODIMP nsImapIncomingServer::SetSocketType(PRInt32 aSocketType)
++{
++  PRInt32 oldSocketType;
++  nsresult rv = GetSocketType(&oldSocketType);
++  if (NS_SUCCEEDED(rv) && oldSocketType != aSocketType)
++    CloseCachedConnections();
++  nsCAutoString fullPrefName;
++  getPrefName(m_serverKey.get(), "socketType", fullPrefName);
++  return m_prefBranch->SetIntPref(fullPrefName.get(), aSocketType);
++}
++
+ NS_IMETHODIMP
+ nsImapIncomingServer::OnUserOrHostNameChanged(const char *oldName, const char *newName)
+ {
+   nsresult rv;
+   // 1. Do common things in the base class.
+   rv = nsMsgIncomingServer::OnUserOrHostNameChanged(oldName, newName);
+   NS_ENSURE_SUCCESS(rv,rv);
+ 
+Index: imap/src/nsImapIncomingServer.h
+===================================================================
+RCS file: /cvsroot/mozilla/mailnews/imap/src/nsImapIncomingServer.h,v
+retrieving revision 1.55
+diff -u -p -8 -r1.55 nsImapIncomingServer.h
+--- imap/src/nsImapIncomingServer.h	23 May 2006 21:39:16 -0000	1.55
++++ imap/src/nsImapIncomingServer.h	10 Sep 2006 17:01:27 -0000
+@@ -96,16 +96,17 @@ public:
+   NS_IMETHOD GetCanFileMessagesOnServer(PRBool *aCanFileMessagesOnServer);
+   NS_IMETHOD GetFilterScope(nsMsgSearchScopeValue *filterScope);
+   NS_IMETHOD GetSearchScope(nsMsgSearchScopeValue *searchScope);
+   NS_IMETHOD GetServerRequiresPasswordForBiff(PRBool *aServerRequiresPasswordForBiff);
+   NS_IMETHOD OnUserOrHostNameChanged(const char *oldName, const char *newName);
+   NS_IMETHOD GetNumIdleConnections(PRInt32 *aNumIdleConnections);
+   NS_IMETHOD ForgetSessionPassword();
+   NS_IMETHOD GetMsgFolderFromURI(nsIMsgFolder *aFolderResource, const char *aURI, nsIMsgFolder **aFolder);
++  NS_IMETHOD SetSocketType(PRInt32 aSocketType);
+ 
+ protected:
+ 	nsresult GetFolder(const char* name, nsIMsgFolder** pFolder);
+   nsresult ResetFoldersToUnverified(nsIMsgFolder *parentFolder);
+   nsresult GetUnverifiedSubFolders(nsIMsgFolder *parentFolder, nsISupportsArray *aFoldersArray, PRInt32 *aNumUnverifiedFolders);
+ 	nsresult GetUnverifiedFolders(nsISupportsArray *aFolderArray, PRInt32 *aNumUnverifiedFolders);
+ 
+   nsresult DeleteNonVerifiedFolders(nsIMsgFolder *parentFolder);

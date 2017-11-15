@@ -1,0 +1,47 @@
+diff --git a/security/manager/ssl/tests/mochitest/mixedcontent/test_bug383369.html b/security/manager/ssl/tests/mochitest/mixedcontent/test_bug383369.html
+--- a/security/manager/ssl/tests/mochitest/mixedcontent/test_bug383369.html
++++ b/security/manager/ssl/tests/mochitest/mixedcontent/test_bug383369.html
+@@ -33,20 +33,21 @@
+     var dirProvider = Components.classes["@mozilla.org/file/directory_service;1"]
+       .getService(Components.interfaces.nsIProperties);
+     var profileDir = dirProvider.get("ProfDS", Components.interfaces.nsIFile);
+     profileDir.append("downloads");
+     
+     var prefs = Components.classes["@mozilla.org/preferences-service;1"]
+       .getService(Components.interfaces.nsIPrefService);
+     prefs = prefs.getBranch("browser.download.");
+         
+     prefs.setCharPref("dir", profileDir.path);
++    prefs.setBoolPref("useDownloadDir", true);
+     prefs.setIntPref("folderList", 2);
+     prefs.setBoolPref("manager.closeWhenDone", true);
+     prefs.setBoolPref("manager.showWhenStarting", false);
+   
+     var downloadManager = Components.classes["@mozilla.org/download-manager;1"]
+       .getService(Components.interfaces.nsIDownloadManager);
+     var theWindow = window;
+     window.setTimeout(function()
+     {
+       netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+@@ -71,20 +72,21 @@
+     
+     const handlerSvc = Components.classes["@mozilla.org/uriloader/handler-service;1"]
+       .getService(Components.interfaces.nsIHandlerService);
+     handlerSvc.remove(handlerInfo);
+     
+     var prefs = Components.classes["@mozilla.org/preferences-service;1"]
+       .getService(Components.interfaces.nsIPrefService);
+     prefs = prefs.getBranch("browser.download.");
+ 
+     prefs.setCharPref("dir", "");
++    prefs.setBoolPref("useDownloadDir", false);
+     prefs.setIntPref("folderList", 0);
+     prefs.setBoolPref("manager.closeWhenDone", false);
+     prefs.setBoolPref("manager.showWhenStarting", true);
+   }
+   
+   </script>
+ </head>
+ 
+ <body>
+ </body>

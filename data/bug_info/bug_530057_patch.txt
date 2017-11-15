@@ -1,0 +1,30 @@
+commit fbfce3a7d51e713506d0f2a896f4ecc962316caa
+Author: Jacek Caban <jacek@codeweavers.com>
+Date:   Fri Nov 20 19:36:52 2009 +0100
+
+    Bug 530057 - nsAuthSSPI.cpp compilation failure on mingw [regression]
+
+diff --git a/extensions/auth/nsAuthSSPI.cpp b/extensions/auth/nsAuthSSPI.cpp
+index 99d2df9..f4d3f80 100644
+--- a/extensions/auth/nsAuthSSPI.cpp
++++ b/extensions/auth/nsAuthSSPI.cpp
+@@ -271,16 +271,16 @@ nsAuthSSPI::Init(const char *serviceName,
+     // null for pai.
+     if (username && password) {
+         if (domain) {
+-            ai.Domain = const_cast<unsigned short*>(domain);
++            ai.Domain = (unsigned short *)domain; // Cast away the const
+             ai.DomainLength = wcslen(domain);
+         }
+         else {
+             ai.Domain = NULL;
+             ai.DomainLength = 0;
+         }
+-        ai.User = const_cast<unsigned short*>(username);
++        ai.User = (unsigned short *)username; // Cast away the const
+         ai.UserLength = wcslen(username);
+-        ai.Password = const_cast<unsigned short*>(password);
++        ai.Password = (unsigned short *)password; // Cast away the const
+         ai.PasswordLength = wcslen(password);
+         ai.Flags = SEC_WINNT_AUTH_IDENTITY_UNICODE;
+         pai = &ai;

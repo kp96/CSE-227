@@ -1,0 +1,33 @@
+Index: browser/base/content/browser.js
+===================================================================
+RCS file: /cvsroot/mozilla/browser/base/content/browser.js,v
+retrieving revision 1.565
+diff -u -8 -p -r1.565 browser.js
+--- browser/base/content/browser.js	28 Feb 2006 04:15:56 -0000	1.565
++++ browser/base/content/browser.js	7 Mar 2006 13:00:38 -0000
+@@ -4576,17 +4576,24 @@ nsContextMenu.prototype = {
+         this.target.ownerDocument.location.reload();
+     },
+     // Open clicked-in frame in its own window.
+     openFrame : function () {
+         openNewWindowWith(this.target.ownerDocument.location.href, null, null);
+     },
+     // Open clicked-in frame in the same window.
+     showOnlyThisFrame : function () {
+-        window.loadURI(this.target.ownerDocument.location.href, null, null);
++        try {
++          const secMan = Components.classes["@mozilla.org/scriptsecuritymanager;1"]
++                         .getService(Components.interfaces.nsIScriptSecurityManager);
++          const nsIScriptSecMan = Components.interfaces.nsIScriptSecurityManager;
++          secMan.checkLoadURI(gBrowser.currentURI, makeURI(this.target.ownerDocument.location.href),
++                              nsIScriptSecMan.DISALLOW_SCRIPT);
++          window.loadURI(this.target.ownerDocument.location.href, null, null);
++        } catch(e) {}
+     },
+     // View Partial Source
+     viewPartialSource : function ( context ) {
+         var focusedWindow = document.commandDispatcher.focusedWindow;
+         if (focusedWindow == window)
+           focusedWindow = content;
+         var docCharset = null;
+         if (focusedWindow)

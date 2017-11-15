@@ -1,0 +1,34 @@
+# HG changeset patch
+# Parent bf11705bf6d4b6535799588a9a427bb654aaa6b4
+# User timeless@mozdev.org
+Bug 619201 nsCertOverrideService needs to initialize on the main thread to use the directory service
+r=kaie
+
+diff --git a/security/manager/ssl/src/nsNSSComponent.cpp b/security/manager/ssl/src/nsNSSComponent.cpp
+--- a/security/manager/ssl/src/nsNSSComponent.cpp
++++ b/security/manager/ssl/src/nsNSSComponent.cpp
+@@ -1640,6 +1640,15 @@ nsNSSComponent::InitializeNSS(PRBool sho
+       }
+     }
+ 
++    {
++      nsCOMPtr<nsICertOverrideService> icos =
++        do_GetService("@mozilla.org/security/certoverride;1", &rv);
++      if (NS_FAILED(rv)) {
++        nsPSMInitPanic::SetPanic();
++        return rv;
++      }
++    }
++
+     hashTableCerts = PL_NewHashTable( 0, certHashtable_keyHash, certHashtable_keyCompare,
+       certHashtable_valueCompare, 0, 0 );
+ 
+@@ -2366,7 +2375,7 @@ void nsNSSComponent::ShowAlert(AlertIden
+ 
+ nsresult nsNSSComponent::LogoutAuthenticatedPK11()
+ {
+-  nsCOMPtr<nsICertOverrideService> icos = 
++  nsCOMPtr<nsICertOverrideService> icos =
+     do_GetService("@mozilla.org/security/certoverride;1");
+   if (icos) {
+     icos->ClearValidityOverride(

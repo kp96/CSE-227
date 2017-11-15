@@ -1,0 +1,38 @@
+# HG changeset patch
+# Parent c722928d8b69b18daf5c6a29e1c66ea35cf7e230
+# User Brian Smith <bsmith@mozilla.com>
+diff --git a/security/manager/ssl/src/nsNSSCertificate.cpp b/security/manager/ssl/src/nsNSSCertificate.cpp
+--- a/security/manager/ssl/src/nsNSSCertificate.cpp
++++ b/security/manager/ssl/src/nsNSSCertificate.cpp
+@@ -458,31 +458,20 @@ nsNSSCertificate::FormatUIStrings(const 
+             details.Append(info);
+             details.Append(PRUnichar(' '));
+           }
+           details.Append(temp1);
+         }
+ 
+         details.Append(PRUnichar('\n'));
+       }
+     }
+ 
+-    PRUint32 tempInt = 0;
+-    if (NS_SUCCEEDED(x509Proxy->GetUsagesString(PR_FALSE, &tempInt, temp1)) && !temp1.IsEmpty()) {
+-      details.AppendLiteral("  ");
+-      if (NS_SUCCEEDED(nssComponent->GetPIPNSSBundleString("CertInfoPurposes", info))) {
+-        details.Append(info);
+-        details.AppendLiteral(": ");
+-      }
+-      details.Append(temp1);
+-      details.Append(PRUnichar('\n'));
+-    }
+-
+     if (NS_SUCCEEDED(GetKeyUsagesString(mCert, nssComponent, temp1)) && !temp1.IsEmpty()) {
+       details.AppendLiteral("  ");
+       if (NS_SUCCEEDED(nssComponent->GetPIPNSSBundleString("CertDumpKeyUsage", info))) {
+         details.Append(info);
+         details.AppendLiteral(": ");
+       }
+       details.Append(temp1);
+       details.Append(PRUnichar('\n'));
+     }
+ 

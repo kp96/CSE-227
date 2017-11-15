@@ -1,0 +1,147 @@
+Index: mozilla/suite/browser/navigator.xul
+===================================================================
+RCS file: /cvsroot/mozilla/suite/browser/navigator.xul,v
+retrieving revision 1.453
+diff -u -7 -p -r1.453 navigator.xul
+--- mozilla/suite/browser/navigator.xul	7 Sep 2007 22:45:46 -0000	1.453
++++ mozilla/suite/browser/navigator.xul	12 Dec 2007 16:38:08 -0000
+@@ -346,15 +346,19 @@
+       <hbox id="browser" flex="1">
+         <tabbrowser id="content"
+                     flex="1" contenttooltip="aHTMLTooltip"
+                     contentcontextmenu="contentAreaContextMenu"
+                     onnewtab="BrowserOpenTab();"
+                     autocompletepopup="PopupAutoComplete"
+                     onbookmarkgroup="addGroupmarkAs();"
+-                    onclick="return contentAreaClick(event);"/>
++                    onclick="return contentAreaClick(event);"
++                    oncommand="BrowserOnCommand(event);"/>
++        <!-- The oncommand listener above lets us fix bugs like 401575 which
++             require error page UI to do privileged things, without letting
++             error pages have any privilege themselves. -->
+       </hbox>
+     </vbox>  
+   </hbox>
+ 
+   <statusbar id="status-bar" class="chromeclass-status"
+              ondragdrop="nsDragAndDrop.drop(event, contentAreaDNDObserver);">
+     <statusbarpanel id="component-bar"/>
+Index: mozilla/suite/common/utilityOverlay.js
+===================================================================
+RCS file: /cvsroot/mozilla/suite/common/utilityOverlay.js,v
+retrieving revision 1.103
+diff -u -7 -p -r1.103 utilityOverlay.js
+--- mozilla/suite/common/utilityOverlay.js	27 Oct 2007 20:08:43 -0000	1.103
++++ mozilla/suite/common/utilityOverlay.js	12 Dec 2007 16:38:08 -0000
+@@ -612,7 +612,50 @@ function validateFileName(aFileName)
+     aFileName = aFileName.replace(/[\>]+/g, ")");
+   }
+   else if (navigator.appVersion.indexOf("Macintosh") != -1)
+     re = /[\:\/]+/g;
+   
+   return aFileName.replace(re, "_");
+ }
++
++/**
++ * Handle command events bubbling up from error page content
++ * called from oncommand by <browser>s that support error pages
++ */
++function BrowserOnCommand(event)
++{
++  // Don't trust synthetic events
++  if (!event.isTrusted)
++    return;
++
++  // If the event came from an ssl error page, it is probably either the "Add
++  // Exception" or "Get Me Out Of Here" button
++  if (/^about:neterror\?e=nssBadCert/.test(event.originalTarget.ownerDocument.documentURI)) {
++    var ot = event.originalTarget;
++    var errorDoc = ot.ownerDocument;
++
++    if (ot == errorDoc.getElementById('exceptionDialogButton')) {
++      var params = { location : errorDoc.location.href,
++                      exceptionAdded : false };
++      window.openDialog('chrome://pippki/content/exceptionDialog.xul',
++                        '','chrome,centerscreen,modal', params);
++
++      // If the user added the exception cert, attempt to reload the page
++      if (params.exceptionAdded)
++        errorDoc.location.reload();
++    }
++    else if (ot == errorDoc.getElementById('getMeOutOfHereButton')) {
++      // Redirect them to a known-functioning page, default start page
++      var url = "about:blank";
++      try {
++        url = pref.getComplexValue("browser.startup.homepage",
++                                    Components.interfaces.nsIPrefLocalizedString).data;
++        // If url is a pipe-delimited set of pages, just take the first one.
++        if (url.indexOf("|") != -1)
++          url = url.split("|")[0];
++      } catch(e) {
++        Components.utils.reportError("Couldn't get homepage pref: " + e);
++      }
++      content.location = url;
++    }
++  }
++}
+Index: mozilla/suite/locales/jar.mn
+===================================================================
+RCS file: /cvsroot/mozilla/suite/locales/jar.mn,v
+retrieving revision 1.25
+diff -u -7 -p -r1.25 jar.mn
+--- mozilla/suite/locales/jar.mn	7 Dec 2007 14:00:32 -0000	1.25
++++ mozilla/suite/locales/jar.mn	12 Dec 2007 16:38:08 -0000
+@@ -1,12 +1,13 @@
+ #filter substitution
+ 
+ @AB_CD@.jar:
+ % locale branding @AB_CD@ %locale/@AB_CD@/branding/
+ % locale communicator @AB_CD@ %locale/@AB_CD@/communicator/
++% override chrome://global/locale/netErrorApp.dtd chrome://communicator/locale/overrides/netErrorApp.dtd
+ % locale communicator-platform @AB_CD@ %locale/@AB_CD@/communicator-platform/
+ % locale communicator-region @AB_CD@ %locale/@AB_CD@/communicator-region/
+ % locale messenger @AB_CD@ %locale/@AB_CD@/messenger/
+ % locale messenger-mapi @AB_CD@ %locale/@AB_CD@/messenger-mapi/
+ % locale messenger-region @AB_CD@ %locale/@AB_CD@/messenger-region/
+ #ifdef MOZ_PSM
+ % locale messenger-smime @AB_CD@ %locale/@AB_CD@/messenger-smime/
+@@ -118,14 +119,15 @@
+   locale/@AB_CD@/communicator/help/images/wink.png                          (%chrome/common/help/images/wink.png)
+   locale/@AB_CD@/communicator/history/history.dtd                           (%chrome/common/history/history.dtd)
+   locale/@AB_CD@/communicator/history/historyTreeOverlay.dtd                (%chrome/common/history/historyTreeOverlay.dtd)
+   locale/@AB_CD@/communicator/history/history.properties                    (%chrome/common/history/history.properties)
+   locale/@AB_CD@/communicator/history/findHistory.dtd                       (%chrome/common/history/findHistory.dtd)
+   locale/@AB_CD@/communicator/migration/migration.dtd                       (%chrome/common/migration/migration.dtd)
+   locale/@AB_CD@/communicator/migration/migration.properties                (%chrome/common/migration/migration.properties)
++  locale/@AB_CD@/communicator/overrides/netErrorApp.dtd                     (%chrome/common/overrides/netErrorApp.dtd)
+   locale/@AB_CD@/communicator/permissions/aboutPopups.dtd                   (%chrome/common/permissions/aboutPopups.dtd)
+   locale/@AB_CD@/communicator/permissions/cookieViewer.properties           (%chrome/common/permissions/cookieViewer.properties)
+   locale/@AB_CD@/communicator/permissions/cookieViewer.dtd                  (%chrome/common/permissions/cookieViewer.dtd)
+   locale/@AB_CD@/communicator/permissions/imageContextOverlay.dtd           (%chrome/common/permissions/imageContextOverlay.dtd)
+   locale/@AB_CD@/communicator/permissions/permissionsManager.dtd            (%chrome/common/permissions/permissionsManager.dtd)
+   locale/@AB_CD@/communicator/permissions/permissionsManager.properties     (%chrome/common/permissions/permissionsManager.properties)
+   locale/@AB_CD@/communicator/permissions/permissionsNavigatorOverlay.dtd   (%chrome/common/permissions/permissionsNavigatorOverlay.dtd)
+Index: mozilla/suite/locales/en-US/chrome/common/overrides/netErrorApp.dtd
+===================================================================
+RCS file: mozilla/suite/locales/en-US/chrome/common/overrides/netErrorApp.dtd
+diff -N netErrorApp.dtd
+--- /dev/null	2007-11-30 18:28:18.000000000 +0100
++++ mozilla/suite/locales/en-US/chrome/common/overrides/netErrorApp.dtd	2007-12-12 17:48:38.000000000 +0100
+@@ -0,0 +1,17 @@
++<!-- Override app-specific error messages for SeaMonkey -->
++
++<!ENTITY securityOverride.linkText "Or you can add an exception...">
++<!ENTITY securityOverride.getMeOutOfHereButton "This sounds bad, take me to my home page instead">
++<!ENTITY securityOverride.exceptionButtonLabel "Add Exception">
++
++<!-- LOCALIZATION NOTE (securityOverride.warningText) - Do not translate the
++contents of the <xul:button> tags.  The only language content is the label= field,
++which uses strings already defined above. The button is included here (instead of
++netError.xhtml) because it exposes functionality specific to SeaMonkey. -->
++
++<!ENTITY securityOverride.warningText "
++<p>You should not add an exception if you are using an internet connection that you do not trust completely, or if you are not used to seeing a warning for this server.</p>
++
++<xul:button xmlns:xul='http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul' id='getMeOutOfHereButton' label='&securityOverride.getMeOutOfHereButton;'/>
++<xul:button xmlns:xul='http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul' id='exceptionDialogButton' label='&securityOverride.exceptionButtonLabel;'/>
++">

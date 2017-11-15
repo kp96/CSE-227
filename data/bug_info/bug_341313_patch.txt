@@ -1,0 +1,345 @@
+Index: netwerk/protocol/about/public/nsIAboutModule.idl
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/netwerk/protocol/about/public/nsIAboutModule.idl,v
+retrieving revision 1.15
+diff -u -p -d -8 -r1.15 nsIAboutModule.idl
+--- netwerk/protocol/about/public/nsIAboutModule.idl	19 Jun 2006 21:02:11 -0000	1.15
++++ netwerk/protocol/about/public/nsIAboutModule.idl	20 Jun 2006 22:56:43 -0000
+@@ -54,16 +54,22 @@ interface nsIAboutModule : nsISupports 
+      * A flag that indicates whether a URI is safe for untrusted
+      * content.  If it is, web pages and so forth will be allowed to
+      * link to this about: URI.  Otherwise, only chrome will be able
+      * to link to it.
+      */
+     const unsigned long URI_SAFE_FOR_UNTRUSTED_CONTENT = (1 << 0);
+ 
+     /**
++     * A flag that indicates whether script should be enabled for the
++     * given about: URI even if it's disabled in general.
++     */
++    const unsigned long ALLOW_SCRIPT = (1 << 1);
++
++    /**
+      * A method to get the flags that apply to a given about: URI.  The URI
+      * passed in is guaranteed to be one of the URIs that this module
+      * registered to deal with.
+      */
+     unsigned long getURIFlags(in nsIURI aURI);
+ };
+ 
+ %{C++
+Index: netwerk/protocol/about/public/nsAboutProtocolUtils.h
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/netwerk/protocol/about/public/nsAboutProtocolUtils.h,v
+retrieving revision 1.1
+diff -u -p -d -8 -r1.1 nsAboutProtocolUtils.h
+--- netwerk/protocol/about/public/nsAboutProtocolUtils.h	14 Sep 2005 04:16:26 -0000	1.1
++++ netwerk/protocol/about/public/nsAboutProtocolUtils.h	20 Jun 2006 22:56:43 -0000
+@@ -32,16 +32,17 @@
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "nsIURI.h"
+ #include "nsString.h"
+ #include "nsReadableUtils.h"
++#include "nsIAboutModule.h"
+ 
+ inline nsresult
+ NS_GetAboutModuleName(nsIURI *aAboutURI, nsCString& aModule)
+ {
+ #ifdef DEBUG
+     {
+         PRBool isAbout;
+         NS_ASSERTION(NS_SUCCEEDED(aAboutURI->SchemeIs("about", &isAbout)) &&
+@@ -57,8 +58,23 @@ NS_GetAboutModuleName(nsIURI *aAboutURI,
+     if (f != kNotFound) {
+         aModule.Truncate(f);
+     }
+ 
+     // convert to lowercase, as all about: modules are lowercase
+     ToLowerCase(aModule);
+     return NS_OK;
+ }
++
++inline nsresult
++NS_GetAboutModule(nsIURI *aAboutURI, nsIAboutModule** aModule)
++{
++  NS_PRECONDITION(aAboutURI, "Must have URI");
++
++  nsCAutoString contractID;
++  nsresult rv = NS_GetAboutModuleName(aAboutURI, contractID);
++  if (NS_FAILED(rv)) return rv;
++
++  // look up a handler to deal with "what"
++  contractID.Insert(NS_LITERAL_CSTRING(NS_ABOUT_MODULE_CONTRACTID_PREFIX), 0);
++
++  return CallGetService(contractID.get(), aModule);
++}
+Index: netwerk/protocol/about/src/nsAboutProtocolHandler.h
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/netwerk/protocol/about/src/nsAboutProtocolHandler.h,v
+retrieving revision 1.9
+diff -u -p -d -8 -r1.9 nsAboutProtocolHandler.h
+--- netwerk/protocol/about/src/nsAboutProtocolHandler.h	19 Jun 2006 21:02:11 -0000	1.9
++++ netwerk/protocol/about/src/nsAboutProtocolHandler.h	20 Jun 2006 22:56:43 -0000
+@@ -49,19 +49,16 @@ public:
+     NS_DECL_ISUPPORTS
+ 
+     // nsIProtocolHandler methods:
+     NS_DECL_NSIPROTOCOLHANDLER
+ 
+     // nsAboutProtocolHandler methods:
+     nsAboutProtocolHandler() {}
+     virtual ~nsAboutProtocolHandler() {}
+-
+-protected:
+-    static nsresult GetModuleForURI(nsIURI* uri, nsIAboutModule** module);
+ };
+ 
+ class nsSafeAboutProtocolHandler : public nsIProtocolHandler
+ {
+ public:
+     NS_DECL_ISUPPORTS
+ 
+     // nsIProtocolHandler methods:
+Index: netwerk/protocol/about/src/nsAboutProtocolHandler.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/netwerk/protocol/about/src/nsAboutProtocolHandler.cpp,v
+retrieving revision 1.43
+diff -u -p -d -8 -r1.43 nsAboutProtocolHandler.cpp
+--- netwerk/protocol/about/src/nsAboutProtocolHandler.cpp	19 Jun 2006 21:02:11 -0000	1.43
++++ netwerk/protocol/about/src/nsAboutProtocolHandler.cpp	20 Jun 2006 22:56:43 -0000
+@@ -100,17 +100,17 @@ nsAboutProtocolHandler::NewURI(const nsA
+     }
+ 
+     // Unfortunately, people create random about: URIs that don't correspond to
+     // about: modules...  Since those URIs will never open a channel, might as
+     // well consider them unsafe for better perf, and just in case.
+     PRBool isSafe = PR_FALSE;
+     
+     nsCOMPtr<nsIAboutModule> aboutMod;
+-    rv = GetModuleForURI(url, getter_AddRefs(aboutMod));
++    rv = NS_GetAboutModule(url, getter_AddRefs(aboutMod));
+     if (NS_SUCCEEDED(rv)) {
+         // The standard return case
+         PRUint32 flags;
+         rv = aboutMod->GetURIFlags(url, &flags);
+         NS_ENSURE_SUCCESS(rv, rv);
+ 
+         isSafe =
+             ((flags & nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT) != 0);
+@@ -142,17 +142,17 @@ nsAboutProtocolHandler::NewURI(const nsA
+ 
+ NS_IMETHODIMP
+ nsAboutProtocolHandler::NewChannel(nsIURI* uri, nsIChannel* *result)
+ {
+     NS_ENSURE_ARG_POINTER(uri);
+ 
+     // about:what you ask?
+     nsCOMPtr<nsIAboutModule> aboutMod;
+-    nsresult rv = GetModuleForURI(uri, getter_AddRefs(aboutMod));
++    nsresult rv = NS_GetAboutModule(uri, getter_AddRefs(aboutMod));
+     if (NS_SUCCEEDED(rv)) {
+         // The standard return case:
+         return aboutMod->NewChannel(uri, result);
+     }
+ 
+     // mumble...
+ 
+     if (rv == NS_ERROR_FACTORY_NOT_REGISTERED) {
+@@ -168,34 +168,16 @@ NS_IMETHODIMP 
+ nsAboutProtocolHandler::AllowPort(PRInt32 port, const char *scheme, PRBool *_retval)
+ {
+     // don't override anything.  
+     *_retval = PR_FALSE;
+     return NS_OK;
+ }
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+-/* static */
+-nsresult
+-nsAboutProtocolHandler::GetModuleForURI(nsIURI* uri, nsIAboutModule** module)
+-{
+-    NS_PRECONDITION(uri, "Must have URI");
+-
+-    nsresult rv;
+-    nsCAutoString contractID;
+-    rv = NS_GetAboutModuleName(uri, contractID);
+-    if (NS_FAILED(rv)) return rv;
+-
+-    // look up a handler to deal with "what"
+-    contractID.Insert(NS_LITERAL_CSTRING(NS_ABOUT_MODULE_CONTRACTID_PREFIX), 0);
+-
+-    return CallGetService(contractID.get(), module);
+-}
+-
+-////////////////////////////////////////////////////////////////////////////////
+ // Safe about protocol handler impl
+ 
+ NS_IMPL_ISUPPORTS1(nsSafeAboutProtocolHandler, nsIProtocolHandler)
+ 
+ // nsIProtocolHandler methods:
+ 
+ NS_IMETHODIMP
+ nsSafeAboutProtocolHandler::GetScheme(nsACString &result)
+Index: netwerk/protocol/about/src/nsAboutRedirector.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/netwerk/protocol/about/src/nsAboutRedirector.cpp,v
+retrieving revision 1.26
+diff -u -p -d -8 -r1.26 nsAboutRedirector.cpp
+--- netwerk/protocol/about/src/nsAboutRedirector.cpp	19 Jun 2006 21:02:11 -0000	1.26
++++ netwerk/protocol/about/src/nsAboutRedirector.cpp	20 Jun 2006 22:56:43 -0000
+@@ -46,36 +46,40 @@
+ #include "nsSimpleNestedURI.h"
+ 
+ NS_IMPL_ISUPPORTS1(nsAboutRedirector, nsIAboutModule)
+ 
+ struct RedirEntry {
+     const char* id;
+     const char* url;
+     PRBool dropChromePrivs; // if PR_TRUE, the page will not have chrome privileges
++    PRBool allowScripts;  // if PR_TRUE, the page will be able to run scripts
++                          // even if script is generally disabled and it
++                          // doesn't have chrome privileges.  Use sparingly!
+ };
+ 
+ /*
+   Entries with dropChromePrivs == PR_FALSE will run with chrome
+   privileges. This is potentially dangerous. Please use PR_TRUE
+   as the third argument to each map item below unless your about:
+   page really needs chrome privileges. Security review is required
+   before adding new map entries with dropChromePrivs == PR_FALSE.
+  */
+ static RedirEntry kRedirMap[] = {
+-    { "credits", "http://www.mozilla.org/credits/", PR_TRUE },
+-    { "mozilla", "chrome://global/content/mozilla.xhtml", PR_TRUE },
+-    { "plugins", "chrome://global/content/plugins.html", PR_FALSE },
+-    { "config", "chrome://global/content/config.xul", PR_FALSE },
+-    { "logo", "chrome://global/content/logo.gif", PR_TRUE },
+-    { "buildconfig", "chrome://global/content/buildconfig.html", PR_TRUE },
+-    { "license", "chrome://global/content/license.html", PR_TRUE },
+-    { "licence", "chrome://global/content/license.html", PR_TRUE },
+-    { "about", "chrome://global/content/aboutAbout.html", PR_FALSE },
+-    { "neterror", "chrome://global/content/netError.xhtml", PR_TRUE }
++    { "credits", "http://www.mozilla.org/credits/", PR_TRUE, PR_FALSE },
++    { "mozilla", "chrome://global/content/mozilla.xhtml", PR_TRUE, PR_FALSE },
++    { "plugins", "chrome://global/content/plugins.html", PR_FALSE, PR_FALSE },
++    { "config", "chrome://global/content/config.xul", PR_FALSE, PR_FALSE },
++    { "logo", "chrome://global/content/logo.gif", PR_TRUE, PR_FALSE },
++    { "buildconfig", "chrome://global/content/buildconfig.html",
++      PR_TRUE, PR_FALSE },
++    { "license", "chrome://global/content/license.html", PR_TRUE, PR_FALSE },
++    { "licence", "chrome://global/content/license.html", PR_TRUE, PR_FALSE },
++    { "about", "chrome://global/content/aboutAbout.html", PR_FALSE, PR_FALSE },
++    { "neterror", "chrome://global/content/netError.xhtml", PR_TRUE, PR_TRUE }
+ };
+ static const int kRedirTotal = NS_ARRAY_LENGTH(kRedirMap);
+ 
+ NS_IMETHODIMP
+ nsAboutRedirector::NewChannel(nsIURI *aURI, nsIChannel **result)
+ {
+     NS_ENSURE_ARG_POINTER(aURI);
+     NS_ASSERTION(result, "must not be null");
+@@ -140,16 +144,19 @@ nsAboutRedirector::GetURIFlags(nsIURI *a
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+     for (int i=0; i < kRedirTotal; i++) 
+     {
+         if (name.EqualsASCII(kRedirMap[i].id))
+         {
+             *result = kRedirMap[i].dropChromePrivs ?
+                 nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT : 0;
++            if (kRedirMap[i].allowScripts) {
++                *result |= nsIAboutModule::ALLOW_SCRIPT;
++            }
+             return NS_OK;
+         }
+     }
+ 
+     NS_ERROR("nsAboutRedirector called for unknown case");
+     return NS_ERROR_ILLEGAL_VALUE;
+ }
+ 
+Index: xpfe/appshell/src/nsAbout.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/xpfe/appshell/src/nsAbout.cpp,v
+retrieving revision 1.21
+diff -u -p -d -8 -r1.21 nsAbout.cpp
+--- xpfe/appshell/src/nsAbout.cpp	19 Jun 2006 21:02:11 -0000	1.21
++++ xpfe/appshell/src/nsAbout.cpp	20 Jun 2006 22:56:43 -0000
+@@ -75,17 +75,17 @@ nsAbout::NewChannel(nsIURI *aURI, nsICha
+     *result = tempChannel.get();
+     NS_ADDREF(*result);
+     return rv;
+ }
+ 
+ NS_IMETHODIMP
+ nsAbout::GetURIFlags(nsIURI *aURI, PRUint32 *result)
+ {
+-    *result = 0;
++    *result = nsIAboutModule::ALLOW_SCRIPT;
+     return NS_OK;
+ }
+ 
+ NS_METHOD
+ nsAbout::Create(nsISupports *aOuter, REFNSIID aIID, void **aResult)
+ {
+     nsAbout* about = new nsAbout();
+     if (about == nsnull)
+Index: caps/src/nsScriptSecurityManager.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/caps/src/nsScriptSecurityManager.cpp,v
+retrieving revision 1.304
+diff -u -p -d -8 -r1.304 nsScriptSecurityManager.cpp
+--- caps/src/nsScriptSecurityManager.cpp	19 Jun 2006 21:08:45 -0000	1.304
++++ caps/src/nsScriptSecurityManager.cpp	20 Jun 2006 22:56:43 -0000
+@@ -1614,29 +1614,38 @@ nsScriptSecurityManager::CanExecuteScrip
+             if (treeItem && !docshell) {
+               NS_ERROR("cannot get a docshell from a treeItem!");
+             }
+ #endif // DEBUG
+         } while (treeItem && docshell);
+     }
+ 
+     // OK, the docshell doesn't have script execution explicitly disabled.
+-    // Check whether our URI is "about:".  If it is, we need to allow JS to
+-    // run...  In this case, don't apply the JS enabled pref or policies.
++    // Check whether our URI is an "about:" URI that allows scripts.  If it is,
++    // we need to allow JS to run.  In this case, don't apply the JS enabled
++    // pref or policies.  On failures, just press on and don't do this special
++    // case.
+     nsCOMPtr<nsIURI> principalURI;
+     aPrincipal->GetURI(getter_AddRefs(principalURI));
+     if (principalURI)
+     {
+-        nsCAutoString spec;
+-        principalURI->GetSpec(spec);
+-        if (spec.EqualsLiteral("about:") ||
+-            StringBeginsWith(spec, NS_LITERAL_CSTRING("about:neterror?")))
+-        {
+-            *result = PR_TRUE;
+-            return NS_OK;              
++        PRBool isAbout;
++        rv = principalURI->SchemeIs("about", &isAbout);
++        if (NS_SUCCEEDED(rv) && isAbout) {
++            nsCOMPtr<nsIAboutModule> module;
++            rv = NS_GetAboutModule(principalURI, getter_AddRefs(module));
++            if (NS_SUCCEEDED(rv)) {
++                PRUint32 flags;
++                rv = module->GetURIFlags(principalURI, &flags);
++                if (NS_SUCCEEDED(rv) &&
++                    (flags & nsIAboutModule::ALLOW_SCRIPT)) {
++                    *result = PR_TRUE;
++                    return NS_OK;              
++                }
++            }
+         }
+     }
+ 
+     //-- See if JS is disabled globally (via prefs)
+     *result = mIsJavaScriptEnabled;
+     if (mIsJavaScriptEnabled != mIsMailJavaScriptEnabled && globalObjTreeItem) 
+     {
+         nsCOMPtr<nsIDocShellTreeItem> rootItem;

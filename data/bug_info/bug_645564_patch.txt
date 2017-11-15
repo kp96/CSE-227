@@ -1,0 +1,226 @@
+# HG changeset patch
+# User Gavin Sharp <gavin@gavinsharp.com>
+# Date 1301529928 14400
+# Node ID cc4a78a0627ca369aac3db8ad92b5fdb23547f52
+# Parent  e1e0a57dc08156431e539c4047fbadad46526348
+Bug 645564: location bar site identity button text not updated when viewing a view-source: page
+
+diff --git a/browser/base/content/browser.js b/browser/base/content/browser.js
+--- a/browser/base/content/browser.js
++++ b/browser/base/content/browser.js
+@@ -7611,32 +7611,31 @@ var gIdentityHandler = {
+       switch (gPrefService.getIntPref("browser.identity.ssl_domain_display")) {
+         case 2 : // Show full domain
+           icon_label = this._lastLocation.hostname;
+           break;
+         case 1 : // Show eTLD.
+           icon_label = this.getEffectiveHost();
+       }
+ 
+-      // We need a port number for all lookups.  If one hasn't been specified, use
+-      // the https default
+-      var lookupHost = this._lastLocation.host;
+-      if (lookupHost.indexOf(':') < 0)
+-        lookupHost += ":443";
+-
+       // Verifier is either the CA Org, for a normal cert, or a special string
+       // for certs that are trusted because of a security exception.
+       var tooltip = gNavigatorBundle.getFormattedString("identity.identified.verifier",
+                                                         [iData.caOrg]);
+ 
+       // Check whether this site is a security exception. XPConnect does the right
+       // thing here in terms of converting _lastLocation.port from string to int, but
+       // the overrideService doesn't like undefined ports, so make sure we have
+       // something in the default case (bug 432241).
+-      if (this._overrideService.hasMatchingOverride(this._lastLocation.hostname,
++      // .hostname can return an empty string in some exceptional cases -
++      // hasMatchingOverride does not handle that, so avoid calling it.
++      // Updating the tooltip value in those cases isn't critical.
++      // FIXME: Fixing bug 646690 would probably makes this check unnecessary
++      if (this._lastLocation.hostname &&
++          this._overrideService.hasMatchingOverride(this._lastLocation.hostname,
+                                                     (this._lastLocation.port || 443),
+                                                     iData.cert, {}, {}))
+         tooltip = gNavigatorBundle.getString("identity.identified.verified_by_you");
+     }
+     else if (newMode == this.IDENTITY_MODE_IDENTIFIED) {
+       // If it's identified, then we can populate the dialog with credentials
+       iData = this.getIdentityData();
+       tooltip = gNavigatorBundle.getFormattedString("identity.identified.verifier",
+diff --git a/browser/base/content/test/Makefile.in b/browser/base/content/test/Makefile.in
+--- a/browser/base/content/test/Makefile.in
++++ b/browser/base/content/test/Makefile.in
+@@ -107,17 +107,17 @@ _BROWSER_FILES = \
+                  browser_bug386835.js \
+                  browser_bug405137.js \
+                  browser_bug406216.js \
+                  browser_bug409481.js \
+                  browser_bug413915.js \
+                  browser_bug416661.js \
+                  browser_bug417483.js \
+                  browser_bug419612.js \
+-                 browser_bug420160.js \
++                 browser_identity_UI.js \
+                  browser_bug422590.js \
+                  browser_bug424101.js \
+                  browser_bug427559.js \
+                  browser_bug432599.js \
+                  browser_bug435035.js \
+                  browser_bug441778.js \
+                  browser_popupNotification.js \
+                  browser_bug455852.js \
+diff --git a/browser/base/content/test/browser_bug420160.js b/browser/base/content/test/browser_identity_UI.js
+rename from browser/base/content/test/browser_bug420160.js
+rename to browser/base/content/test/browser_identity_UI.js
+--- a/browser/base/content/test/browser_bug420160.js
++++ b/browser/base/content/test/browser_identity_UI.js
+@@ -1,53 +1,113 @@
+-var listener = {
+-  testFunction: null,
+-
+-  handleEvent: function (e) {
+-    this.testFunction();
+-  }
+-}
+-
+ /* Tests for correct behaviour of getEffectiveHost on identity handler */
+ function test() {
+   waitForExplicitFinish();
+ 
+   ok(gIdentityHandler, "gIdentityHandler should exist");
+ 
+   gBrowser.selectedTab = gBrowser.addTab();
+-  gBrowser.selectedBrowser.addEventListener("load", listener, true);
+-  listener.testFunction = testNormalDomain;  
+-  content.location = "http://test1.example.org/";
++  gBrowser.selectedBrowser.addEventListener("load", checkResult, true);
++
++  nextTest();
+ }
+ 
+ // Greek IDN for 'example.test'.
+ var idnDomain = "\u03C0\u03B1\u03C1\u03AC\u03B4\u03B5\u03B9\u03B3\u03BC\u03B1.\u03B4\u03BF\u03BA\u03B9\u03BC\u03AE";
++var tests = [
++  {
++    name: "normal domain",
++    location: "http://test1.example.org/",
++    host: "test1.example.org",
++    effectiveHost: "example.org"
++  },
++  {
++    name: "view-source",
++    location: "view-source:http://example.com/",
++    // TODO: these should not be blank, bug 646690
++    host: "",
++    effectiveHost: ""
++  },
++  {
++    name: "normal HTTPS",
++    location: "https://example.com/",
++    host: "example.com",
++    effectiveHost: "example.com",
++    isHTTPS: true
++  },
++  {
++    name: "IDN subdomain",
++    location: "http://sub1." + idnDomain + "/",
++    host: "sub1." + idnDomain,
++    effectiveHost: idnDomain
++  },
++  {
++    name: "subdomain with port",
++    location: "http://sub1.test1.example.org:8000/",
++    host: "sub1.test1.example.org:8000",
++    effectiveHost: "example.org"
++  },
++  {
++    name: "subdomain HTTPS",
++    location: "https://test1.example.com",
++    host: "test1.example.com",
++    effectiveHost: "example.com",
++    isHTTPS: true
++  },
++  {
++    name: "view-source HTTPS",
++    location: "view-source:https://example.com/",
++    // TODO: these should not be blank, bug 646690
++    host: "",
++    effectiveHost: "",
++    isHTTPS: true
++  },
++  {
++    name: "IP address",
++    location: "http://127.0.0.1:8888/",
++    host: "127.0.0.1:8888",
++    effectiveHost: "127.0.0.1"
++  },
++]
+ 
+-function testNormalDomain() {
+-  is(gIdentityHandler._lastLocation.host, 'test1.example.org', "Identity handler is getting the full location");
+-  is(gIdentityHandler.getEffectiveHost(), 'example.org', "getEffectiveHost should return example.org for test1.example.org");
++let gCurrentTest, gCurrentTestIndex = -1;
++// Go through the tests in both directions, to add additional coverage for
++// transitions between different states.
++let gForward = true;
++function nextTest() {
++  if (gForward)
++    gCurrentTestIndex++;
++  else
++    gCurrentTestIndex--;
+ 
+-  listener.testFunction = testIDNDomain;
+-  content.location = "http://sub1." + idnDomain + "/";
++  if (gCurrentTestIndex == tests.length) {
++    // Went too far, reverse
++    gCurrentTestIndex--;
++    gForward = false;
++  }
++
++  if (gCurrentTestIndex == -1) {
++    gBrowser.selectedBrowser.removeEventListener("load", checkResult, true);
++    gBrowser.removeCurrentTab();
++    finish();
++    return;
++  }
++
++  gCurrentTest = tests[gCurrentTestIndex];
++  gTestDesc = "#" + gCurrentTestIndex + " (" + gCurrentTest.name + ")";
++  if (!gForward)
++    gTestDesc += " (second time)";
++  content.location = gCurrentTest.location;
+ }
+ 
+-function testIDNDomain() {
+-  is(gIdentityHandler._lastLocation.host, "sub1." + idnDomain, "Identity handler is getting the full location");
+-  is(gIdentityHandler.getEffectiveHost(), idnDomain, "getEffectiveHost should return the IDN base domain in UTF-8");
++function checkResult() {
++  if (gCurrentTest.isHTTPS) {
++    // Check that the effective host is displayed in the UI
++    let label = document.getElementById("identity-icon-label");
++    is(label.value, gCurrentTest.effectiveHost, "effective host is displayed in identity icon label for test " + gTestDesc);
++  }
+ 
+-  listener.testFunction = testNormalDomainWithPort;
+-  content.location = "http://sub1.test1.example.org:8000/";
++  // Sanity check other values, and the value of gIdentityHandler.getEffectiveHost()
++  is(gIdentityHandler._lastLocation.host, gCurrentTest.host, "host matches for test " + gTestDesc);
++  is(gIdentityHandler.getEffectiveHost(), gCurrentTest.effectiveHost, "effectiveHost matches for test " + gTestDesc);
++
++  executeSoon(nextTest);
+ }
+-
+-function testNormalDomainWithPort() {
+-  is(gIdentityHandler._lastLocation.host, 'sub1.test1.example.org:8000', "Identity handler is getting port information");
+-  is(gIdentityHandler.getEffectiveHost(), 'example.org', "getEffectiveHost should return example.org for sub1.test1.example.org:8000");
+-
+-  listener.testFunction = testIPWithPort;
+-  content.location = "http://127.0.0.1:8888/";
+-}
+-
+-function testIPWithPort() {
+-  is(gIdentityHandler.getEffectiveHost(), '127.0.0.1', "getEffectiveHost should return 127.0.0.1 for 127.0.0.1:8888");
+-  gBrowser.selectedBrowser.removeEventListener("load", listener, true);
+-  gBrowser.removeCurrentTab();
+-  finish();
+-}

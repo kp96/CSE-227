@@ -1,0 +1,51 @@
+Index: camino/src/security/CertificatesWindowController.mm
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/security/CertificatesWindowController.mm,v
+retrieving revision 1.13
+diff -u -8 -r1.13 CertificatesWindowController.mm
+--- camino/src/security/CertificatesWindowController.mm	19 Aug 2008 18:27:58 -0000	1.13
++++ camino/src/security/CertificatesWindowController.mm	8 Sep 2008 23:55:26 -0000
+@@ -410,16 +410,17 @@
+ }
+ 
+ - (void)awakeFromNib
+ {
+   [self setShouldCascadeWindows:NO];
+   [[self window] setFrameAutosaveName:@"CertificatesWindow"];
+ 
+   [mCertsOutlineView setAutoresizesOutlineColumn:NO];
++  [mCertsOutlineView setAllowsEditing:NO];
+ 
+   [mCertsOutlineView setAutosaveName:@"CertificatesOutlineView"];
+   [mCertsOutlineView setAutosaveTableColumns:YES];
+ }
+ 
+ - (void)windowDidLoad
+ {
+   // we need to listen for changes in our parent chain, to update cached trust
+Index: camino/src/extensions/ExtendedOutlineView.mm
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/extensions/ExtendedOutlineView.mm,v
+retrieving revision 1.28
+diff -u -8 -r1.28 ExtendedOutlineView.mm
+--- camino/src/extensions/ExtendedOutlineView.mm	8 Jun 2007 17:41:38 -0000	1.28
++++ camino/src/extensions/ExtendedOutlineView.mm	8 Sep 2008 23:55:29 -0000
+@@ -154,17 +154,17 @@
+         {
+           [NSApp sendAction:mDeleteAction to:[self target] from:self];
+           handled = YES;
+         }
+         break;
+         
+       case NSCarriageReturnCharacter:
+         // Start editing
+-        if ([self numberOfSelectedRows] == 1)
++        if (mAllowsEditing && ([self numberOfSelectedRows] == 1))
+         {
+           [self editColumn:0 row:[self selectedRow] withEvent:aEvent select:YES];
+           handled = YES;
+         }
+         break;
+ 
+       case NSEnterCharacter:
+         [NSApp sendAction:[self doubleAction] to:[self target] from:self];

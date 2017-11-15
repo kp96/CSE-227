@@ -1,0 +1,186 @@
+Index: modules/libpref/src/init/all.js
+===================================================================
+RCS file: /cvsroot/mozilla/modules/libpref/src/init/all.js,v
+retrieving revision 3.515.2.3.2.20
+diff -u -9 -p -r3.515.2.3.2.20 all.js
+--- modules/libpref/src/init/all.js	13 Oct 2004 01:53:42 -0000	3.515.2.3.2.20
++++ modules/libpref/src/init/all.js	19 Oct 2004 00:45:05 -0000
+@@ -1034,18 +1034,23 @@ pref("plugin.scan.Acrobat", "5.0");
+ pref("plugin.scan.Quicktime", "5.0");
+ 
+ // Locate and scan the Window Media Player installation directory for plugins with a minimum version
+ pref("plugin.scan.WindowsMediaPlayer", "7.0");
+ 
+ // Locate plugins by the directories specified in the Windows registry for PLIDs
+ // Which is currently HKLM\Software\MozillaPlugins\xxxPLIDxxx\Path
+ pref("plugin.scan.plid.all", true);
+ 
++// Disable the Asgard ActiveX-wrapper plugin since it crashes mozilla
++// due to its usage of internal APIs that have changed since the
++// plugin was created.
++pref("plugin.blocked.mimetypes", "application/x-pw-oleobject");
++
+ // Controls the scanning of the Navigator 4.x directory for plugins
+ // When pref is missing, the default is to pickup popular plugins such as
+ // Flash, Shockwave, Acrobat, and Quicktime. If set to true, ALL plugins
+ // will be picked up and if set to false the scan will not happen at all
+ //pref("plugin.scan.4xPluginFolder", false);
+ 
+ // Help Windows NT, 2000, and XP dialup a RAS connection
+ // when a network address is unreachable.
+ pref("network.autodial-helper.enabled", true);
+Index: modules/plugin/base/src/nsPluginHostImpl.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/modules/plugin/base/src/nsPluginHostImpl.cpp,v
+retrieving revision 1.497.6.1
+diff -u -9 -p -r1.497.6.1 nsPluginHostImpl.cpp
+--- modules/plugin/base/src/nsPluginHostImpl.cpp	20 Aug 2004 04:08:52 -0000	1.497.6.1
++++ modules/plugin/base/src/nsPluginHostImpl.cpp	19 Oct 2004 00:45:07 -0000
+@@ -4697,18 +4697,50 @@ PRBool nsPluginHostImpl::IsDuplicatePlug
+     // mFileName contained leaf name only, and if not equal, return true
+     if (tag->mFullPath && aPluginTag->mFullPath && PL_strcmp(tag->mFullPath, aPluginTag->mFullPath))
+       return PR_TRUE;
+   }
+ 
+   // we do not have it at all, return false
+   return PR_FALSE;
+ }
+ 
++PRBool
++nsPluginHostImpl::SupportsBlockedMimetype(nsPluginTag * tag)
++{
++  nsXPIDLCString blockedTypes;
++
++  if (mPrefService)
++    mPrefService->GetCharPref("plugin.blocked.mimetypes",
++                              getter_Copies(blockedTypes));
++
++  if (blockedTypes.IsEmpty()) {
++    return PR_FALSE;
++  }
++
++  for (PRInt32 i = 0; i < tag->mVariants; ++i) {
++    nsXPIDLCString::const_iterator start, end;
++    blockedTypes.BeginReading(start);
++    blockedTypes.EndReading(end);
++    nsXPIDLCString::const_iterator matchStart(start), matchEnd(end);
++
++    if (FindInReadable(nsDependentCString(tag->mMimeTypeArray[i]),
++                       matchStart, matchEnd)) {
++      if ((matchStart == start || *(--matchStart) == ',') &&
++          (matchEnd == end || *matchEnd == ',')) {
++        return PR_TRUE;
++      }
++    }
++  }
++
++  return PR_FALSE;
++}
++
++
+ // Structure for collecting plugin files found during directory scanning
+ struct pluginFileinDirectory
+ {
+   nsString mFilename;
+   PRInt64  mModTime;
+ 
+   pluginFileinDirectory()
+   {
+     mModTime = LL_ZERO;
+@@ -4856,19 +4888,22 @@ nsresult nsPluginHostImpl::ScanPluginsDi
+         delete pluginTag;
+         pluginTag = nsnull;
+ 
+         // plugin file changed, flag this fact
+         *aPluginsChanged = PR_TRUE;
+       }
+       else {
+         // if it is unwanted plugin we are checking for, get it back to the cache info list
+         // if this is a duplicate plugin, too place it back in the cache info list marking unwantedness
+-        if((checkForUnwantedPlugins && isUnwantedPlugin(pluginTag)) || IsDuplicatePlugin(pluginTag) || isUnwantedJavaPlugin(pluginTag)) {
++        if (SupportsBlockedMimetype(pluginTag) ||
++            (checkForUnwantedPlugins && isUnwantedPlugin(pluginTag)) ||
++            IsDuplicatePlugin(pluginTag) ||
++            isUnwantedJavaPlugin(pluginTag)) {
+           pluginTag->Mark(NS_PLUGIN_FLAG_UNWANTED);
+           pluginTag->mNext = mCachedPlugins;
+           mCachedPlugins = pluginTag;
+         }
+       }
+     }
+     else {
+       // plugin file was added, flag this fact
+       *aPluginsChanged = PR_TRUE;
+@@ -4918,33 +4953,38 @@ nsresult nsPluginHostImpl::ScanPluginsDi
+       if(pluginTag == nsnull)
+         return NS_ERROR_OUT_OF_MEMORY;
+       
+       pluginTag->mLibrary = pluginLibrary;
+       pluginTag->mLastModifiedTime = fileModTime;
+ 
+       // if this is unwanted plugin we are checkin for, or this is a duplicate plugin, 
+       // add it to our cache info list so we can cache the unwantedness of this plugin 
+       // when we sync cached plugins to registry
+-      if((checkForUnwantedPlugins && isUnwantedPlugin(pluginTag)) || IsDuplicatePlugin(pluginTag) || isUnwantedJavaPlugin(pluginTag)) {
++      if (SupportsBlockedMimetype(pluginTag) ||
++          (checkForUnwantedPlugins && isUnwantedPlugin(pluginTag)) ||
++          IsDuplicatePlugin(pluginTag) ||
++          isUnwantedJavaPlugin(pluginTag)) {
+         pluginTag->Mark(NS_PLUGIN_FLAG_UNWANTED);
+         pluginTag->mNext = mCachedPlugins;
+         mCachedPlugins = pluginTag;
+       }
+     }
+ 
+     // set the flag that we want to add this plugin to the list for now
+     // and see if it remains after we check several reasons not to do so
+     PRBool bAddIt = PR_TRUE;
+ 
+     // check if this is a specific plugin we don't want
+-    if((checkForUnwantedPlugins && isUnwantedPlugin(pluginTag)) ||
+-       isUnwantedJavaPlugin(pluginTag))
++    if (SupportsBlockedMimetype(pluginTag) ||
++        (checkForUnwantedPlugins && isUnwantedPlugin(pluginTag)) ||
++        isUnwantedJavaPlugin(pluginTag)) {
+       bAddIt = PR_FALSE;
++    }
+ 
+     // check if we already have this plugin in the list which
+     // is possible if we do refresh
+     if(bAddIt) {
+       if (HaveSamePlugin(pluginTag)) {
+         // we cannot get here if the plugin has just been added
+         // and thus |pluginTag| is not from cache, because otherwise
+         // it would not be present in the list;
+         // so there is no need to delete |pluginTag| -- it _is_ from the cache info list.
+Index: modules/plugin/base/src/nsPluginHostImpl.h
+===================================================================
+RCS file: /cvsroot/mozilla/modules/plugin/base/src/nsPluginHostImpl.h,v
+retrieving revision 1.93.32.1
+diff -u -9 -p -r1.93.32.1 nsPluginHostImpl.h
+--- modules/plugin/base/src/nsPluginHostImpl.h	20 Aug 2004 04:08:52 -0000	1.93.32.1
++++ modules/plugin/base/src/nsPluginHostImpl.h	19 Oct 2004 00:45:07 -0000
+@@ -465,19 +465,22 @@ private:
+   // and removes it from the cache.
+   nsPluginTag* RemoveCachedPluginsInfo(const char *filename);
+ 
+   //checks if the list already have the same plugin as given
+   nsPluginTag* HaveSamePlugin(nsPluginTag * aPluginTag);
+ 
+   // checks if given plugin is a duplicate of what we already have
+   // in the plugin list but found in some different place
+   PRBool IsDuplicatePlugin(nsPluginTag * aPluginTag);
+-  
++
++  // Check if a plugin supports a blocked mimetype.
++  PRBool SupportsBlockedMimetype(nsPluginTag * tag);
++
+   // destroys plugin info list
+   void ClearCachedPluginInfoList();
+   
+   nsresult EnsurePrivateDirServiceProvider();
+ 
+   nsresult GetPrompt(nsIPluginInstanceOwner *aOwner, nsIPrompt **aPrompt);
+ 
+   // one-off hack to include nppl3260.dll from the components folder
+   nsresult ScanForRealInComponentsFolder(nsIComponentManager * aCompManager);

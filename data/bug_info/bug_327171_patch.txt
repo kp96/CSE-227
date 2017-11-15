@@ -1,0 +1,84 @@
+Index: caps/include/nsScriptSecurityManager.h
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/caps/include/nsScriptSecurityManager.h,v
+retrieving revision 1.96
+diff -u -p -d -1 -0 -r1.96 nsScriptSecurityManager.h
+--- caps/include/nsScriptSecurityManager.h	16 Nov 2005 02:12:21 -0000	1.96
++++ caps/include/nsScriptSecurityManager.h	14 Feb 2006 19:07:10 -0000
+@@ -398,23 +398,20 @@ private:
+     doGetSubjectPrincipal(nsresult* rv);
+     
+     static nsresult
+     GetBaseURIScheme(nsIURI* aURI, nsCString& aScheme);
+ 
+     static nsresult 
+     ReportError(JSContext* cx, const nsAString& messageTag,
+                 nsIURI* aSource, nsIURI* aTarget);
+ 
+     nsresult
+-    GetRootDocShell(JSContext* cx, nsIDocShell **result);
+-
+-    nsresult
+     CheckPropertyAccessImpl(PRUint32 aAction,
+                             nsIXPCNativeCallContext* aCallContext,
+                             JSContext* cx, JSObject* aJSObject,
+                             nsISupports* aObj, nsIURI* aTargetURI,
+                             nsIClassInfo* aClassInfo,
+                             const char* aClassName, jsval aProperty,
+                             void** aCachedClassPolicy);
+ 
+     nsresult
+     CheckSameOriginPrincipalInternal(nsIPrincipal* aSubject,
+Index: caps/src/nsScriptSecurityManager.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/caps/src/nsScriptSecurityManager.cpp,v
+retrieving revision 1.284
+diff -u -p -d -1 -0 -r1.284 nsScriptSecurityManager.cpp
+--- caps/src/nsScriptSecurityManager.cpp	7 Feb 2006 22:24:47 -0000	1.284
++++ caps/src/nsScriptSecurityManager.cpp	14 Feb 2006 19:07:06 -0000
+@@ -1509,45 +1509,20 @@ nsScriptSecurityManager::CheckFunctionAc
+     nsIPrincipal* object = doGetObjectPrincipal(aCx, obj);
+ 
+     if (!object)
+         return NS_ERROR_FAILURE;        
+ 
+     // Note that CheckSameOriginPrincipalInternal already does an equality
+     // comparison on subject and object, so no need for us to do it.
+     return CheckSameOriginPrincipalInternal(subject, object, PR_TRUE);
+ }
+ 
+-nsresult
+-nsScriptSecurityManager::GetRootDocShell(JSContext *cx, nsIDocShell **result)
+-{
+-    nsresult rv;
+-    *result = nsnull;
+-    nsIScriptContext *scriptContext = GetScriptContext(cx);
+-    if (!scriptContext)
+-        return NS_ERROR_FAILURE;
+-
+-    nsCOMPtr<nsPIDOMWindow> window =
+-        do_QueryInterface(scriptContext->GetGlobalObject());
+-    if (!window)
+-        return NS_ERROR_FAILURE;
+-
+-    nsCOMPtr<nsIDocShellTreeItem> docshellTreeItem =
+-        do_QueryInterface(window->GetDocShell(), &rv);
+-    if (NS_FAILED(rv)) return rv;
+-
+-    nsCOMPtr<nsIDocShellTreeItem> rootItem;
+-    rv = docshellTreeItem->GetRootTreeItem(getter_AddRefs(rootItem));
+-    if (NS_FAILED(rv)) return rv;
+-
+-    return rootItem->QueryInterface(NS_GET_IID(nsIDocShell), (void**)result);
+-}
+-
+ NS_IMETHODIMP
+ nsScriptSecurityManager::CanExecuteScripts(JSContext* cx,
+                                            nsIPrincipal *aPrincipal,
+                                            PRBool *result)
+ {
+     *result = PR_FALSE; 
+ 
+     if (aPrincipal == mSystemPrincipal)
+     {
+         // Even if JavaScript is disabled, we must still execute system scripts

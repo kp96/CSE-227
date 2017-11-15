@@ -1,0 +1,59 @@
+# HG changeset patch
+# User timeless@mozdev.org
+# Date 1274798053 -10800
+# Node ID 8d099a9accbabc525f14309195f7e5eb905a90e0
+# Parent 8e4dbab0d59d73505dd8e067d155e36ee6d4ebd8
+Bug 564584 @mozilla.org/security/certoverride;1 overrides crashes the application [@ nsNSSComponent::LogoutAuthenticatedPK11]
+r=kaie
+
+diff --git a/security/manager/ssl/public/nsICertOverrideService.idl b/security/manager/ssl/public/nsICertOverrideService.idl
+--- a/security/manager/ssl/public/nsICertOverrideService.idl
++++ b/security/manager/ssl/public/nsICertOverrideService.idl
+@@ -133,8 +133,10 @@ interface nsICertOverrideService : nsISu
+    *  Remove a override for the given hostname:port.
+    *
+    *  @param aHostName The host (punycode) whose entry should be cleared.
+-   *  @param aPort The port whose entry should be cleared, if it is -1 then it 
+-   *          is internaly treated as 443
++   *  @param aPort The port whose entry should be cleared.
++   *               If it is -1, then it is internaly treated as 443.
++   *               If it is 0 and aHostName is "all:temporary-certificates",
++   *               then all temporary certificates should be cleared.
+    */
+   void clearValidityOverride(in ACString aHostName,
+                              in PRInt32 aPort);
+diff --git a/security/manager/ssl/src/nsCertOverrideService.cpp b/security/manager/ssl/src/nsCertOverrideService.cpp
+--- a/security/manager/ssl/src/nsCertOverrideService.cpp
++++ b/security/manager/ssl/src/nsCertOverrideService.cpp
+@@ -696,6 +696,11 @@ nsCertOverrideService::AddEntryToList(co
+ NS_IMETHODIMP
+ nsCertOverrideService::ClearValidityOverride(const nsACString & aHostName, PRInt32 aPort)
+ {
++  if (aPort == 0 &&
++      aHostName.EqualsLiteral("all:temporary-certificates")) {
++    RemoveAllTemporaryOverrides();
++    return NS_OK;
++  }
+   nsCAutoString hostPort;
+   GetHostWithPort(aHostName, aPort, hostPort);
+   {
+diff --git a/security/manager/ssl/src/nsNSSComponent.cpp b/security/manager/ssl/src/nsNSSComponent.cpp
+--- a/security/manager/ssl/src/nsNSSComponent.cpp
++++ b/security/manager/ssl/src/nsNSSComponent.cpp
+@@ -2350,12 +2350,10 @@ nsresult nsNSSComponent::LogoutAuthentic
+ {
+   nsCOMPtr<nsICertOverrideService> icos = 
+     do_GetService("@mozilla.org/security/certoverride;1");
+-    
+-  nsCertOverrideService *cos = 
+-    reinterpret_cast<nsCertOverrideService*>(icos.get());
+-
+-  if (cos) {
+-    cos->RemoveAllTemporaryOverrides();
++  if (icos) {
++    icos->ClearValidityOverride(
++            NS_LITERAL_CSTRING("all:temporary-certificates"),
++            0);
+   }
+ 
+   if (mClientAuthRememberService) {

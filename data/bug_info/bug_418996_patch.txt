@@ -1,0 +1,611 @@
+Index: js/src/xpconnect/src/XPCCrossOriginWrapper.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/js/src/xpconnect/src/XPCCrossOriginWrapper.cpp,v
+retrieving revision 1.37
+diff -u -p -d -8 -r1.37 XPCCrossOriginWrapper.cpp
+--- js/src/xpconnect/src/XPCCrossOriginWrapper.cpp	10 Mar 2008 08:28:51 -0000	1.37
++++ js/src/xpconnect/src/XPCCrossOriginWrapper.cpp	13 Mar 2008 00:08:37 -0000
+@@ -245,24 +245,24 @@ IsValFrame(JSObject *obj, jsval v, XPCWr
+     nsAutoString str(reinterpret_cast<PRUnichar *>
+                                      (JS_GetStringChars(JSVAL_TO_STRING(v))));
+     col->NamedItem(str, getter_AddRefs(domwin));
+   }
+ 
+   return domwin != nsnull;
+ }
+ 
+-// Returns whether the currently executing code has the same origin as the
+-// wrapper. Uses nsIScriptSecurityManager::CheckSameOriginPrincipal.
++// Returns whether the currently executing code is allowed to access
++// the wrapper.  Uses nsIPrincipal::Subsumes.
+ // |cx| must be the top context on the context stack.
+-// If the two principals have the same origin, returns NS_OK. If they differ,
++// If the subject is allowed to access the object returns NS_OK. If not,
+ // returns NS_ERROR_DOM_PROP_ACCESS_DENIED, returns another error code on
+ // failure.
+ nsresult
+-IsWrapperSameOrigin(JSContext *cx, JSObject *wrappedObj)
++CanAccessWrapper(JSContext *cx, JSObject *wrappedObj)
+ {
+   // Get the subject principal from the execution stack.
+   nsIScriptSecurityManager *ssm = XPCWrapper::GetSecurityManager();
+   if (!ssm) {
+     ThrowException(NS_ERROR_NOT_INITIALIZED, cx);
+     return NS_ERROR_NOT_INITIALIZED;
+   }
+ 
+@@ -274,16 +274,18 @@ IsWrapperSameOrigin(JSContext *cx, JSObj
+   }
+ 
+   PRBool isSystem = PR_FALSE;
+   nsresult rv = ssm->IsSystemPrincipal(subjectPrin, &isSystem);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   // If we somehow end up being called from chrome, just allow full access.
+   // This can happen from components with xpcnativewrappers=no.
++  // Note that this is just an optimization to avoid getting the
++  // object principal in this case, since Subsumes() would return true.
+   if (isSystem) {
+     return NS_OK;
+   }
+ 
+   nsCOMPtr<nsIPrincipal> objectPrin;
+   rv = ssm->GetObjectPrincipal(cx, wrappedObj, getter_AddRefs(objectPrin));
+   if (NS_FAILED(rv)) {
+     return rv;
+@@ -291,17 +293,22 @@ IsWrapperSameOrigin(JSContext *cx, JSObj
+   NS_ASSERTION(objectPrin, "Object didn't have principals?");
+ 
+   // Micro-optimization: don't call into caps if we know the answer.
+   if (subjectPrin == objectPrin) {
+     return NS_OK;
+   }
+ 
+   // Now, we have our two principals, compare them!
+-  return ssm->CheckSameOriginPrincipal(subjectPrin, objectPrin);
++  PRBool subsumes;
++  rv = subjectPrin->Subsumes(objectPrin, &subsumes);
++  if (NS_SUCCEEDED(rv) && !subsumes) {
++    rv = NS_ERROR_DOM_PROP_ACCESS_DENIED;
++  }
++  return rv;
+ }
+ 
+ static JSBool
+ WrapSameOriginProp(JSContext *cx, JSObject *outerObj, jsval *vp);
+ 
+ static JSBool
+ XPC_XOW_FunctionWrapper(JSContext *cx, JSObject *obj, uintN argc, jsval *argv,
+                         jsval *rval)
+@@ -328,17 +335,17 @@ XPC_XOW_FunctionWrapper(JSContext *cx, J
+     return JS_FALSE;
+   }
+ 
+   JSFunction *fun = JS_ValueToFunction(cx, funToCall);
+   if (!fun) {
+     return ThrowException(NS_ERROR_ILLEGAL_VALUE, cx);
+   }
+ 
+-  nsresult rv = IsWrapperSameOrigin(cx, JSVAL_TO_OBJECT(funToCall));
++  nsresult rv = CanAccessWrapper(cx, JSVAL_TO_OBJECT(funToCall));
+   if (NS_FAILED(rv) && rv != NS_ERROR_DOM_PROP_ACCESS_DENIED) {
+     return ThrowException(rv, cx);
+   }
+ 
+   JSNative native = JS_GetFunctionNative(cx, fun);
+   NS_ASSERTION(native, "How'd we get here with a scripted function?");
+ 
+   // A trick! Calling the native directly doesn't push the native onto the
+@@ -546,17 +553,17 @@ XPC_XOW_AddProperty(JSContext *cx, JSObj
+     // Allow us to define a property on ourselves.
+     return JS_TRUE;
+   }
+ 
+   JSObject *wrappedObj = GetWrappedObject(cx, obj);
+   if (!wrappedObj) {
+     return ThrowException(NS_ERROR_ILLEGAL_VALUE, cx);
+   }
+-  nsresult rv = IsWrapperSameOrigin(cx, wrappedObj);
++  nsresult rv = CanAccessWrapper(cx, wrappedObj);
+   if (NS_FAILED(rv)) {
+     if (rv == NS_ERROR_DOM_PROP_ACCESS_DENIED) {
+       // Can't override properties on foreign objects.
+       return ThrowException(rv, cx);
+     }
+     return JS_FALSE;
+   }
+ 
+@@ -566,17 +573,17 @@ XPC_XOW_AddProperty(JSContext *cx, JSObj
+ 
+ JS_STATIC_DLL_CALLBACK(JSBool)
+ XPC_XOW_DelProperty(JSContext *cx, JSObject *obj, jsval id, jsval *vp)
+ {
+   JSObject *wrappedObj = GetWrappedObject(cx, obj);
+   if (!wrappedObj) {
+     return ThrowException(NS_ERROR_ILLEGAL_VALUE, cx);
+   }
+-  nsresult rv = IsWrapperSameOrigin(cx, wrappedObj);
++  nsresult rv = CanAccessWrapper(cx, wrappedObj);
+   if (NS_FAILED(rv)) {
+     if (rv == NS_ERROR_DOM_PROP_ACCESS_DENIED) {
+       // Can't delete properties on foreign objects.
+       return ThrowException(rv, cx);
+     }
+     return JS_FALSE;
+   }
+ 
+@@ -615,17 +622,17 @@ XPC_XOW_GetOrSetProperty(JSContext *cx, 
+   }
+ 
+   AUTO_MARK_JSVAL(ccx, vp);
+ 
+   JSObject *wrappedObj = GetWrappedObject(cx, obj);
+   if (!wrappedObj) {
+     return ThrowException(NS_ERROR_ILLEGAL_VALUE, cx);
+   }
+-  nsresult rv = IsWrapperSameOrigin(cx, wrappedObj);
++  nsresult rv = CanAccessWrapper(cx, wrappedObj);
+   if (NS_FAILED(rv)) {
+     if (rv != NS_ERROR_DOM_PROP_ACCESS_DENIED) {
+       return JS_FALSE;
+     }
+ 
+     // This is a request to get a property across origins. We need to
+     // determine if this property is allAccess. If it is, then we need to
+     // actually get the property. If not, we simply need to throw an
+@@ -729,17 +736,17 @@ JS_STATIC_DLL_CALLBACK(JSBool)
+ XPC_XOW_Enumerate(JSContext *cx, JSObject *obj)
+ {
+   obj = GetWrapper(obj);
+   JSObject *wrappedObj = GetWrappedObject(cx, obj);
+   if (!wrappedObj) {
+     // Nothing to enumerate.
+     return JS_TRUE;
+   }
+-  nsresult rv = IsWrapperSameOrigin(cx, wrappedObj);
++  nsresult rv = CanAccessWrapper(cx, wrappedObj);
+   if (NS_FAILED(rv)) {
+     if (rv == NS_ERROR_DOM_PROP_ACCESS_DENIED) {
+       // Can't enumerate on foreign objects.
+       return ThrowException(rv, cx);
+     }
+ 
+     return JS_FALSE;
+   }
+@@ -755,17 +762,17 @@ XPC_XOW_NewResolve(JSContext *cx, JSObje
+ 
+   JSObject *wrappedObj = GetWrappedObject(cx, obj);
+   if (!wrappedObj) {
+     // No wrappedObj means that this is probably the prototype.
+     *objp = nsnull;
+     return JS_TRUE;
+   }
+ 
+-  nsresult rv = IsWrapperSameOrigin(cx, wrappedObj);
++  nsresult rv = CanAccessWrapper(cx, wrappedObj);
+   if (NS_FAILED(rv)) {
+     if (rv != NS_ERROR_DOM_PROP_ACCESS_DENIED) {
+       return JS_FALSE;
+     }
+ 
+     // We're dealing with a cross-origin lookup. Ensure that we're allowed to
+     // resolve this property and resolve it if so. Otherwise, we deny access
+     // and throw a security error. Note that this code does not actually check
+@@ -835,17 +842,17 @@ XPC_XOW_Convert(JSContext *cx, JSObject 
+       return XPC_XOW_toString(cx, obj, 0, nsnull, vp);
+     }
+ 
+     *vp = OBJECT_TO_JSVAL(obj);
+     return JS_TRUE;
+   }
+ 
+   // Note: JSTYPE_VOID and JSTYPE_STRING are equivalent.
+-  nsresult rv = IsWrapperSameOrigin(cx, wrappedObj);
++  nsresult rv = CanAccessWrapper(cx, wrappedObj);
+   if (NS_FAILED(rv) &&
+       (rv != NS_ERROR_DOM_PROP_ACCESS_DENIED ||
+        (type != JSTYPE_STRING && type != JSTYPE_VOID))) {
+     // Ensure that we report some kind of error.
+     if (rv == NS_ERROR_DOM_PROP_ACCESS_DENIED) {
+       ThrowException(rv, cx);
+     }
+     return JS_FALSE;
+@@ -903,17 +910,17 @@ XPC_XOW_CheckAccess(JSContext *cx, JSObj
+ JS_STATIC_DLL_CALLBACK(JSBool)
+ XPC_XOW_Call(JSContext *cx, JSObject *obj, uintN argc, jsval *argv, jsval *rval)
+ {
+   JSObject *wrappedObj = GetWrappedObject(cx, obj);
+   if (!wrappedObj) {
+     // Nothing to call.
+     return JS_TRUE;
+   }
+-  nsresult rv = IsWrapperSameOrigin(cx, wrappedObj);
++  nsresult rv = CanAccessWrapper(cx, wrappedObj);
+   if (NS_FAILED(rv)) {
+     if (rv == NS_ERROR_DOM_PROP_ACCESS_DENIED) {
+       // Can't call.
+       return ThrowException(rv, cx);
+     }
+ 
+     return JS_FALSE;
+   }
+@@ -934,17 +941,17 @@ XPC_XOW_Construct(JSContext *cx, JSObjec
+                   jsval *rval)
+ {
+   JSObject *realObj = GetWrapper(JSVAL_TO_OBJECT(argv[-2]));
+   JSObject *wrappedObj = GetWrappedObject(cx, realObj);
+   if (!wrappedObj) {
+     // Nothing to construct.
+     return JS_TRUE;
+   }
+-  nsresult rv = IsWrapperSameOrigin(cx, wrappedObj);
++  nsresult rv = CanAccessWrapper(cx, wrappedObj);
+   if (NS_FAILED(rv)) {
+     if (rv == NS_ERROR_DOM_PROP_ACCESS_DENIED) {
+       // Can't construct.
+       return ThrowException(rv, cx);
+     }
+     return JS_FALSE;
+   }
+ 
+@@ -958,17 +965,17 @@ XPC_XOW_Construct(JSContext *cx, JSObjec
+ 
+   return XPC_XOW_RewrapIfNeeded(cx, callee, rval);
+ }
+ 
+ JS_STATIC_DLL_CALLBACK(JSBool)
+ XPC_XOW_HasInstance(JSContext *cx, JSObject *obj, jsval v, JSBool *bp)
+ {
+   JSObject *iface = GetWrappedObject(cx, obj);
+-  nsresult rv = IsWrapperSameOrigin(cx, iface);
++  nsresult rv = CanAccessWrapper(cx, iface);
+   if (NS_FAILED(rv)) {
+     if (rv == NS_ERROR_DOM_PROP_ACCESS_DENIED) {
+       // Don't do this test across origins.
+       return ThrowException(rv, cx);
+     }
+     return JS_FALSE;
+   }
+ 
+@@ -1088,17 +1095,17 @@ XPC_XOW_toString(JSContext *cx, JSObject
+       JS_NewStringCopyN(cx, protoString.get(), protoString.Length());
+     if (!str) {
+       return JS_FALSE;
+     }
+     *rval = STRING_TO_JSVAL(str);
+     return JS_TRUE;
+   }
+ 
+-  nsresult rv = IsWrapperSameOrigin(cx, wrappedObj);
++  nsresult rv = CanAccessWrapper(cx, wrappedObj);
+   if (rv == NS_ERROR_DOM_PROP_ACCESS_DENIED) {
+     nsIScriptSecurityManager *ssm = XPCWrapper::GetSecurityManager();
+     if (!ssm) {
+       return ThrowException(NS_ERROR_NOT_INITIALIZED, cx);
+     }
+     rv = ssm->CheckPropertyAccess(cx, wrappedObj,
+                                   STOBJ_GET_CLASS(wrappedObj)->name,
+                                   GetRTStringByIndex(cx, XPCJSRuntime::IDX_TO_STRING),
+Index: js/src/xpconnect/src/XPCWrapper.h
+===================================================================
+RCS file: /cvsroot/mozilla/js/src/xpconnect/src/XPCWrapper.h,v
+retrieving revision 1.12
+diff -u -p -d -8 -r1.12 XPCWrapper.h
+--- js/src/xpconnect/src/XPCWrapper.h	6 Mar 2008 19:58:28 -0000	1.12
++++ js/src/xpconnect/src/XPCWrapper.h	13 Mar 2008 00:08:50 -0000
+@@ -74,17 +74,17 @@ XPC_XOW_WrapFunction(JSContext *cx, JSOb
+ JSBool
+ XPC_XOW_RewrapIfNeeded(JSContext *cx, JSObject *wrapperObj, jsval *vp);
+ 
+ JSBool
+ XPC_XOW_WrapperMoved(JSContext *cx, XPCWrappedNative *innerObj,
+                      XPCWrappedNativeScope *newScope);
+ 
+ nsresult
+-IsWrapperSameOrigin(JSContext *cx, JSObject *wrappedObj);
++CanAccessWrapper(JSContext *cx, JSObject *wrappedObj);
+ 
+ inline JSBool
+ XPC_XOW_ClassNeedsXOW(const char *name)
+ {
+   // TODO Make a perfect hash of these and use that?
+   return !strcmp(name, "Window")            ||
+          !strcmp(name, "Location")          ||
+          !strcmp(name, "HTMLIFrameElement") ||
+@@ -203,17 +203,17 @@ public:
+       return nsnull;
+     }
+ 
+     if (JSVAL_IS_PRIMITIVE(v)) {
+       return nsnull;
+     }
+ 
+     JSObject *wrappedObj = JSVAL_TO_OBJECT(v);
+-    nsresult rv = IsWrapperSameOrigin(cx, wrappedObj);
++    nsresult rv = CanAccessWrapper(cx, wrappedObj);
+     if (NS_FAILED(rv)) {
+       JS_ClearPendingException(cx);
+       return nsnull;
+     }
+ 
+     return wrappedObj;
+   }
+ 
+Index: caps/idl/nsIScriptSecurityManager.idl
+===================================================================
+RCS file: /cvsroot/mozilla/caps/idl/nsIScriptSecurityManager.idl,v
+retrieving revision 1.76
+diff -u -p -d -8 -r1.76 nsIScriptSecurityManager.idl
+--- caps/idl/nsIScriptSecurityManager.idl	4 Jan 2008 23:59:12 -0000	1.76
++++ caps/idl/nsIScriptSecurityManager.idl	13 Mar 2008 04:24:17 -0000
+@@ -37,17 +37,17 @@
+ 
+ #include "nsISupports.idl"
+ #include "nsIPrincipal.idl"
+ #include "nsIXPCSecurityManager.idl"
+ interface nsIURI;
+ interface nsIChannel;
+ 
+ 
+-[scriptable, uuid(ce216cf7-3bcb-48ab-9ff8-d03a24f19ca5)]
++[scriptable, uuid(3fffd8e8-3fea-442e-a0ed-2ba81ae197d5)]
+ interface nsIScriptSecurityManager : nsIXPCSecurityManager
+ {
+     ///////////////// Security Checks //////////////////
+     /**
+      * Checks whether the running script is allowed to access aProperty.
+      */
+     [noscript] void checkPropertyAccess(in JSContextPtr aJSContext,
+                                         in JSObjectPtr aJSObject,
+@@ -287,23 +287,16 @@ interface nsIScriptSecurityManager : nsI
+      * ReportError flag suppresses error reports for functions that
+      * don't need reporting.
+      */
+     void checkSameOriginURI(in nsIURI aSourceURI,
+                             in nsIURI aTargetURI,
+                             in boolean reportError);
+ 
+     /**
+-     * Returns OK if aSourcePrincipal and aTargetPrincipal
+-     * have the same "origin" (scheme, host, and port).
+-     */
+-    void checkSameOriginPrincipal(in nsIPrincipal aSourcePrincipal,
+-                                  in nsIPrincipal aTargetPrincipal);
+-
+-    /**
+      * Returns the principal of the global object of the given context, or null
+      * if no global or no principal.
+      */
+     [noscript] nsIPrincipal getPrincipalFromContext(in JSContextPtr cx);
+ 
+     /**
+      * Get the principal for the given channel.  This will typically be the
+      * channel owner if there is one, and the codebase principal for the
+Index: caps/include/nsScriptSecurityManager.h
+===================================================================
+RCS file: /cvsroot/mozilla/caps/include/nsScriptSecurityManager.h,v
+retrieving revision 1.111
+diff -u -p -d -8 -r1.111 nsScriptSecurityManager.h
+--- caps/include/nsScriptSecurityManager.h	27 Feb 2008 03:45:30 -0000	1.111
++++ caps/include/nsScriptSecurityManager.h	13 Mar 2008 04:23:16 -0000
+@@ -401,17 +401,20 @@ public:
+      * method returns true if aSubjectURI and aObjectURI have the same origin,
+      * false otherwise.
+      */
+     static PRBool SecurityCompareURIs(nsIURI* aSourceURI, nsIURI* aTargetURI);
+ 
+     static nsresult 
+     ReportError(JSContext* cx, const nsAString& messageTag,
+                 nsIURI* aSource, nsIURI* aTarget);
+-
++    static nsresult
++    CheckSameOriginPrincipal(nsIPrincipal* aSubject,
++                             nsIPrincipal* aObject,
++                             PRBool aIsCheckConnect);
+ private:
+ 
+     // GetScriptSecurityManager is the only call that can make one
+     nsScriptSecurityManager();
+     virtual ~nsScriptSecurityManager();
+ 
+     static JSBool JS_DLL_CALLBACK
+     CheckObjectAccess(JSContext *cx, JSObject *obj,
+@@ -437,21 +440,16 @@ private:
+                             nsAXPCNativeCallContext* aCallContext,
+                             JSContext* cx, JSObject* aJSObject,
+                             nsISupports* aObj, nsIURI* aTargetURI,
+                             nsIClassInfo* aClassInfo,
+                             const char* aClassName, jsval aProperty,
+                             void** aCachedClassPolicy);
+ 
+     nsresult
+-    CheckSameOriginPrincipalInternal(nsIPrincipal* aSubject,
+-                                     nsIPrincipal* aObject,
+-                                     PRBool aIsCheckConnect);
+-
+-    nsresult
+     CheckSameOriginDOMProp(nsIPrincipal* aSubject, 
+                            nsIPrincipal* aObject,
+                            PRUint32 aAction,
+                            PRBool aIsCheckConnect);
+ 
+     nsresult
+     LookupPolicy(nsIPrincipal* principal,
+                  ClassInfoData& aClassData, jsval aProperty,
+Index: caps/src/nsPrincipal.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/caps/src/nsPrincipal.cpp,v
+retrieving revision 1.54
+diff -u -p -d -8 -r1.54 nsPrincipal.cpp
+--- caps/src/nsPrincipal.cpp	27 Feb 2008 03:45:30 -0000	1.54
++++ caps/src/nsPrincipal.cpp	13 Mar 2008 04:23:26 -0000
+@@ -244,23 +244,24 @@ nsPrincipal::Equals(nsIPrincipal *aOther
+   *aResult = PR_FALSE;
+ 
+   if (!aOther) {
+     NS_WARNING("Need a principal to compare this to!");
+     return NS_OK;
+   }
+ 
+   if (this != aOther) {
+-    if (mCert) {
+-      PRBool otherHasCert;
+-      aOther->GetHasCertificate(&otherHasCert);
+-      if (!otherHasCert) {
+-        return NS_OK;
+-      }
++    PRBool otherHasCert;
++    aOther->GetHasCertificate(&otherHasCert);
++    if (otherHasCert != (mCert != nsnull)) {
++      // One has a cert while the other doesn't.  Not equal.
++      return NS_OK;
++    }
+ 
++    if (mCert) {
+       nsCAutoString str;
+       aOther->GetFingerprint(str);
+       *aResult = str.Equals(mCert->fingerprint);
+ 
+       // If either subject name is empty, just let the result stand (so that
+       // nsScriptSecurityManager::SetCanEnableCapability works), but if they're
+       // both non-empty, only claim equality if they're equal.
+       if (*aResult && !mCert->subjectName.IsEmpty()) {
+@@ -287,18 +288,19 @@ nsPrincipal::Equals(nsIPrincipal *aOther
+         return NS_OK;
+       }
+ 
+       // Fall through to the codebase comparison.
+     }
+ 
+     // Codebases are equal if they have the same origin.
+     *aResult =
+-      NS_SUCCEEDED(nsScriptSecurityManager::GetScriptSecurityManager()
+-                   ->CheckSameOriginPrincipal(this, aOther));
++      NS_SUCCEEDED(nsScriptSecurityManager::CheckSameOriginPrincipal(this,
++                                                                     aOther,
++                                                                     PR_FALSE));
+     return NS_OK;
+   }
+ 
+   *aResult = PR_TRUE;
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+Index: caps/src/nsScriptSecurityManager.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/caps/src/nsScriptSecurityManager.cpp,v
+retrieving revision 1.347
+diff -u -p -d -8 -r1.347 nsScriptSecurityManager.cpp
+--- caps/src/nsScriptSecurityManager.cpp	11 Mar 2008 17:30:23 -0000	1.347
++++ caps/src/nsScriptSecurityManager.cpp	13 Mar 2008 04:23:03 -0000
+@@ -717,26 +717,16 @@ nsScriptSecurityManager::CheckSameOrigin
+                      aSourceURI, aTargetURI);
+             return NS_OK;
+          }
+          return NS_ERROR_DOM_BAD_URI;
+     }
+     return NS_OK;
+ }
+ 
+-NS_IMETHODIMP
+-nsScriptSecurityManager::CheckSameOriginPrincipal(nsIPrincipal* aSourcePrincipal,
+-                                                  nsIPrincipal* aTargetPrincipal)
+-{
+-    return CheckSameOriginPrincipalInternal(aSourcePrincipal,
+-                                            aTargetPrincipal,
+-                                            PR_FALSE);
+-}
+-
+-
+ nsresult
+ nsScriptSecurityManager::CheckPropertyAccessImpl(PRUint32 aAction,
+                                                  nsAXPCNativeCallContext* aCallContext,
+                                                  JSContext* cx, JSObject* aJSObject,
+                                                  nsISupports* aObj, nsIURI* aTargetURI,
+                                                  nsIClassInfo* aClassInfo,
+                                                  const char* aClassName, jsval aProperty,
+                                                  void** aCachedClassPolicy)
+@@ -953,20 +943,21 @@ nsScriptSecurityManager::CheckPropertyAc
+             if (xpcCallContext)
+                 xpcCallContext->SetExceptionWasThrown(PR_TRUE);
+         }
+     }
+ 
+     return rv;
+ }
+ 
++/* static */
+ nsresult
+-nsScriptSecurityManager::CheckSameOriginPrincipalInternal(nsIPrincipal* aSubject,
+-                                                          nsIPrincipal* aObject,
+-                                                          PRBool aIsCheckConnect)
++nsScriptSecurityManager::CheckSameOriginPrincipal(nsIPrincipal* aSubject,
++                                                  nsIPrincipal* aObject,
++                                                  PRBool aIsCheckConnect)
+ {
+     /*
+     ** Get origin of subject and object and compare.
+     */
+     if (aSubject == aObject)
+         return NS_OK;
+ 
+     // These booleans are only used when !aIsCheckConnect.  Default
+@@ -1026,18 +1017,29 @@ nsScriptSecurityManager::CheckSameOrigin
+ 
+ 
+ nsresult
+ nsScriptSecurityManager::CheckSameOriginDOMProp(nsIPrincipal* aSubject,
+                                                 nsIPrincipal* aObject,
+                                                 PRUint32 aAction,
+                                                 PRBool aIsCheckConnect)
+ {
+-    nsresult rv = CheckSameOriginPrincipalInternal(aSubject, aObject,
+-                                                   aIsCheckConnect);
++    nsresult rv;
++    if (aIsCheckConnect) {
++        // Don't do equality compares, just do a same-origin compare,
++        // since the object principal isn't a real principal, just a
++        // GetCodebasePrincipal() on whatever URI we started with.
++        rv = CheckSameOriginPrincipal(aSubject, aObject, aIsCheckConnect);
++    } else {
++        PRBool subsumes;
++        rv = aSubject->Subsumes(aObject, &subsumes);
++        if (NS_SUCCEEDED(rv) && !subsumes) {
++            rv = NS_ERROR_DOM_PROP_ACCESS_DENIED;
++        }
++    }
+     
+     if (NS_SUCCEEDED(rv))
+         return NS_OK;
+ 
+     /*
+     * Content can't ever touch chrome (we check for UniversalXPConnect later)
+     */
+     if (aObject == mSystemPrincipal)
+@@ -1687,19 +1689,22 @@ nsScriptSecurityManager::CheckFunctionAc
+     ** Get origin of subject and object and compare.
+     */
+     JSObject* obj = (JSObject*)aTargetObj;
+     nsIPrincipal* object = doGetObjectPrincipal(obj);
+ 
+     if (!object)
+         return NS_ERROR_FAILURE;        
+ 
+-    // Note that CheckSameOriginPrincipalInternal already does an equality
+-    // comparison on subject and object, so no need for us to do it.
+-    return CheckSameOriginPrincipalInternal(subject, object, PR_TRUE);
++    PRBool subsumes;
++    rv = subject->Subsumes(object, &subsumes);
++    if (NS_SUCCEEDED(rv) && !subsumes) {
++        rv = NS_ERROR_DOM_PROP_ACCESS_DENIED;
++    }
++    return rv;
+ }
+ 
+ NS_IMETHODIMP
+ nsScriptSecurityManager::CanExecuteScripts(JSContext* cx,
+                                            nsIPrincipal *aPrincipal,
+                                            PRBool *result)
+ {
+     *result = PR_FALSE; 

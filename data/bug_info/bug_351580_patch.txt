@@ -1,0 +1,206 @@
+diff -u10dpN security/manager/ssl/src/nsCrypto.cpp security/manager/ssl/src/nsCrypto.cpp 
+--- security/manager/ssl/src/nsCrypto.cpp	2008-01-17 15:30:15.655091900 +0100
++++ security/manager/ssl/src/nsCrypto.cpp	2008-02-28 20:31:26.402028300 +0100
+@@ -879,29 +879,33 @@ cryptojs_ReadArgsAndGenerateKey(JSContex
+   if (!JSVAL_IS_INT(argv[0])) {
+     JS_ReportError(cx, "%s%s\n", JS_ERROR,
+                    "passed in non-integer for key size");
+     return NS_ERROR_FAILURE;
+   }
+   keySize = JSVAL_TO_INT(argv[0]);
+   if (JSVAL_IS_NULL(argv[1])) {
+     params = nsnull;
+   } else {
+     jsString = JS_ValueToString(cx,argv[1]);
++    NS_ENSURE_TRUE(jsString, NS_ERROR_OUT_OF_MEMORY);
++    argv[1] = STRING_TO_JSVAL(jsString);
+     params   = JS_GetStringBytes(jsString);
+   }
+ 
+   if (JSVAL_IS_NULL(argv[2])) {
+     JS_ReportError(cx,"%s%s\n", JS_ERROR,
+              "key generation type not specified");
+     return NS_ERROR_FAILURE;
+   }
+   jsString = JS_ValueToString(cx, argv[2]);
++  NS_ENSURE_TRUE(jsString, NS_ERROR_OUT_OF_MEMORY);
++  argv[2] = STRING_TO_JSVAL(jsString);
+   keyGenAlg = JS_GetStringBytes(jsString);
+   keyGenType->keyGenType = cryptojs_interpret_key_gen_type(keyGenAlg);
+   if (keyGenType->keyGenType == invalidKeyGen) {
+     JS_ReportError(cx, "%s%s%s", JS_ERROR,
+                    "invalid key generation argument:",
+                    keyGenAlg);
+     goto loser;
+   }
+   if (*slot == nsnull) {
+     *slot = nsGetSlotForKeyGen(keyGenType->keyGenType, uiCxt);
+@@ -1809,25 +1813,27 @@ nsCrypto::GenerateCRMFRequest(nsIDOMCRMF
+ 
+   if (!ncc)
+     return NS_ERROR_NOT_AVAILABLE;
+ 
+   PRUint32 argc;
+ 
+   ncc->GetArgc(&argc);
+ 
+   jsval *argv = nsnull;
+ 
+-  ncc->GetArgvPtr(&argv);
++  nrv = ncc->GetArgvPtr(&argv);
++  NS_ENSURE_SUCCESS(nrv, nrv);
+ 
+   JSContext *cx;
+ 
+-  ncc->GetJSContext(&cx);
++  nrv = ncc->GetJSContext(&cx);
++  NS_ENSURE_SUCCESS(nrv, nrv);
+ 
+   JSObject* script_obj = nsnull;
+   nsCOMPtr<nsIXPConnectJSObjectHolder> holder;
+ 
+   JSAutoRequest ar(cx);
+ 
+   /*
+    * Get all of the parameters.
+    */
+   if (argc < 5 || ((argc-5) % 3) != 0) {
+@@ -1835,49 +1841,63 @@ nsCrypto::GenerateCRMFRequest(nsIDOMCRMF
+                   "incorrect number of parameters");
+     return NS_ERROR_FAILURE;
+   }
+   
+   if (JSVAL_IS_NULL(argv[0])) {
+     JS_ReportError(cx, "%s%s\n", JS_ERROR, "no DN specified");
+     return NS_ERROR_FAILURE;
+   }
+   
+   JSString *jsString = JS_ValueToString(cx,argv[0]);
++  NS_ENSURE_TRUE(jsString, NS_ERROR_OUT_OF_MEMORY);
++  argv[0] = STRING_TO_JSVAL(jsString);
+   
+   char * reqDN = JS_GetStringBytes(jsString);
+   char *regToken;
+   if (JSVAL_IS_NULL(argv[1])) {
+     regToken           = nsnull;
+   } else {
+     jsString = JS_ValueToString(cx, argv[1]);
++    NS_ENSURE_TRUE(jsString, NS_ERROR_OUT_OF_MEMORY);
++    argv[1] = STRING_TO_JSVAL(jsString);
++
+     regToken = JS_GetStringBytes(jsString);
+   }
+   char *authenticator;
+   if (JSVAL_IS_NULL(argv[2])) {
+     authenticator           = nsnull;
+   } else {
+     jsString      = JS_ValueToString(cx, argv[2]);
++    NS_ENSURE_TRUE(jsString, NS_ERROR_OUT_OF_MEMORY);
++    argv[2] = STRING_TO_JSVAL(jsString);
++
+     authenticator = JS_GetStringBytes(jsString);
+   }
+   char *eaCert;
+   if (JSVAL_IS_NULL(argv[3])) {
+     eaCert           = nsnull;
+   } else {
+     jsString     = JS_ValueToString(cx, argv[3]);
++    NS_ENSURE_TRUE(jsString, NS_ERROR_OUT_OF_MEMORY);
++    argv[3] = STRING_TO_JSVAL(jsString);
++
+     eaCert       = JS_GetStringBytes(jsString);
+   }
+   if (JSVAL_IS_NULL(argv[4])) {
+     JS_ReportError(cx, "%s%s\n", JS_ERROR, "no completion "
+                    "function specified");
+     return NS_ERROR_FAILURE;
+   }
+   jsString = JS_ValueToString(cx, argv[4]);
++  NS_ENSURE_TRUE(jsString, NS_ERROR_OUT_OF_MEMORY);
++  argv[4] = STRING_TO_JSVAL(jsString);
++
+   char *jsCallback = JS_GetStringBytes(jsString);
+ 
+ 
+   nrv = xpc->WrapNative(cx, ::JS_GetGlobalObject(cx),
+                         static_cast<nsIDOMCrypto *>(this),
+                         NS_GET_IID(nsIDOMCrypto), getter_AddRefs(holder));
+   NS_ENSURE_SUCCESS(nrv, nrv);
+ 
+   nrv = holder->GetJSObject(&script_obj);
+   NS_ENSURE_SUCCESS(nrv, nrv);
+@@ -2139,21 +2159,26 @@ nsCryptoRunnable::nsCryptoRunnable(nsCry
+   nsNSSShutDownPreventionLock locker;
+   NS_ASSERTION(args,"Passed nsnull to nsCryptoRunnable constructor.");
+   m_args = args;
+   NS_IF_ADDREF(m_args);
+   JS_AddNamedRoot(args->m_cx, &args->m_scope,"nsCryptoRunnable::mScope");
+ }
+ 
+ nsCryptoRunnable::~nsCryptoRunnable()
+ {
+   nsNSSShutDownPreventionLock locker;
+-  JS_RemoveRoot(m_args->m_cx, &m_args->m_scope);
++
++  {
++    JSAutoRequest ar(m_args->m_cx);
++    JS_RemoveRoot(m_args->m_cx, &m_args->m_scope);
++  }
++
+   NS_IF_RELEASE(m_args);
+ }
+ 
+ //Implementation that runs the callback passed to 
+ //crypto.generateCRMFRequest as an event.
+ NS_IMETHODIMP
+ nsCryptoRunnable::Run()
+ {
+   nsNSSShutDownPreventionLock locker;
+   JSPrincipals *principals;
+@@ -2162,20 +2187,22 @@ nsCryptoRunnable::Run()
+   nsresult rv = m_args->m_principals->GetJSPrincipals(cx, &principals);
+   if (NS_FAILED(rv))
+     return NS_ERROR_FAILURE;
+ 
+   // make sure the right context is on the stack. must not return w/out popping
+   nsCOMPtr<nsIJSContextStack> stack(do_GetService("@mozilla.org/js/xpc/ContextStack;1"));
+   if (!stack || NS_FAILED(stack->Push(cx))) {
+     return NS_ERROR_FAILURE;
+   }
+ 
++  JSAutoRequest ar(cx);
++
+   jsval retval;
+   if (JS_EvaluateScriptForPrincipals(cx, m_args->m_scope, principals,
+                                      m_args->m_jsCallback, 
+                                      strlen(m_args->m_jsCallback),
+                                      nsnull, 0,
+                                      &retval) != JS_TRUE) {
+     rv = NS_ERROR_FAILURE;
+   }
+ 
+   stack->Pop(nsnull);
+@@ -2542,20 +2569,23 @@ nsCrypto::SignText(const nsAString& aStr
+     }
+ 
+     jsval *argv = nsnull;
+     ncc->GetArgvPtr(&argv);
+ 
+     JSAutoRequest ar(cx);
+ 
+     PRUint32 i;
+     for (i = 2; i < argc; ++i) {
+       JSString *caName = JS_ValueToString(cx, argv[i]);
++      NS_ENSURE_TRUE(caName, NS_ERROR_OUT_OF_MEMORY);
++      argv[i] = STRING_TO_JSVAL(caName);
++
+       if (!caName) {
+         aResult.Append(internalError);
+ 
+         return NS_OK;
+       }
+       caNames[i - 2] = JS_GetStringBytes(caName);
+     }
+ 
+     if (certList &&
+         CERT_FilterCertListByCANames(certList, numCAs, caNames,

@@ -1,0 +1,31 @@
+Index: browser/base/content/browser.js
+===================================================================
+RCS file: /cvsroot/mozilla/browser/base/content/browser.js,v
+retrieving revision 1.296.2.3.2.134.2.3
+diff -w -u -r1.296.2.3.2.134.2.3 browser.js
+--- browser/base/content/browser.js	17 Mar 2005 04:58:01 -0000	1.296.2.3.2.134.2.3
++++ browser/base/content/browser.js	8 Jun 2005 15:05:02 -0000
+@@ -5604,6 +5604,11 @@
+ }
+ 
+ missingPluginInstaller.prototype.installSinglePlugin = function(aEvent){
++  // Check if the event is trust-worthy.
++  if (!aEvent.isTrusted) {
++    return;
++  }
++
+   var tabbrowser = getBrowser();
+   var missingPluginsArray = new Object;
+ 
+@@ -5630,6 +5635,11 @@
+ }
+ 
+ missingPluginInstaller.prototype.newMissingPlugin = function(aEvent){
++  // Check if the event is trust-worthy.
++  if (!aEvent.isTrusted) {
++    return;
++  }
++
+   // For broken non-object plugin tags, register a click handler so
+   // that the user can click the plugin replacement to get the new
+   // plugin. Object tags can, and often do, deal with that themselves,

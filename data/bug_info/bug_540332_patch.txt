@@ -1,0 +1,104 @@
+diff --git a/security/manager/locales/en-US/chrome/pipnss/nsserrors.properties b/security/manager/locales/en-US/chrome/pipnss/nsserrors.properties
+--- a/security/manager/locales/en-US/chrome/pipnss/nsserrors.properties
++++ b/security/manager/locales/en-US/chrome/pipnss/nsserrors.properties
+@@ -99,16 +99,21 @@ SSL_ERROR_INTERNAL_ERROR_ALERT=Peer repo
+ SSL_ERROR_USER_CANCELED_ALERT=Peer user canceled handshake.
+ SSL_ERROR_NO_RENEGOTIATION_ALERT=Peer does not permit renegotiation of SSL security parameters.
+ SSL_ERROR_SERVER_CACHE_NOT_CONFIGURED=SSL server cache not configured and not disabled for this socket.
+ SSL_ERROR_UNSUPPORTED_EXTENSION_ALERT=SSL peer does not support requested TLS hello extension.
+ SSL_ERROR_CERTIFICATE_UNOBTAINABLE_ALERT=SSL peer could not obtain your certificate from the supplied URL.
+ SSL_ERROR_UNRECOGNIZED_NAME_ALERT=SSL peer has no certificate for the requested DNS name.
+ SSL_ERROR_BAD_CERT_STATUS_RESPONSE_ALERT=SSL peer was unable to get an OCSP response for its certificate.
+ SSL_ERROR_BAD_CERT_HASH_VALUE_ALERT=SSL peer reported bad certificate hash value.
++SSL_ERROR_RX_UNEXPECTED_NEW_SESSION_TICKET=SSL received an unexpected New Session Ticket handshake message.                             
++SSL_ERROR_RX_MALFORMED_NEW_SESSION_TICKET=SSL received a malformed New Session Ticket handshake message.                                
++SSL_ERROR_DECOMPRESSION_FAILURE=SSL received a compressed record that could not be decompressed.                                        
++SSL_ERROR_RENEGOTIATION_NOT_ALLOWED=Renegotiation is not allowed on this SSL socket.                                                    
++SSL_ERROR_UNSAFE_NEGOTIATION=Peer attempted old style (potentially vulnerable) handshake.
+ SEC_ERROR_IO=An I/O error occurred during security authorization.
+ SEC_ERROR_LIBRARY_FAILURE=security library failure.
+ SEC_ERROR_BAD_DATA=security library: received bad data.
+ SEC_ERROR_OUTPUT_LEN=security library: output length error.
+ SEC_ERROR_INPUT_LEN=security library has experienced an input length error.
+ SEC_ERROR_INVALID_ARGS=security library: invalid arguments.
+ SEC_ERROR_INVALID_ALGORITHM=security library: invalid algorithm.
+ SEC_ERROR_INVALID_AVA=security library: invalid AVA.
+@@ -257,8 +262,22 @@ SEC_ERROR_CRL_UNKNOWN_CRITICAL_EXTENSION
+ SEC_ERROR_UNKNOWN_OBJECT_TYPE=Unknown object type specified.
+ SEC_ERROR_INCOMPATIBLE_PKCS11=PKCS #11 driver violates the spec in an incompatible way.
+ SEC_ERROR_NO_EVENT=No new slot event is available at this time.
+ SEC_ERROR_CRL_ALREADY_EXISTS=CRL already exists.
+ SEC_ERROR_NOT_INITIALIZED=NSS is not initialized.
+ SEC_ERROR_TOKEN_NOT_LOGGED_IN=The operation failed because the PKCS#11 token is not logged in.
+ SEC_ERROR_OCSP_RESPONDER_CERT_INVALID=Configured OCSP responder's certificate is invalid.
+ SEC_ERROR_OCSP_BAD_SIGNATURE=OCSP response has an invalid signature.
++SEC_ERROR_OUT_OF_SEARCH_LIMITS=Cert validation search is out of search limits
++SEC_ERROR_INVALID_POLICY_MAPPING=Policy mapping contains anypolicy
++SEC_ERROR_POLICY_VALIDATION_FAILED=Cert chain fails policy validation
++SEC_ERROR_UNKNOWN_AIA_LOCATION_TYPE=Unknown location type in cert AIA extension
++SEC_ERROR_BAD_HTTP_RESPONSE=Server returned bad HTTP response
++SEC_ERROR_BAD_LDAP_RESPONSE=Server returned bad LDAP response
++SEC_ERROR_FAILED_TO_ENCODE_DATA=Failed to encode data with ASN1 encoder
++SEC_ERROR_BAD_INFO_ACCESS_LOCATION=Bad information access location in cert extension
++SEC_ERROR_LIBPKIX_INTERNAL=Libpkix internal error occured during cert validation.
++SEC_ERROR_PKCS11_GENERAL_ERROR=A PKCS #11 module returned CKR_GENERAL_ERROR, indicating that an unrecoverable error has occurred.
++SEC_ERROR_PKCS11_FUNCTION_FAILED=A PKCS #11 module returned CKR_FUNCTION_FAILED, indicating that the requested function could not be performed.  Trying the same operation again might succeed.
++SEC_ERROR_PKCS11_DEVICE_ERROR=A PKCS #11 module returned CKR_DEVICE_ERROR, indicating that a problem has occurred with the token or slot.
++SEC_ERROR_BAD_INFO_ACCESS_METHOD=Unknown information access method in certificate extension.
++SEC_ERROR_CRL_IMPORT_FAILED=Error attempting to import a CRL.
+diff --git a/security/manager/ssl/src/nsNSSErrors.cpp b/security/manager/ssl/src/nsNSSErrors.cpp
+--- a/security/manager/ssl/src/nsNSSErrors.cpp
++++ b/security/manager/ssl/src/nsNSSErrors.cpp
+@@ -149,16 +149,21 @@ nsNSSErrors::getDefaultErrorStringName(P
+     case SSL_ERROR_USER_CANCELED_ALERT: id_str = "SSL_ERROR_USER_CANCELED_ALERT"; break;
+     case SSL_ERROR_NO_RENEGOTIATION_ALERT: id_str = "SSL_ERROR_NO_RENEGOTIATION_ALERT"; break;
+     case SSL_ERROR_SERVER_CACHE_NOT_CONFIGURED: id_str = "SSL_ERROR_SERVER_CACHE_NOT_CONFIGURED"; break;
+     case SSL_ERROR_UNSUPPORTED_EXTENSION_ALERT: id_str = "SSL_ERROR_UNSUPPORTED_EXTENSION_ALERT"; break;
+     case SSL_ERROR_CERTIFICATE_UNOBTAINABLE_ALERT: id_str = "SSL_ERROR_CERTIFICATE_UNOBTAINABLE_ALERT"; break;
+     case SSL_ERROR_UNRECOGNIZED_NAME_ALERT: id_str = "SSL_ERROR_UNRECOGNIZED_NAME_ALERT"; break;
+     case SSL_ERROR_BAD_CERT_STATUS_RESPONSE_ALERT: id_str = "SSL_ERROR_BAD_CERT_STATUS_RESPONSE_ALERT"; break;
+     case SSL_ERROR_BAD_CERT_HASH_VALUE_ALERT: id_str = "SSL_ERROR_BAD_CERT_HASH_VALUE_ALERT"; break;
++    case SSL_ERROR_RX_UNEXPECTED_NEW_SESSION_TICKET: id_str = "SSL_ERROR_RX_UNEXPECTED_NEW_SESSION_TICKET"; break;
++    case SSL_ERROR_RX_MALFORMED_NEW_SESSION_TICKET: id_str = "SSL_ERROR_RX_MALFORMED_NEW_SESSION_TICKET"; break;  
++    case SSL_ERROR_DECOMPRESSION_FAILURE: id_str = "SSL_ERROR_DECOMPRESSION_FAILURE"; break;                      
++    case SSL_ERROR_RENEGOTIATION_NOT_ALLOWED: id_str = "SSL_ERROR_RENEGOTIATION_NOT_ALLOWED"; break;              
++    case SSL_ERROR_UNSAFE_NEGOTIATION: id_str = "SSL_ERROR_UNSAFE_NEGOTIATION"; break;
+     case SEC_ERROR_IO: id_str = "SEC_ERROR_IO"; break;
+     case SEC_ERROR_LIBRARY_FAILURE: id_str = "SEC_ERROR_LIBRARY_FAILURE"; break;
+     case SEC_ERROR_BAD_DATA: id_str = "SEC_ERROR_BAD_DATA"; break;
+     case SEC_ERROR_OUTPUT_LEN: id_str = "SEC_ERROR_OUTPUT_LEN"; break;
+     case SEC_ERROR_INPUT_LEN: id_str = "SEC_ERROR_INPUT_LEN"; break;
+     case SEC_ERROR_INVALID_ARGS: id_str = "SEC_ERROR_INVALID_ARGS"; break;
+     case SEC_ERROR_INVALID_ALGORITHM: id_str = "SEC_ERROR_INVALID_ALGORITHM"; break;
+     case SEC_ERROR_INVALID_AVA: id_str = "SEC_ERROR_INVALID_AVA"; break;
+@@ -307,16 +312,30 @@ nsNSSErrors::getDefaultErrorStringName(P
+     case SEC_ERROR_UNKNOWN_OBJECT_TYPE: id_str = "SEC_ERROR_UNKNOWN_OBJECT_TYPE"; break;
+     case SEC_ERROR_INCOMPATIBLE_PKCS11: id_str = "SEC_ERROR_INCOMPATIBLE_PKCS11"; break;
+     case SEC_ERROR_NO_EVENT: id_str = "SEC_ERROR_NO_EVENT"; break;
+     case SEC_ERROR_CRL_ALREADY_EXISTS: id_str = "SEC_ERROR_CRL_ALREADY_EXISTS"; break;
+     case SEC_ERROR_NOT_INITIALIZED: id_str = "SEC_ERROR_NOT_INITIALIZED"; break;
+     case SEC_ERROR_TOKEN_NOT_LOGGED_IN: id_str = "SEC_ERROR_TOKEN_NOT_LOGGED_IN"; break;
+     case SEC_ERROR_OCSP_RESPONDER_CERT_INVALID: id_str = "SEC_ERROR_OCSP_RESPONDER_CERT_INVALID"; break;
+     case SEC_ERROR_OCSP_BAD_SIGNATURE: id_str = "SEC_ERROR_OCSP_BAD_SIGNATURE"; break;
++    case SEC_ERROR_OUT_OF_SEARCH_LIMITS: id_str = "SEC_ERROR_OUT_OF_SEARCH_LIMITS"; break;
++    case SEC_ERROR_INVALID_POLICY_MAPPING: id_str = "SEC_ERROR_INVALID_POLICY_MAPPING"; break;
++    case SEC_ERROR_POLICY_VALIDATION_FAILED: id_str = "SEC_ERROR_POLICY_VALIDATION_FAILED"; break;
++    case SEC_ERROR_UNKNOWN_AIA_LOCATION_TYPE: id_str = "SEC_ERROR_UNKNOWN_AIA_LOCATION_TYPE"; break;
++    case SEC_ERROR_BAD_HTTP_RESPONSE: id_str = "SEC_ERROR_BAD_HTTP_RESPONSE"; break;
++    case SEC_ERROR_BAD_LDAP_RESPONSE: id_str = "SEC_ERROR_BAD_LDAP_RESPONSE"; break;
++    case SEC_ERROR_FAILED_TO_ENCODE_DATA: id_str = "SEC_ERROR_FAILED_TO_ENCODE_DATA"; break;
++    case SEC_ERROR_BAD_INFO_ACCESS_LOCATION: id_str = "SEC_ERROR_BAD_INFO_ACCESS_LOCATION"; break;
++    case SEC_ERROR_LIBPKIX_INTERNAL: id_str = "SEC_ERROR_LIBPKIX_INTERNAL"; break;
++    case SEC_ERROR_PKCS11_GENERAL_ERROR: id_str = "SEC_ERROR_PKCS11_GENERAL_ERROR"; break;
++    case SEC_ERROR_PKCS11_FUNCTION_FAILED: id_str = "SEC_ERROR_PKCS11_FUNCTION_FAILED"; break;
++    case SEC_ERROR_PKCS11_DEVICE_ERROR: id_str = "SEC_ERROR_PKCS11_DEVICE_ERROR"; break;
++    case SEC_ERROR_BAD_INFO_ACCESS_METHOD: id_str = "SEC_ERROR_BAD_INFO_ACCESS_METHOD"; break;
++    case SEC_ERROR_CRL_IMPORT_FAILED: id_str = "SEC_ERROR_CRL_IMPORT_FAILED"; break;
+   }
+ 
+   return id_str;
+ }
+ 
+ const char *
+ nsNSSErrors::getOverrideErrorStringName(PRInt32 aErrorCode)
+ {

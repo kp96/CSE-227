@@ -1,0 +1,97 @@
+? mozilla/security/manager/ssl/src/nsSSLThread.cpp-good
+Index: mozilla/security/manager/ssl/src/nsCertTree.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsCertTree.cpp,v
+retrieving revision 1.42.4.1
+diff -u -r1.42.4.1 nsCertTree.cpp
+--- mozilla/security/manager/ssl/src/nsCertTree.cpp	16 Aug 2005 00:23:42 -0000	1.42.4.1
++++ mozilla/security/manager/ssl/src/nsCertTree.cpp	27 Sep 2006 00:02:12 -0000
+@@ -46,6 +46,9 @@
+ #include "nsNSSCertificate.h"
+ #include "nsNSSCertHelper.h"
+ #include "nsINSSCertCache.h"
++#include "nsArray.h"
++#include "nsISupportsPrimitives.h"
++#include "nsXPCOMCID.h"
+ 
+ #include "prlog.h"
+ #ifdef PR_LOGGING
+@@ -141,6 +144,7 @@
+ {
+   mCompareCache.ops = nsnull;
+   mNSSComponent = do_GetService(kNSSComponentCID);
++  mCellText = nsnull;
+ }
+ 
+ void nsCertTree::ClearCompareHash()
+@@ -419,6 +423,10 @@
+   if (!mTreeArray)
+     return NS_ERROR_OUT_OF_MEMORY;
+ 
++  nsCOMPtr<nsIMutableArray> newCell;
++  NS_NewArray(getter_AddRefs(newCell));
++  mCellText = newCell;
++
+   PRUint32 j = 0;
+   nsCOMPtr<nsISupports> isupport = dont_AddRef(mCertArray->ElementAt(j));
+   nsCOMPtr<nsIX509Cert> orgCert = do_QueryInterface(isupport);
+@@ -711,6 +719,22 @@
+       _retval.SetCapacity(0);
+     return NS_OK;
+   }
++  PRInt32 colIndex;
++  col->GetIndex(&colIndex);
++  PRUint32 arrayIndex=row+colIndex*mNumRows;
++  PRUint32 arrayLength=0;
++  if (mCellText) {
++    mCellText->GetLength(&arrayLength);
++  }
++  if (arrayIndex < arrayLength) {
++    nsCOMPtr<nsISupportsString> myString;
++    mCellText->QueryElementAt(arrayIndex,
++	nsISupportsString::GetIID(), getter_AddRefs(myString));
++    if (myString) {
++      myString->GetData(_retval);
++      return NS_OK;
++    }
++  }
+   nsCOMPtr<nsIX509Cert> cert = dont_AddRef(GetCertAtIndex(row));
+   if (cert == nsnull) return NS_ERROR_FAILURE;
+   if (NS_LITERAL_STRING("certcol").Equals(colID)) {
+@@ -796,6 +820,12 @@
+   } else {
+     return NS_ERROR_FAILURE;
+   }
++  if (mCellText) {
++    nsCOMPtr<nsISupportsString> text(do_CreateInstance(NS_SUPPORTS_STRING_CONTRACTID, &rv));
++    NS_ENSURE_SUCCESS(rv, rv);
++    text->SetData(_retval);
++    mCellText->ReplaceElementAt(text, arrayIndex, PR_FALSE);
++  }
+   return rv;
+ }
+ 
+Index: mozilla/security/manager/ssl/src/nsCertTree.h
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsCertTree.h,v
+retrieving revision 1.10.28.1
+diff -u -r1.10.28.1 nsCertTree.h
+--- mozilla/security/manager/ssl/src/nsCertTree.h	16 Aug 2005 00:23:42 -0000	1.10.28.1
++++ mozilla/security/manager/ssl/src/nsCertTree.h	27 Sep 2006 00:02:13 -0000
+@@ -45,6 +45,7 @@
+ #include "nsITreeBoxObject.h"
+ #include "nsITreeSelection.h"
+ #include "nsISupportsArray.h"
++#include "nsIArray.h"
+ #include "pldhash.h"
+ #include "nsIX509CertDB.h"
+ 
+@@ -129,6 +130,8 @@
+                                     void              *aCertCmpFnArg,
+                                     nsISupportsArray **_certs);
+ 
++  nsCOMPtr<nsIMutableArray> mCellText;
++
+ #ifdef DEBUG_CERT_TREE
+   /* for debugging purposes */
+   void dumpMap();

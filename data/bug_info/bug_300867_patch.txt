@@ -1,0 +1,32 @@
+Index: jsdbgapi.c
+===================================================================
+RCS file: /cvsroot/mozilla/js/src/jsdbgapi.c,v
+retrieving revision 3.54
+diff -p -u -8 -r3.54 jsdbgapi.c
+--- jsdbgapi.c	8 Jul 2005 23:26:36 -0000	3.54
++++ jsdbgapi.c	15 Jul 2005 06:12:07 -0000
+@@ -709,20 +709,20 @@ JS_EvalFramePrincipals(JSContext *cx, JS
+         callee = JSVAL_TO_OBJECT(fp->argv[-2]);
+         principals = rt->findObjectPrincipals(cx, callee);
+     } else {
+         principals = NULL;
+     }
+     if (!caller)
+         return principals;
+     callerPrincipals = JS_StackFramePrincipals(cx, caller);
+-    return (principals && callerPrincipals &&
+-            principals->subsume(principals, callerPrincipals))
+-           ? callerPrincipals
+-           : principals;
++    return (callerPrincipals && principals &&
++            callerPrincipals->subsume(callerPrincipals, principals))
++           ? principals
++           : callerPrincipals;
+ }
+ 
+ JS_PUBLIC_API(void *)
+ JS_GetFrameAnnotation(JSContext *cx, JSStackFrame *fp)
+ {
+     if (fp->annotation && fp->script) {
+         JSPrincipals *principals = JS_StackFramePrincipals(cx, fp);
+ 

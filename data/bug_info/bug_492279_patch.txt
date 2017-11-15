@@ -1,0 +1,191 @@
+diff --git a/mail/app/Makefile.in b/mail/app/Makefile.in
+--- a/mail/app/Makefile.in
++++ b/mail/app/Makefile.in
+@@ -339,20 +339,6 @@ else
+ 	$(SYSINSTALL) $(IFLAGS1) $^ $(FINAL_TARGET)
+ endif
+ 
+-# Disable these tests due to bug 431125
+-TEST_COOKIES_FILES = \
+-	$(DIST)/../_tests/xpcshell/test_cookies/unit/test_bug468700.js \
+-	$(DIST)/../_tests/xpcshell/test_cookies/unit/test_cookies.js \
+-	$(DIST)/../_tests/xpcshell/test_necko/unit/test_cookie_header.js \
+-	$(NULL)
+-
+-libs::
+-	for file in $(TEST_COOKIES_FILES); do \
+-		if test -f $$file; then $(RM) $$file; echo "function run_test() {dump('disabled for bug 431125');}" >$$file; fi; \
+-	done
+-	$(RM) $(DIST)/bin/TestCookie
+-	if test -f $(DIST)/bin/TestTArray; then cp $(DIST)/bin/TestTArray $(DIST)/bin/TestCookie; fi;
+-
+ ifneq (,$(filter mac cocoa,$(MOZ_WIDGET_TOOLKIT)))
+ 
+ AB := $(firstword $(subst -, ,$(AB_CD)))
+diff --git a/mailnews/base/src/nsMsgContentPolicy.cpp b/mailnews/base/src/nsMsgContentPolicy.cpp
+--- a/mailnews/base/src/nsMsgContentPolicy.cpp
++++ b/mailnews/base/src/nsMsgContentPolicy.cpp
+@@ -43,7 +43,7 @@
+ #include "nsIPrefService.h"
+ #include "nsIPrefBranch2.h"
+ #include "nsIURI.h"
+-#include "nsCOMPtr.h"
++#include "nsIInterfaceRequestorUtils.h"
+ #include "nsIMsgHeaderParser.h"
+ #include "nsIAbManager.h"
+ #include "nsIAbDirectory.h"
+@@ -51,10 +51,9 @@
+ #include "nsIMsgWindow.h"
+ #include "nsIMimeMiscStatus.h"
+ #include "nsIMsgMessageService.h"
+-#include "nsIMsgIncomingServer.h"
+-#include "nsIRssIncomingServer.h"
+ #include "nsIMsgHdr.h"
+ #include "nsMsgUtils.h"
++#include "nsNetUtil.h"
+ 
+ #include "nsIMsgComposeService.h"
+ #include "nsIMsgCompose.h"
+@@ -64,14 +63,9 @@
+ #include "nsIExternalProtocolService.h"
+ #include "nsCExternalHandlerService.h"
+ 
+-// needed for the cookie policy manager
+-#include "nsNetUtil.h"
+-#include "nsICookie2.h"
+-
+ // needed for mailnews content load policy manager
+ #include "nsIDocShell.h"
+ #include "nsIWebNavigation.h"
+-#include "nsIDocShellTreeNode.h"
+ #include "nsContentPolicyUtils.h"
+ #include "nsIDOMHTMLImageElement.h"
+ #include "nsILoadContext.h"
+@@ -884,64 +878,3 @@ nsMsgContentPolicy::OnSecurityChange(nsI
+ {
+   return NS_OK;
+ }
+-
+-#ifdef MOZ_THUNDERBIRD
+-
+-NS_IMPL_ISUPPORTS1(nsMsgCookiePolicy, nsICookiePermission)
+-
+-
+-NS_IMETHODIMP nsMsgCookiePolicy::SetAccess(nsIURI         *aURI,
+-                                           nsCookieAccess  aAccess)
+-{
+-  // we don't support cookie access lists for mail
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP nsMsgCookiePolicy::CanAccess(nsIURI         *aURI,
+-                                           nsIChannel     *aChannel,
+-                                           nsCookieAccess *aResult)
+-{
+-  // by default we deny all cookies in mail
+-  *aResult = ACCESS_DENY;
+-  NS_ENSURE_ARG_POINTER(aChannel);
+-  
+-  nsCOMPtr<nsILoadContext> loadContext;
+-  NS_QueryNotificationCallbacks(aChannel, loadContext);
+-
+-  NS_ENSURE_TRUE(loadContext, NS_OK);
+-  PRBool isContent;
+-  loadContext->GetIsContent(&isContent);
+-
+-  // allow chrome to set cookies
+-  if (!isContent)
+-    *aResult = ACCESS_DEFAULT;
+-  else // allow RSS articles in content to access cookies
+-  {
+-    NS_ENSURE_TRUE(aURI, NS_OK);  
+-    PRBool isRSS = PR_FALSE;
+-    IsRSSArticle(aURI, &isRSS);
+-    if (isRSS)
+-      *aResult = ACCESS_DEFAULT;
+-  }
+-
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP nsMsgCookiePolicy::CanSetCookie(nsIURI     *aURI,
+-                                              nsIChannel *aChannel,
+-                                              nsICookie2 *aCookie,
+-                                              PRBool     *aIsSession,
+-                                              PRInt64    *aExpiry,
+-                                              PRBool     *aResult)
+-{
+-  *aResult = PR_TRUE;
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP nsMsgCookiePolicy::GetOriginatingURI(nsIChannel  *aChannel,
+-                                                   nsIURI     **aURI)
+-{
+-  return NS_ERROR_NOT_IMPLEMENTED;
+-}
+-
+-#endif
+diff --git a/mailnews/base/src/nsMsgContentPolicy.h b/mailnews/base/src/nsMsgContentPolicy.h
+--- a/mailnews/base/src/nsMsgContentPolicy.h
++++ b/mailnews/base/src/nsMsgContentPolicy.h
+@@ -52,7 +52,6 @@
+ #include "nsWeakReference.h"
+ #include "nsStringGlue.h"
+ #include "nsIMsgMailNewsUrl.h"
+-#include "nsICookiePermission.h" 
+ #include "nsIWebProgressListener.h"
+ 
+ /* DBFCFDF0-4489-4faa-8122-190FD1EFA16C */
+@@ -111,24 +110,4 @@ protected:
+                                            nsISupports *aRequestingContext);
+ };
+ 
+-#ifdef MOZ_THUNDERBIRD
+-
+-/* 2C4B5CC1-8C0F-4080-92A7-D133CC30F43B */
+-#define NS_MSGCOOKIEPOLICY_CID \
+-{ 0x2c4b5cc1, 0x8c0f, 0x4080, { 0x92, 0xa7, 0xd1, 0x33, 0xcc, 0x30, 0xf4, 0x3b } }
+-
+-
+-class nsMsgCookiePolicy : public nsICookiePermission
+-{
+-public:
+-  NS_DECL_ISUPPORTS
+-  NS_DECL_NSICOOKIEPERMISSION
+-
+-  nsMsgCookiePolicy() {}
+-
+-  virtual ~nsMsgCookiePolicy() {}
+-};
+-
+-#endif
+-
+ #endif // _nsMsgContentPolicy_H_
+diff --git a/mailnews/build/nsMailModule.cpp b/mailnews/build/nsMailModule.cpp
+--- a/mailnews/build/nsMailModule.cpp
++++ b/mailnews/build/nsMailModule.cpp
+@@ -377,9 +377,6 @@ NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsMe
+ #endif
+ NS_GENERIC_FACTORY_CONSTRUCTOR(nsMessengerContentHandler)
+ NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsMsgContentPolicy, Init)
+-#ifdef MOZ_THUNDERBIRD
+-NS_GENERIC_FACTORY_CONSTRUCTOR(nsMsgCookiePolicy)
+-#endif
+ NS_GENERIC_FACTORY_CONSTRUCTOR(nsStopwatch)
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+@@ -934,13 +931,6 @@ static const nsModuleComponentInfo gComp
+        NS_MSGSHUTDOWNSERVICE_CONTRACTID,
+        nsMsgShutdownServiceConstructor
+     },
+-#ifdef MOZ_THUNDERBIRD
+-    { "mail cookie policy enforcer",
+-      NS_MSGCOOKIEPOLICY_CID,
+-      NS_COOKIEPERMISSION_CONTRACTID,
+-      nsMsgCookiePolicyConstructor
+-    },
+-#endif
+     {
+       "stopwatch",
+       NS_STOPWATCH_CID,

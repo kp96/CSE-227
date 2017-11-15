@@ -1,0 +1,33 @@
+Index: content/base/src/nsContentUtils.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/content/base/src/nsContentUtils.cpp,v
+retrieving revision 1.142
+diff -u -p -d -8 -r1.142 nsContentUtils.cpp
+--- content/base/src/nsContentUtils.cpp	17 Feb 2006 23:41:44 -0000	1.142
++++ content/base/src/nsContentUtils.cpp	28 Feb 2006 22:50:30 -0000
+@@ -2482,17 +2482,24 @@ nsContentUtils::NotifyXPCIfExceptionPend
+ {
+   if (!::JS_IsExceptionPending(aCx)) {
+     return;
+   }
+ 
+   nsCOMPtr<nsIXPCNativeCallContext> nccx;
+   XPConnect()->GetCurrentNativeCallContext(getter_AddRefs(nccx));
+   if (nccx) {
+-    nccx->SetExceptionWasThrown(PR_TRUE);
++    // Check to make sure that the JSContext that nccx will mess with is the
++    // same as the JSContext we've set an exception on.  If they're not the
++    // same, don't mess with nccx.
++    JSContext* cx;
++    nccx->GetJSContext(&cx);
++    if (cx == aCx) {
++      nccx->SetExceptionWasThrown(PR_TRUE);
++    }
+   }
+ }
+ 
+ // static
+ nsIContentPolicy*
+ nsContentUtils::GetContentPolicy()
+ {
+   if (!sTriedToGetContentPolicy) {

@@ -1,0 +1,91 @@
+Index: netwerk/build/nsNetModule.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/netwerk/build/nsNetModule.cpp,v
+retrieving revision 1.137
+diff -u -p -d -8 -r1.137 nsNetModule.cpp
+--- netwerk/build/nsNetModule.cpp	19 Jun 2006 21:02:12 -0000	1.137
++++ netwerk/build/nsNetModule.cpp	20 Jun 2006 18:50:41 -0000
+@@ -984,17 +984,17 @@ static const nsModuleComponentInfo gNetM
+     // from netwerk/protocol/about (about:blank is mandatory):
+     { NS_ABOUTPROTOCOLHANDLER_CLASSNAME, 
+       NS_ABOUTPROTOCOLHANDLER_CID,
+       NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX "about", 
+       nsAboutProtocolHandlerConstructor
+     },
+     { NS_SAFEABOUTPROTOCOLHANDLER_CLASSNAME,
+       NS_SAFEABOUTPROTOCOLHANDLER_CID,
+-      NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX "safe-about", 
++      NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX "moz-safe-about", 
+       nsSafeAboutProtocolHandlerConstructor
+     },
+     { "about:blank", 
+       NS_ABOUT_BLANK_MODULE_CID,
+       NS_ABOUT_MODULE_CONTRACTID_PREFIX "blank", 
+       nsAboutBlank::Create
+     },
+ #ifdef NECKO_PROTOCOL_about
+Index: netwerk/protocol/about/src/nsAboutProtocolHandler.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/netwerk/protocol/about/src/nsAboutProtocolHandler.cpp,v
+retrieving revision 1.43
+diff -u -p -d -8 -r1.43 nsAboutProtocolHandler.cpp
+--- netwerk/protocol/about/src/nsAboutProtocolHandler.cpp	19 Jun 2006 21:02:11 -0000	1.43
++++ netwerk/protocol/about/src/nsAboutProtocolHandler.cpp	20 Jun 2006 19:21:29 -0000
+@@ -112,20 +112,28 @@ nsAboutProtocolHandler::NewURI(const nsA
+         rv = aboutMod->GetURIFlags(url, &flags);
+         NS_ENSURE_SUCCESS(rv, rv);
+ 
+         isSafe =
+             ((flags & nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT) != 0);
+     }
+ 
+     if (isSafe) {
+-        // We need to indicate that this baby is safe.  Use an inner
+-        // URI that no one but the security manager will see.
++        // We need to indicate that this baby is safe.  Use an inner URI that
++        // no one but the security manager will see.  Make sure to preserve our
++        // path, in case someone decides to hardcode checks for particular
++        // about: URIs somewhere.
++        nsCAutoString spec;
++        rv = url->GetPath(spec);
++        NS_ENSURE_SUCCESS(rv, rv);
++        
++        spec.Insert("moz-safe-about:", 0);
++
+         nsCOMPtr<nsIURI> inner;
+-        rv = NS_NewURI(getter_AddRefs(inner), "moz-safe-about:x");
++        rv = NS_NewURI(getter_AddRefs(inner), spec);
+         NS_ENSURE_SUCCESS(rv, rv);
+ 
+         nsSimpleNestedURI* outer = new nsSimpleNestedURI(inner);
+         NS_ENSURE_TRUE(outer, NS_ERROR_OUT_OF_MEMORY);
+ 
+         // Take a ref to it in the COMPtr we plan to return
+         url = outer;
+ 
+Index: caps/src/nsScriptSecurityManager.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/caps/src/nsScriptSecurityManager.cpp,v
+retrieving revision 1.304
+diff -u -p -d -8 -r1.304 nsScriptSecurityManager.cpp
+--- caps/src/nsScriptSecurityManager.cpp	19 Jun 2006 21:08:45 -0000	1.304
++++ caps/src/nsScriptSecurityManager.cpp	20 Jun 2006 19:25:02 -0000
+@@ -913,17 +913,17 @@ nsScriptSecurityManager::CheckSameOrigin
+     // Subject URI could be null here.... 
+     if (subjectURI) {
+         rv = subjectURI->SchemeIs(NS_NULLPRINCIPAL_SCHEME, &nullSubject);
+     }
+     if (NS_SUCCEEDED(rv) && !nullSubject) {
+         nsXPIDLCString origin;
+         rv = aObject->GetOrigin(getter_Copies(origin));
+         NS_ENSURE_SUCCESS(rv, rv);
+-        if (nsCRT::strcasecmp(origin, "about:blank") == 0)
++        if (nsCRT::strcasecmp(origin, "moz-safe-about:blank") == 0)
+             return NS_OK;
+     }
+ 
+     /*
+     ** Access tests failed, so now report error.
+     */
+     return NS_ERROR_DOM_PROP_ACCESS_DENIED;
+ }

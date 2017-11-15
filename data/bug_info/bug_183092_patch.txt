@@ -1,0 +1,32 @@
+Index: jsj_convert.c
+===================================================================
+RCS file: /m/pub/mozilla/js/src/liveconnect/jsj_convert.c,v
+retrieving revision 1.15
+diff -w -u -r1.15 jsj_convert.c
+--- jsj_convert.c	19 Mar 2002 04:28:46 -0000	1.15
++++ jsj_convert.c	25 Feb 2003 19:06:03 -0000
+@@ -139,12 +139,22 @@
+     return JS_TRUE;
+ }
+ 
++/* Artificially limit length of Java strings to handle a bug in the JVM,
++ * see : http://bugzilla.mozilla.org/show_bug.cgi?id=183092
++ */
++#define MAX_JAVA_STRING_LENGTH (10000)
+ jstring
+ jsj_ConvertJSStringToJavaString(JSContext *cx, JNIEnv *jEnv, JSString *js_str)
+ {
+     jstring result;
+-    result = (*jEnv)->NewString(jEnv, JS_GetStringChars(js_str),
+-                                JS_GetStringLength(js_str));
++    size_t length = JS_GetStringLength(js_str);
++
++    if (length > MAX_JAVA_STRING_LENGTH) {
++        jsj_UnexpectedJavaError(cx, jEnv, "Exceeded artifical length limit "
++                                          "of java.lang.String");
++        return NULL;
++    }
++    result = (*jEnv)->NewString(jEnv, JS_GetStringChars(js_str), length);
+     if (!result) {
+         jsj_UnexpectedJavaError(cx, jEnv, "Couldn't construct instance "
+                                           "of java.lang.String");

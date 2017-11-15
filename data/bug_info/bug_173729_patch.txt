@@ -1,0 +1,168 @@
+diff --git a/security/manager/locales/en-US/chrome/pippki/certManager.dtd b/security/manager/locales/en-US/chrome/pippki/certManager.dtd
+--- a/security/manager/locales/en-US/chrome/pippki/certManager.dtd
++++ b/security/manager/locales/en-US/chrome/pippki/certManager.dtd
+@@ -112,26 +112,28 @@
+ <!ENTITY certmgr.expires                      "Expires On">
+ <!ENTITY certmgr.email                        "E-Mail Address">
+ <!ENTITY certmgr.serial                       "Serial Number">
+ 
+ <!ENTITY certmgr.close.label                  "Close">
+ <!ENTITY certmgr.close.accesskey              "C">
+ <!ENTITY certmgr.view2.label                  "View…">
+ <!ENTITY certmgr.view2.accesskey              "V">
+-<!ENTITY certmgr.edit2.label                  "Edit…">
+-<!ENTITY certmgr.edit2.accesskey              "E">
++<!ENTITY certmgr.edit3.label                  "Edit Trust…">
++<!ENTITY certmgr.edit3.accesskey              "E">
+ <!ENTITY certmgr.editca.label                 "Edit CA Trust">
+ <!ENTITY certmgr.editca.accesskey             "d">
+ <!ENTITY certmgr.add.label                    "Add">
+ <!ENTITY certmgr.add.accesskey                "A">
+ <!ENTITY certmgr.export.label                 "Export…">
+ <!ENTITY certmgr.export.accesskey             "x">
+ <!ENTITY certmgr.delete2.label                "Delete…">
+ <!ENTITY certmgr.delete2.accesskey            "D">
++<!ENTITY certmgr.delete_builtin.label         "Delete or Distrust…">
++<!ENTITY certmgr.delete_builtin.accesskey     "D">
+ <!ENTITY certmgr.backup2.label                "Backup…">
+ <!ENTITY certmgr.backup2.accesskey            "B">
+ <!ENTITY certmgr.backupall2.label             "Backup All…">
+ <!ENTITY certmgr.backupall2.accesskey         "k">
+ <!ENTITY certmgr.restore2.label               "Import…">
+ <!ENTITY certmgr.restore2.accesskey           "m">
+ <!ENTITY certmgr.details.label                "Certificate Fields">
+ <!ENTITY certmgr.details.accesskey            "F">
+diff --git a/security/manager/locales/en-US/chrome/pippki/pippki.properties b/security/manager/locales/en-US/chrome/pippki/pippki.properties
+--- a/security/manager/locales/en-US/chrome/pippki/pippki.properties
++++ b/security/manager/locales/en-US/chrome/pippki/pippki.properties
+@@ -57,19 +57,19 @@ issuerCertNotFound=Certificate for this 
+ deleteSslCertConfirm3=Are you sure you want to delete these server exceptions?
+ deleteSslCertImpact3=If you delete a server exception, you restore the usual security checks for that server and require it uses a valid certificate.
+ deleteSslCertTitle3=Delete Server Certificate Exceptions
+ 
+ deleteUserCertConfirm=Are you sure you want to delete these certificates?
+ deleteUserCertImpact=If you delete one of your own certificates, you can no longer use it to identify yourself.
+ deleteUserCertTitle=Delete your Certificates
+ 
+-deleteCaCertConfirm=Are you sure you want to delete these CA certificates?
+-deleteCaCertImpactX=If you delete a certificate authority (CA) certificate, this application will no longer trust any certificates issued by that CA.
+-deleteCaCertTitle=Delete CA Certificates
++deleteCaCertConfirm2=You have requested to delete these CA certificates. For built-in certificates all trust will be removed, which has the same effect. Are you sure you want to delete or distrust?
++deleteCaCertImpactX2=If you delete or distrust a certificate authority (CA) certificate, this application will no longer trust any certificates issued by that CA.
++deleteCaCertTitle2=Delete or Distrust CA Certificates
+ 
+ deleteEmailCertConfirm=Are you sure you want to delete these people's e-mail certificates?
+ deleteEmailCertImpactDesc=If you delete a person's e-mail certificate, you will no longer be able to send encrypted e-mail to that person.
+ deleteEmailCertTitle=Delete E-Mail Certificates
+ 
+ deleteOrphanCertConfirm=Are you sure you want to delete these certificates?
+ deleteOrphanCertTitle=Delete Certificates
+ 
+diff --git a/security/manager/pki/resources/content/CAOverlay.xul b/security/manager/pki/resources/content/CAOverlay.xul
+--- a/security/manager/pki/resources/content/CAOverlay.xul
++++ b/security/manager/pki/resources/content/CAOverlay.xul
+@@ -69,26 +69,26 @@
+     <separator class="thin"/>
+ 
+     <hbox>
+       <button id="ca_viewButton"
+               label="&certmgr.view2.label;"
+               accesskey="&certmgr.view2.accesskey;"
+               disabled="true" oncommand="viewCerts();"/>
+       <button id="ca_editButton"
+-              label="&certmgr.edit2.label;"
+-              accesskey="&certmgr.edit2.accesskey;"
++              label="&certmgr.edit3.label;"
++              accesskey="&certmgr.edit3.accesskey;"
+               disabled="true" oncommand="editCerts();"/>
+       <button id="ca_addButton"
+               label="&certmgr.restore2.label;"
+               accesskey="&certmgr.restore2.accesskey;"
+               oncommand="addCACerts();"/>
+       <button id="ca_exportButton"
+               label="&certmgr.export.label;"
+               accesskey="&certmgr.export.accesskey;"
+               disabled="true" oncommand="exportCerts();"/>
+       <button id="ca_deleteButton"
+-              label="&certmgr.delete2.label;"
+-              accesskey="&certmgr.delete2.accesskey;"
++              label="&certmgr.delete_builtin.label;"
++              accesskey="&certmgr.delete_builtin.accesskey;"
+               disabled="true" oncommand="deleteCerts();"/>
+     </hbox>
+   </vbox>
+ </overlay>
+diff --git a/security/manager/pki/resources/content/OthersOverlay.xul b/security/manager/pki/resources/content/OthersOverlay.xul
+--- a/security/manager/pki/resources/content/OthersOverlay.xul
++++ b/security/manager/pki/resources/content/OthersOverlay.xul
+@@ -70,18 +70,18 @@
+     <separator class="thin"/>
+ 
+     <hbox>
+       <button id="email_viewButton"
+               label="&certmgr.view2.label;"
+               accesskey="&certmgr.view2.accesskey;"
+               disabled="true" oncommand="viewCerts();"/>
+       <button id="email_editButton"
+-              label="&certmgr.edit2.label;"
+-              accesskey="&certmgr.edit2.accesskey;"
++              label="&certmgr.edit3.label;"
++              accesskey="&certmgr.edit3.accesskey;"
+               disabled="true" oncommand="editCerts();"/>
+       <button id="email_addButton"
+               label="&certmgr.restore2.label;"
+               accesskey="&certmgr.restore2.accesskey;"
+               oncommand="addEmailCert();"/>
+       <button id="email_exportButton"
+               label="&certmgr.export.label;"
+               accesskey="&certmgr.export.accesskey;"
+diff --git a/security/manager/pki/resources/content/WebSitesOverlay.xul b/security/manager/pki/resources/content/WebSitesOverlay.xul
+--- a/security/manager/pki/resources/content/WebSitesOverlay.xul
++++ b/security/manager/pki/resources/content/WebSitesOverlay.xul
+@@ -76,18 +76,18 @@
+     <separator class="thin"/>
+ 
+     <hbox>
+       <button id="websites_viewButton"
+               label="&certmgr.view2.label;"
+               accesskey="&certmgr.view2.accesskey;"
+               disabled="true" oncommand="viewCerts();"/>
+       <button id="websites_editButton"
+-              label="&certmgr.edit2.label;"
+-              accesskey="&certmgr.edit2.accesskey;"
++              label="&certmgr.edit3.label;"
++              accesskey="&certmgr.edit3.accesskey;"
+               disabled="true" oncommand="editCerts();"/>
+       <button id="websites_addButton"
+               label="&certmgr.restore2.label;"
+               accesskey="&certmgr.restore2.accesskey;"
+               oncommand="addWebSiteCert();"/>
+       <button id="websites_exportButton"
+               label="&certmgr.export.label;"
+               accesskey="&certmgr.export.accesskey;"
+diff --git a/security/manager/pki/resources/content/deletecert.js b/security/manager/pki/resources/content/deletecert.js
+--- a/security/manager/pki/resources/content/deletecert.js
++++ b/security/manager/pki/resources/content/deletecert.js
+@@ -65,19 +65,19 @@ function setWindowName()
+   else if(typeFlag == "websites_tab")
+   {
+      title = bundle.GetStringFromName("deleteSslCertTitle3");
+      confirm = bundle.GetStringFromName("deleteSslCertConfirm3");
+      impact = bundle.GetStringFromName("deleteSslCertImpact3");
+   }
+   else if(typeFlag == "ca_tab")
+   {
+-     title = bundle.GetStringFromName("deleteCaCertTitle");
+-     confirm = bundle.GetStringFromName("deleteCaCertConfirm");
+-     impact = bundle.GetStringFromName("deleteCaCertImpactX");
++     title = bundle.GetStringFromName("deleteCaCertTitle2");
++     confirm = bundle.GetStringFromName("deleteCaCertConfirm2");
++     impact = bundle.GetStringFromName("deleteCaCertImpactX2");
+   }
+   else if(typeFlag == "others_tab")
+   {
+      title = bundle.GetStringFromName("deleteEmailCertTitle");
+      confirm = bundle.GetStringFromName("deleteEmailCertConfirm");
+      impact = bundle.GetStringFromName("deleteEmailCertImpactDesc");
+   }
+   else if(typeFlag == "orphan_tab")

@@ -1,0 +1,15 @@
+Index: modules/libpref/src/init/all.js
+===================================================================
+RCS file: /cvsroot/mozilla/modules/libpref/src/init/all.js,v
+retrieving revision 3.515.2.3.2.21
+diff -u -r3.515.2.3.2.21 all.js
+--- modules/libpref/src/init/all.js	20 Oct 2004 13:32:37 -0000	3.515.2.3.2.21
++++ modules/libpref/src/init/all.js	22 Oct 2004 13:31:11 -0000
+@@ -1482,7 +1482,6 @@
+ pref("network.hosts.pop_server", "pop");
+ pref("browser.display.screen_resolution", 0); // System setting
+ pref("browser.drag_out_of_frame_style", 1);
+-pref("editor.singleLine.pasteNewlines", 0);
+ 
+ // Middle-mouse handling
+ pref("middlemouse.paste", true);

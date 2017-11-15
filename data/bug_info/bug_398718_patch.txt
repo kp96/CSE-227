@@ -1,0 +1,1089 @@
+Index: browser/locales/en-US/chrome/overrides/netError.dtd
+===================================================================
+RCS file: /cvsroot/mozilla/browser/locales/en-US/chrome/overrides/netError.dtd,v
+retrieving revision 1.10
+diff -u -8 -p -r1.10 netError.dtd
+--- browser/locales/en-US/chrome/overrides/netError.dtd	29 Oct 2007 18:29:17 -0000	1.10
++++ browser/locales/en-US/chrome/overrides/netError.dtd	30 Oct 2007 20:20:14 -0000
+@@ -118,16 +118,27 @@
+ <!ENTITY nssFailure2.title "Secure Connection Failed">
+ <!ENTITY nssFailure2.longDesc "
+ <ul>
+   <li>The page you are trying to view can not be shown because the authenticity of the received data could not be verified.</li>
+   <li>Please contact the web site owners to inform them of this problem. Alternatively, use the command found in the help menu to report this broken site.</li>
+ </ul>
+ ">
+ 
++<!ENTITY nssBadCert.title "Secure Connection Failed">
++<!ENTITY nssBadCert.longDesc "
++<ul>
++  <li>This could be a problem with the server's configuration, or it could be
++someone trying to impersonate the server.</li>
++  <li>If you have connected to this server successfully in the past, the error may
++be temporary, and you can try again later.</li>
++  <li>You can see and change your current list of servers with known security problems
++  in your advanced encryption settings.</li>
++</ul>
++">
+ 
+ <!ENTITY sharedLongDesc "
+ <ul>
+   <li>The site could be temporarily unavailable or too busy. Try again in a few
+     moments.</li>
+   <li>If you are unable to load any pages, check your computer's network
+     connection.</li>
+   <li>If your computer or network is protected by a firewall or proxy, make sure
+Index: camino/embed-replacements/locale/en-US/global/netError.dtd
+===================================================================
+RCS file: /cvsroot/mozilla/camino/embed-replacements/locale/en-US/global/netError.dtd,v
+retrieving revision 1.6
+diff -u -8 -p -r1.6 netError.dtd
+--- camino/embed-replacements/locale/en-US/global/netError.dtd	29 Oct 2007 18:29:17 -0000	1.6
++++ camino/embed-replacements/locale/en-US/global/netError.dtd	30 Oct 2007 20:20:15 -0000
+@@ -49,16 +49,24 @@
+ <!ENTITY redirectLoop.longDesc "<p>Camino has stopped trying to retrieve the requested item. The site is redirecting the request in a way that will never complete.</p><ul><li>Have you disabled or blocked cookies required by this site?</li><li><em>NOTE</em>: If accepting the site's cookies does not resolve the problem, it is likely a server configuration issue and not your computer.</li></ul>">
+ 
+ <!ENTITY unknownSocketType.title "Incorrect Response">
+ <!ENTITY unknownSocketType.longDesc "<p>The site responded to the network request in an unexpected way and Camino cannot continue.</p>">
+ 
+ <!ENTITY nssFailure2.title "Secure Connection Failed">
+ <!ENTITY nssFailure2.longDesc "<p>The page you are trying to view can not be shown because the authenticity of the received data could not be verified.</p><ul><li>Please contact the web site owners to inform them of this problem.</li></ul>">
+ 
++<!ENTITY nssBadCert.title "Secure Connection Failed">
++<!ENTITY nssBadCert.longDesc "<ul>
++<li>This could be a problem with the server's configuration, or it could be someone trying to impersonate the server.</li>
++<li>If you have connected to this server successfully in the past, the error may be temporary, and you can try again later.</li>
++<li>You can see and change your current list of servers with known security problems in your advanced encryption settings.</li>
++</ul>
++">
++
+ <!ENTITY malwareBlocked.title "Suspected Attack Site!">
+ <!ENTITY malwareBlocked.longDesc "<p>
+ Attack sites try to install programs that steal private information, use your computer to attack others, or damage your system.</p>
+ <p>You should not visit this site.</p>
+ ">
+ 
+ <!ENTITY phishingBlocked.title "Suspected Web Forgery!">
+ <!ENTITY phishingBlocked.longDesc "
+Index: docshell/base/nsDocShell.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/docshell/base/nsDocShell.cpp,v
+retrieving revision 1.863
+diff -u -8 -p -r1.863 nsDocShell.cpp
+--- docshell/base/nsDocShell.cpp	29 Oct 2007 18:29:18 -0000	1.863
++++ docshell/base/nsDocShell.cpp	30 Oct 2007 20:20:17 -0000
+@@ -2926,41 +2926,53 @@ nsDocShell::DisplayLoadError(nsresult aE
+         // Get the host
+         nsCAutoString host;
+         aURI->GetHost(host);
+         CopyUTF8toUTF16(host, formatStrs[0]);
+         formatStrCount = 1;
+         error.AssignLiteral("netTimeout");
+     }
+     else if (NS_ERROR_GET_MODULE(aError) == NS_ERROR_MODULE_SECURITY) {
++        nsCOMPtr<nsINSSErrorsService> nsserr =
++            do_GetService(NS_NSS_ERRORS_SERVICE_CONTRACTID);
++
++        PRUint32 errorClass;
++        if (!nsserr ||
++            NS_FAILED(nsserr->GetErrorClass(aError, &errorClass))) {
++          errorClass = nsINSSErrorsService::ERROR_CLASS_SSL_PROTOCOL;
++        }
++
+         nsCOMPtr<nsISupports> securityInfo;
+         nsCOMPtr<nsITransportSecurityInfo> tsi;
+         if (aFailedChannel)
+             aFailedChannel->GetSecurityInfo(getter_AddRefs(securityInfo));
+         tsi = do_QueryInterface(securityInfo);
+         if (tsi) {
+             // Usually we should have aFailedChannel and get a detailed message
+             tsi->GetErrorMessage(getter_Copies(messageStr));
+         }
+         else {
+             // No channel, let's obtain the generic error message
+-            nsCOMPtr<nsINSSErrorsService> nsserr =
+-                do_GetService(NS_NSS_ERRORS_SERVICE_CONTRACTID);
+             if (nsserr) {
+                 nsserr->GetErrorMessage(aError, messageStr);
+             }
+         }
+-        if (!messageStr.IsEmpty())
+-            error.AssignLiteral("nssFailure2");
++        if (!messageStr.IsEmpty()) {
++            if (errorClass == nsINSSErrorsService::ERROR_CLASS_BAD_CERT) {
++                error.AssignLiteral("nssBadCert");
++            } else {
++                error.AssignLiteral("nssFailure2");
++            }
++        }
+     } else if (NS_ERROR_PHISHING_URI == aError || NS_ERROR_MALWARE_URI == aError) {
+         nsCAutoString host;
+         aURI->GetHost(host);
+         CopyUTF8toUTF16(host, formatStrs[0]);
+         formatStrCount = 1;
+-        
++
+         // Malware and phishing detectors may want to use an alternate error
+         // page, but if the pref's not set, we'll fall back on the standard page
+         nsXPIDLCString alternateErrorPage;
+         mPrefs->GetCharPref("urlclassifier.alternate_error_page",
+                             getter_Copies(alternateErrorPage));
+         if (alternateErrorPage)
+             errorPage.Assign(alternateErrorPage);
+ 
+Index: docshell/resources/content/netError.xhtml
+===================================================================
+RCS file: /cvsroot/mozilla/docshell/resources/content/netError.xhtml,v
+retrieving revision 1.23
+diff -u -8 -p -r1.23 netError.xhtml
+--- docshell/resources/content/netError.xhtml	31 Aug 2007 23:18:48 -0000	1.23
++++ docshell/resources/content/netError.xhtml	30 Oct 2007 20:20:17 -0000
+@@ -197,16 +197,17 @@
+         <h1 id="et_netReset">&netReset.title;</h1>
+         <h1 id="et_netOffline">&netOffline.title;</h1>
+         <h1 id="et_netInterrupt">&netInterrupt.title;</h1>
+         <h1 id="et_deniedPortAccess">&deniedPortAccess.title;</h1>
+         <h1 id="et_proxyResolveFailure">&proxyResolveFailure.title;</h1>
+         <h1 id="et_proxyConnectFailure">&proxyConnectFailure.title;</h1>
+         <h1 id="et_contentEncodingError">&contentEncodingError.title;</h1>
+         <h1 id="et_nssFailure2">&nssFailure2.title;</h1>
++        <h1 id="et_nssBadCert">&nssBadCert.title;</h1>
+         <h1 id="et_malwareBlocked">&malwareBlocked.title;</h1>
+       </div>
+       <div id="errorDescriptionsContainer">
+         <div id="ed_generic">&generic.longDesc;</div>
+         <div id="ed_dnsNotFound">&dnsNotFound.longDesc;</div>
+         <div id="ed_fileNotFound">&fileNotFound.longDesc;</div>
+         <div id="ed_malformedURI">&malformedURI.longDesc;</div>
+         <div id="ed_protocolNotFound">&protocolNotFound.longDesc;</div>
+@@ -217,16 +218,17 @@
+         <div id="ed_netReset">&netReset.longDesc;</div>
+         <div id="ed_netOffline">&netOffline.longDesc;</div>
+         <div id="ed_netInterrupt">&netInterrupt.longDesc;</div>
+         <div id="ed_deniedPortAccess">&deniedPortAccess.longDesc;</div>
+         <div id="ed_proxyResolveFailure">&proxyResolveFailure.longDesc;</div>
+         <div id="ed_proxyConnectFailure">&proxyConnectFailure.longDesc;</div>
+         <div id="ed_contentEncodingError">&contentEncodingError.longDesc;</div>
+         <div id="ed_nssFailure2">&nssFailure2.longDesc;</div>
++        <div id="ed_nssBadCert">&nssBadCert.longDesc;</div>
+         <div id="ed_malwareBlocked">&malwareBlocked.longDesc;</div>
+       </div>
+     </div>
+ 
+     <!-- PAGE CONTAINER (for styling purposes only) -->
+     <div id="errorPageContainer">
+     
+       <!-- Error Title -->
+Index: dom/locales/en-US/chrome/netError.dtd
+===================================================================
+RCS file: /cvsroot/mozilla/dom/locales/en-US/chrome/netError.dtd,v
+retrieving revision 1.10
+diff -u -8 -p -r1.10 netError.dtd
+--- dom/locales/en-US/chrome/netError.dtd	29 Oct 2007 18:29:18 -0000	1.10
++++ dom/locales/en-US/chrome/netError.dtd	30 Oct 2007 20:20:17 -0000
+@@ -49,16 +49,24 @@
+ <!ENTITY redirectLoop.longDesc "<p>The browser has stopped trying to retrieve the requested item. The site is redirecting the request in a way that will never complete.</p><ul><li>Have you disabled or blocked cookies required by this site?</li><li><em>NOTE</em>: If accepting the site's cookies does not resolve the problem, it is likely a server configuration issue and not your computer.</li></ul>">
+ 
+ <!ENTITY unknownSocketType.title "Incorrect Response">
+ <!ENTITY unknownSocketType.longDesc "<p>The site responded to the network request in an unexpected way and the browser cannot continue.</p>">
+ 
+ <!ENTITY nssFailure2.title "Secure Connection Failed">
+ <!ENTITY nssFailure2.longDesc "<p>The page you are trying to view can not be shown because the authenticity of the received data could not be verified.</p><ul><li>Please contact the web site owners to inform them of this problem.</li></ul>">
+ 
++<!ENTITY nssBadCert.title "Secure Connection Failed">
++<!ENTITY nssBadCert.longDesc "<ul>
++<li>This could be a problem with the server's configuration, or it could be someone trying to impersonate the server.</li>
++<li>If you have connected to this server successfully in the past, the error may be temporary, and you can try again later.</li>
++<li>You can see and change your current list of servers with known security problems in your advanced encryption settings.</li>
++</ul>
++">
++
+ <!ENTITY malwareBlocked.title "Suspected Attack Site!">
+ <!ENTITY malwareBlocked.longDesc "
+ <p>Attack sites try to install programs that steal private information, use your computer to attack others, or damage your system.</p>
+ <p>Web site owners who believe their site has been reported as an attack site in error may <a href='http://www.stopbadware.org/home/reviewinfo' >request a review</a>.</p>
+ ">
+ 
+ <!ENTITY phishingBlocked.title "Suspected Web Forgery!">
+ <!ENTITY phishingBlocked.longDesc "
+Index: netwerk/base/public/nsINSSErrorsService.idl
+===================================================================
+RCS file: /cvsroot/mozilla/netwerk/base/public/nsINSSErrorsService.idl,v
+retrieving revision 1.1
+diff -u -8 -p -r1.1 nsINSSErrorsService.idl
+--- netwerk/base/public/nsINSSErrorsService.idl	17 Feb 2007 03:47:27 -0000	1.1
++++ netwerk/base/public/nsINSSErrorsService.idl	30 Oct 2007 20:20:29 -0000
+@@ -34,17 +34,17 @@
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "nsISupports.idl"
+ 
+-[scriptable, uuid(c6ac6e5d-9db1-4cad-bedc-e2d226913c21)]
++[scriptable, uuid(3a5c7a0f-f5da-4a8b-a748-d7c5a528f33b)]
+ interface nsINSSErrorsService : nsISupports
+ {
+     /**
+      *  @param aNSPRCode An error code obtained using PR_GetError()
+      *  @return True if it is error code defined by the NSS library
+      */
+     boolean isNSSErrorCode(in PRInt32 aNSPRCode);
+ 
+@@ -56,9 +56,19 @@ interface nsINSSErrorsService : nsISuppo
+     nsresult getXPCOMFromNSSError(in PRInt32 aNSPRCode);
+ 
+     /**
+      *  Function will fail if aXPCOMErrorCode is not an NSS error code.
+      *  @param aXPCOMErrorCode An error code obtain using getXPCOMFromNSSError
+      *  return A localized human readable error explanation.
+      */
+     AString getErrorMessage(in nsresult aXPCOMErrorCode);
++
++    /**
++     *  Function will fail if aXPCOMErrorCode is not an NSS error code.
++     *  @param aXPCOMErrorCode An error code obtain using getXPCOMFromNSSError
++     *  return the 
++     */
++    PRUint32 getErrorClass(in nsresult aXPCOMErrorCode);
++
++    const unsigned long ERROR_CLASS_SSL_PROTOCOL = 1;
++    const unsigned long ERROR_CLASS_BAD_CERT     = 2;
+ };
+Index: security/manager/locales/en-US/chrome/pipnss/pipnss.properties
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/locales/en-US/chrome/pipnss/pipnss.properties,v
+retrieving revision 1.28
+diff -u -8 -p -r1.28 pipnss.properties
+--- security/manager/locales/en-US/chrome/pipnss/pipnss.properties	23 Oct 2007 18:30:16 -0000	1.28
++++ security/manager/locales/en-US/chrome/pipnss/pipnss.properties	30 Oct 2007 20:20:29 -0000
+@@ -332,22 +332,34 @@ UnknownCertOrg=(Unknown Organization)
+ AVATemplate=%S = %S
+ 
+ PSMERR_SSL_Disabled=Can't connect securely because the SSL protocol has been disabled.
+ PSMERR_SSL2_Disabled=Can't connect securely because the site uses an older, insecure version of the SSL protocol.
+ PSMERR_HostReusedIssuerSerial=You have received an invalid certificate.  Please contact the server administrator or email correspondent and give them the following information:\n\nYour certificate contains the same serial number as another certificate issued by the certificate authority.  Please get a new certificate containing a unique serial number.
+ 
+ SSLConnectionErrorPrefix=An error occurred during a connection to %S.
+ 
+-certErrorIntro=An error occurred during a connection to %S because it uses an invalid security certificate.
+-certErrorUntrusted=The certificate is not trusted or its issuer certificate is invalid.
+-certErrorMismatch=The certificate is not valid for domain name %S.
+-certErrorExpired=The certificate has expired on %S.
++certErrorIntro=%S uses an invalid security certificate.
++
++certErrorTrust_SelfSigned=The certificate is not trusted because it is self signed.
++certErrorTrust_UnknownIssuer=The certificate is not trusted because the issuer certificate is unknown.
++certErrorTrust_CaInvalid=The certificate is not trusted because it was issued by an invalid CA certificate.
++certErrorTrust_Issuer=The certificate is not trusted because the issuer certificate is not trusted.
++certErrorTrust_ExpiredIssuer=The certificate is not trusted because the issuer certificate has expired.
++certErrorTrust_Untrusted=The certificate does not come from a trusted source.
++
++certErrorMismatch=The certificate is not valid for the name %S.
++certErrorMismatchSingle=The certificate is only valid for name %S.
++certErrorMismatchMultiple=The certificate is only valid for the following names:
++
++certErrorExpired=The certificate expired on %S.
+ certErrorNotYetValid=The certificate will not be valid until %S.
+ 
++certErrorCodePrefix=(Error code: %S)
++
+ CertInfoIssuedFor=Issued to:
+ CertInfoIssuedBy=Issued by:
+ CertInfoValid=Valid
+ CertInfoFrom=from
+ CertInfoTo=to
+ CertInfoPurposes=Purposes
+ CertInfoEmail=Email
+ CertInfoStoredIn=Stored in:
+Index: security/manager/ssl/public/nsIX509Cert3.idl
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/public/nsIX509Cert3.idl,v
+retrieving revision 1.3
+diff -u -8 -p -r1.3 nsIX509Cert3.idl
+--- security/manager/ssl/public/nsIX509Cert3.idl	3 Oct 2007 11:46:12 -0000	1.3
++++ security/manager/ssl/public/nsIX509Cert3.idl	30 Oct 2007 20:20:30 -0000
+@@ -37,17 +37,17 @@
+ 
+ #include "nsIX509Cert2.idl"
+ 
+ interface nsICertVerificationListener;
+ 
+ /**
+  * Extending nsIX509Cert
+  */
+-[scriptable, uuid(1362ffab-a683-4504-8038-25ce63b45370)]
++[scriptable, uuid(aa67eb02-ccc8-4f55-84da-bcafff9265ae)]
+ interface nsIX509Cert3 : nsIX509Cert2 {
+ 
+   /**
+    *  Constants for specifying the chain mode when exporting a certificate
+    */
+   const unsigned long CMS_CHAIN_MODE_CertOnly = 1;
+   const unsigned long CMS_CHAIN_MODE_CertChain = 2;
+   const unsigned long CMS_CHAIN_MODE_CertChainWithRoot = 3;
+@@ -67,16 +67,18 @@ interface nsIX509Cert3 : nsIX509Cert2 {
+    *  @param chainMode Whether to include the chain (with or without the root),
+                        see CMS_CHAIN_MODE constants.
+    *  @param length The number of bytes of the PKCS#7 data.
+    *  @param data The bytes representing the PKCS#7 wrapped certificate.
+    */
+   void exportAsCMS(in unsigned long chainMode,
+                    out unsigned long length,
+                    [retval, array, size_is(length)] out octet data);
++
++  readonly attribute boolean isSelfSigned;
+ };
+ 
+ [scriptable, uuid(2fd0a785-9f2d-4327-8871-8c3e0783891d)]
+ interface nsICertVerificationResult : nsISupports {
+ 
+   /**
+    *  This interface reflects a container of
+    *  verification results. Call will not block.
+Index: security/manager/ssl/src/nsNSSCertificate.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSCertificate.cpp,v
+retrieving revision 1.132
+diff -u -8 -p -r1.132 nsNSSCertificate.cpp
+--- security/manager/ssl/src/nsNSSCertificate.cpp	24 Oct 2007 22:30:34 -0000	1.132
++++ security/manager/ssl/src/nsNSSCertificate.cpp	30 Oct 2007 20:20:30 -0000
+@@ -216,16 +216,29 @@ nsNSSCertificate::GetCertType(PRUint32 *
+   if (mCertType == CERT_TYPE_NOT_YET_INITIALIZED) {
+      // only determine cert type once and cache it
+      mCertType = getCertType(mCert);
+   }
+   *aCertType = mCertType;
+   return NS_OK;
+ }
+ 
++NS_IMETHODIMP
++nsNSSCertificate::GetIsSelfSigned(PRBool *aIsSelfSigned)
++{
++  NS_ENSURE_ARG(aIsSelfSigned);
++
++  nsNSSShutDownPreventionLock locker;
++  if (isAlreadyShutDown())
++    return NS_ERROR_NOT_AVAILABLE;
++
++  *aIsSelfSigned = mCert->isRoot;
++  return NS_OK;
++}
++
+ nsresult
+ nsNSSCertificate::MarkForPermDeletion()
+ {
+   nsNSSShutDownPreventionLock locker;
+   if (isAlreadyShutDown())
+     return NS_ERROR_NOT_AVAILABLE;
+ 
+   // make sure user is logged in to the token
+Index: security/manager/ssl/src/nsNSSComponent.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSComponent.cpp,v
+retrieving revision 1.155
+diff -u -8 -p -r1.155 nsNSSComponent.cpp
+--- security/manager/ssl/src/nsNSSComponent.cpp	23 Oct 2007 18:30:17 -0000	1.155
++++ security/manager/ssl/src/nsNSSComponent.cpp	30 Oct 2007 20:20:30 -0000
+@@ -2224,16 +2224,48 @@ nsNSSComponent::GetXPCOMFromNSSError(PRI
+ 
+   *aXPCOMErrorCode =
+     NS_ERROR_GENERATE_FAILURE(NS_ERROR_MODULE_SECURITY,
+                               -1 * aNSPRCode);
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
++nsNSSComponent::GetErrorClass(nsresult aXPCOMErrorCode, PRUint32 *aErrorClass)
++{
++  NS_ENSURE_ARG(aErrorClass);
++
++  if (NS_ERROR_GET_MODULE(aXPCOMErrorCode) != NS_ERROR_MODULE_SECURITY
++      || NS_ERROR_GET_SEVERITY(aXPCOMErrorCode) != NS_ERROR_SEVERITY_ERROR)
++    return NS_ERROR_FAILURE;
++  
++  PRInt32 aNSPRCode = -1 * NS_ERROR_GET_CODE(aXPCOMErrorCode);
++
++  if (!IS_SEC_ERROR(aNSPRCode) && !IS_SSL_ERROR(aNSPRCode))
++    return NS_ERROR_FAILURE;
++
++  switch (aNSPRCode)
++  {
++    case SEC_ERROR_UNKNOWN_ISSUER:
++    case SEC_ERROR_CA_CERT_INVALID:
++    case SEC_ERROR_UNTRUSTED_ISSUER:
++    case SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE:
++    case SEC_ERROR_UNTRUSTED_CERT:
++    case SSL_ERROR_BAD_CERT_DOMAIN:
++    case SEC_ERROR_EXPIRED_CERTIFICATE:
++      *aErrorClass = ERROR_CLASS_BAD_CERT;
++      break;
++    default:
++      *aErrorClass = ERROR_CLASS_SSL_PROTOCOL;
++      break;
++  }
++  return NS_OK;
++}
++
++NS_IMETHODIMP
+ nsNSSComponent::GetErrorMessage(nsresult aXPCOMErrorCode, nsAString &aErrorMessage)
+ {
+   if (NS_ERROR_GET_MODULE(aXPCOMErrorCode) != NS_ERROR_MODULE_SECURITY
+       || NS_ERROR_GET_SEVERITY(aXPCOMErrorCode) != NS_ERROR_SEVERITY_ERROR)
+     return NS_ERROR_FAILURE;
+   
+   PRInt32 aNSPRCode = -1 * NS_ERROR_GET_CODE(aXPCOMErrorCode);
+ 
+Index: security/manager/ssl/src/nsNSSErrors.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSErrors.cpp,v
+retrieving revision 1.3
+diff -u -8 -p -r1.3 nsNSSErrors.cpp
+--- security/manager/ssl/src/nsNSSErrors.cpp	27 Jun 2007 13:12:03 -0000	1.3
++++ security/manager/ssl/src/nsNSSErrors.cpp	30 Oct 2007 20:20:30 -0000
+@@ -359,22 +359,36 @@ nsNSSErrors::getErrorMessageFromCode(PRI
+     else
+     {
+       rv = component->GetNSSBundleString(nss_error_id_str, defMsg);
+     }
+ 
+     if (NS_SUCCEEDED(rv))
+     {
+       returnedMessage.Append(defMsg);
+-      returnedMessage.Append(NS_LITERAL_STRING(" "));
++      returnedMessage.Append(NS_LITERAL_STRING("\n"));
+     }
+ 
+     nsCString error_id(nss_error_id_str);
+     ToLowerCase(error_id);
+     NS_ConvertASCIItoUTF16 idU(error_id);
+ 
+-    returnedMessage.Append(NS_LITERAL_STRING("("));
+-    returnedMessage.Append(idU);
+-    returnedMessage.Append(NS_LITERAL_STRING(")"));
++    const PRUnichar *params[1];
++    params[0] = idU.get();
++
++    nsString formattedString;
++    rv = component->PIPBundleFormatStringFromName("certErrorCodePrefix", 
++                                                  params, 1, 
++                                                  formattedString);
++    if (NS_SUCCEEDED(rv)) {
++      returnedMessage.Append(NS_LITERAL_STRING("\n"));
++      returnedMessage.Append(formattedString);
++      returnedMessage.Append(NS_LITERAL_STRING("\n"));
++    }
++    else {
++      returnedMessage.Append(NS_LITERAL_STRING("("));
++      returnedMessage.Append(idU);
++      returnedMessage.Append(NS_LITERAL_STRING(")"));
++    }
+   }
+ 
+   return NS_OK;
+ }
+Index: security/manager/ssl/src/nsNSSIOLayer.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp,v
+retrieving revision 1.138
+diff -u -8 -p -r1.138 nsNSSIOLayer.cpp
+--- security/manager/ssl/src/nsNSSIOLayer.cpp	19 Oct 2007 19:16:36 -0000	1.138
++++ security/manager/ssl/src/nsNSSIOLayer.cpp	30 Oct 2007 20:20:30 -0000
+@@ -594,103 +594,275 @@ void nsSSLIOLayerHelpers::Cleanup()
+   if (mSharedPollableEvent)
+     PR_DestroyPollableEvent(mSharedPollableEvent);
+ 
+   if (mutex)
+     PR_DestroyLock(mutex);
+ }
+ 
+ static nsresult
+-getErrorMessage(PRInt32 err, const nsString &host,
++getErrorMessage(PRInt32 err, 
++                const nsString &host,
++                PRInt32 port,
++                PRBool externalErrorReporting,
+                 nsINSSComponent *component,
+                 nsString &returnedMessage)
+ {
+   NS_ENSURE_ARG_POINTER(component);
+ 
+   const PRUnichar *params[1];
+   nsresult rv;
+ 
+   if (host.Length())
+   {
+-    params[0] = host.get();
++    nsString hostWithPort;
++
++    // For now, hide port when it's 443 and we're reporting the error using
++    // external reporting. In the future a better mechanism should be used
++    // to make a decision about showing the port number, possibly by requiring
++    // the context object to implement a specific interface.
++    // The motivation is that Mozilla browser would like to hide the port number
++    // in error pages in the common case.
++
++    if (externalErrorReporting && port == 443) {
++      params[0] = host.get();
++    }
++    else {
++      hostWithPort = host;
++      hostWithPort.AppendLiteral(":");
++      hostWithPort.AppendInt(port);
++      params[0] = hostWithPort.get();
++    }
+ 
+     nsString formattedString;
+     rv = component->PIPBundleFormatStringFromName("SSLConnectionErrorPrefix", 
+                                                   params, 1, 
+                                                   formattedString);
+     if (NS_SUCCEEDED(rv))
+     {
+       returnedMessage.Append(formattedString);
+-      returnedMessage.Append(NS_LITERAL_STRING("\n"));
++      returnedMessage.Append(NS_LITERAL_STRING("\n\n"));
+     }
+   }
+ 
+   nsString explanation;
+   rv = nsNSSErrors::getErrorMessageFromCode(err, component, explanation);
+   if (NS_SUCCEEDED(rv))
+     returnedMessage.Append(explanation);
+ 
+   return NS_OK;
+ }
+ 
+ static nsresult
+ getInvalidCertErrorMessage(PRUint32 multipleCollectedErrors, 
+-                           PRInt32 errorCodeToReport, 
++                           PRErrorCode errorCodeToReport, 
++                           PRErrorCode errTrust, 
++                           PRErrorCode errMismatch, 
++                           PRErrorCode errExpired,
+                            const nsString &host,
+                            const nsString &hostWithPort,
++                           PRInt32 port,
+                            nsIX509Cert* ix509,
++                           PRBool externalErrorReporting,
+                            nsINSSComponent *component,
+                            nsString &returnedMessage)
+ {
+   NS_ENSURE_ARG_POINTER(component);
+ 
+   const PRUnichar *params[1];
+   nsresult rv;
+ 
+-  if (hostWithPort.Length())
+-  {
++  // For now, hide port when it's 443 and we're reporting the error using
++  // external reporting. In the future a better mechanism should be used
++  // to make a decision about showing the port number, possibly by requiring
++  // the context object to implement a specific interface.
++  // The motivation is that Mozilla browser would like to hide the port number
++  // in error pages in the common case.
++  
++  if (externalErrorReporting && port == 443)
++    params[0] = host.get();
++  else
+     params[0] = hostWithPort.get();
+ 
+-    nsString formattedString;
+-    rv = component->PIPBundleFormatStringFromName("certErrorIntro", 
+-                                                  params, 1, 
+-                                                  formattedString);
+-    if (NS_SUCCEEDED(rv))
+-    {
+-      returnedMessage.Append(formattedString);
+-      returnedMessage.Append(NS_LITERAL_STRING("\n"));
+-    }
++  nsString formattedString;
++  rv = component->PIPBundleFormatStringFromName("certErrorIntro", 
++                                                params, 1, 
++                                                formattedString);
++  if (NS_SUCCEEDED(rv))
++  {
++    returnedMessage.Append(formattedString);
++    returnedMessage.Append(NS_LITERAL_STRING("\n\n"));
+   }
+ 
+   if (multipleCollectedErrors & nsICertOverrideService::ERROR_UNTRUSTED)
+   {
+     params[0] = host.get();
+ 
++    const char *errorID = nsnull;
++    nsCOMPtr<nsIX509Cert3> cert3 = do_QueryInterface(ix509);
++    if (cert3) {
++      PRBool isSelfSigned;
++      if (NS_SUCCEEDED(cert3->GetIsSelfSigned(&isSelfSigned))
++          && isSelfSigned) {
++        errorID = "certErrorTrust_SelfSigned";
++      }
++    }
++
++    if (!errorID) {
++      switch (errTrust) {
++        case SEC_ERROR_UNKNOWN_ISSUER:
++          errorID = "certErrorTrust_UnknownIssuer";
++          break;
++        case SEC_ERROR_CA_CERT_INVALID:
++          errorID = "certErrorTrust_CaInvalid";
++          break;
++        case SEC_ERROR_UNTRUSTED_ISSUER:
++          errorID = "certErrorTrust_Issuer";
++          break;
++        case SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE:
++          errorID = "certErrorTrust_ExpiredIssuer";
++          break;
++        case SEC_ERROR_UNTRUSTED_CERT:
++        default:
++          errorID = "certErrorTrust_Untrusted";
++          break;
++      }
++    }
++
+     nsString formattedString;
+-    rv = component->GetPIPNSSBundleString("certErrorUntrusted", 
++    rv = component->GetPIPNSSBundleString(errorID, 
+                                           formattedString);
+     if (NS_SUCCEEDED(rv))
+     {
+       returnedMessage.Append(formattedString);
+       returnedMessage.Append(NS_LITERAL_STRING("\n"));
+     }
+   }
+ 
+   if (multipleCollectedErrors & nsICertOverrideService::ERROR_MISMATCH)
+   {
+-    params[0] = host.get();
++    PRBool useSAN = PR_TRUE; // subject alt name extension
++    PRBool multipleNames = PR_FALSE;
++    nsString allNames;
++
++    CERTCertificate *nssCert = NULL;
++    CERTCertificateCleaner nssCertCleaner(nssCert);
++    nsCOMPtr<nsIX509Cert2> cert2 = do_QueryInterface(ix509, &rv);
++    if (cert2)
++      nssCert = cert2->GetCert();
++    if (!nssCert)
++      useSAN = PR_FALSE;
++
++    PRArenaPool *san_arena = nsnull;
++    SECItem altNameExtension = {siBuffer, NULL, 0 };
++    CERTGeneralName *sanNameList = nsnull;
++
++    if (useSAN) {
++      rv = CERT_FindCertExtension(nssCert, SEC_OID_X509_SUBJECT_ALT_NAME,
++                                  &altNameExtension);
++      if (rv != SECSuccess)
++        useSAN = PR_FALSE;
++    }
++
++    if (useSAN) {
++      san_arena = PORT_NewArena(DER_DEFAULT_CHUNKSIZE);
++      if (!san_arena)
++        useSAN = PR_FALSE;
++    }
++
++    if (useSAN) {
++      sanNameList = CERT_DecodeAltNameExtension(san_arena, &altNameExtension);
++      if (!sanNameList)
++        useSAN = PR_FALSE;
++    }
++
++    SECITEM_FreeItem(&altNameExtension, PR_FALSE);
++
++    if (useSAN) {
++      CERTGeneralName *current = sanNameList;
++      do {
++        nsAutoString name;
++        switch (current->type) {
++          case certDNSName:
++            name.AssignASCII((char*)current->name.other.data, current->name.other.len);
++            if (!allNames.IsEmpty()) {
++              multipleNames = PR_TRUE;
++              allNames.Append(NS_LITERAL_STRING(" , "));
++            }
++            allNames.Append(name);
++            break;
++  
++          case certIPAddress:
++            {
++              char buf[INET6_ADDRSTRLEN];
++              PRNetAddr addr;
++              if (current->name.other.len == 4) {
++                addr.inet.family = PR_AF_INET;
++                memcpy(&addr.inet.ip, current->name.other.data, current->name.other.len);
++                PR_NetAddrToString(&addr, buf, sizeof(buf));
++                name.AssignASCII(buf);
++              } else if (current->name.other.len == 16) {
++                addr.ipv6.family = PR_AF_INET6;
++                memcpy(&addr.ipv6.ip, current->name.other.data, current->name.other.len);
++                PR_NetAddrToString(&addr, buf, sizeof(buf));
++                name.AssignASCII(buf);
++              } else {
++                /* invalid IP address */
++              }
++              if (!name.IsEmpty()) {
++                if (!allNames.IsEmpty()) {
++                  multipleNames = PR_TRUE;
++                  allNames.Append(NS_LITERAL_STRING(" , "));
++                }
++                allNames.Append(name);
++              }
++              break;
++            }
+ 
+-    nsString formattedString;
+-    rv = component->PIPBundleFormatStringFromName("certErrorMismatch", 
+-                                                  params, 1, 
+-                                                  formattedString);
+-    if (NS_SUCCEEDED(rv))
+-    {
+-      returnedMessage.Append(formattedString);
+-      returnedMessage.Append(NS_LITERAL_STRING("\n"));
++          default: // all other types of names are ignored
++            break;
++        }
++        current = CERT_GetNextGeneralName(current);
++      } while (current != sanNameList); // double linked
++    }
++    if (san_arena)
++      PORT_FreeArena(san_arena, PR_FALSE);
++
++    if (!useSAN) {
++      char *certName = nsnull;
++      // certName = CERT_FindNSStringExtension(nssCert, SEC_OID_NS_CERT_EXT_SSL_SERVER_NAME);
++      if (!certName) {
++        certName = CERT_GetCommonName(&nssCert->subject);
++      }
++      allNames.AssignASCII(certName);
++      PORT_Free(certName);
++    }
++
++    if (multipleNames) {
++      nsString message;
++      rv = component->GetPIPNSSBundleString("certErrorMismatchMultiple", 
++                                            message);
++      if (NS_SUCCEEDED(rv)) {
++        returnedMessage.Append(message);
++        returnedMessage.Append(NS_LITERAL_STRING("\n  "));
++        returnedMessage.Append(allNames);
++        returnedMessage.Append(NS_LITERAL_STRING("  \n"));
++      }
++    }
++    else { // !multipleNames
++      params[0] = allNames.get();
++
++      nsString formattedString;
++      rv = component->PIPBundleFormatStringFromName("certErrorMismatchSingle", 
++                                                    params, 1, 
++                                                    formattedString);
++      if (NS_SUCCEEDED(rv)) {
++        returnedMessage.Append(formattedString);
++        returnedMessage.Append(NS_LITERAL_STRING("\n"));
++      }
+     }
+   }
+ 
+   if (multipleCollectedErrors & nsICertOverrideService::ERROR_TIME)
+   {
+     PRTime now = PR_Now();
+     PRTime notAfter, notBefore, timeToUse;
+     nsCOMPtr<nsIX509CertValidity> validity;
+@@ -740,19 +912,32 @@ getInvalidCertErrorMessage(PRUint32 mult
+ 
+   const char *codeName = nsNSSErrors::getDefaultErrorStringName(errorCodeToReport);
+   if (codeName)
+   {
+     nsCString error_id(codeName);
+     ToLowerCase(error_id);
+     NS_ConvertASCIItoUTF16 idU(error_id);
+ 
+-    returnedMessage.Append(NS_LITERAL_STRING(" ("));
+-    returnedMessage.Append(idU);
+-    returnedMessage.Append(NS_LITERAL_STRING(")"));
++    params[0] = idU.get();
++
++    nsString formattedString;
++    rv = component->PIPBundleFormatStringFromName("certErrorCodePrefix", 
++                                                  params, 1, 
++                                                  formattedString);
++    if (NS_SUCCEEDED(rv)) {
++      returnedMessage.Append(NS_LITERAL_STRING("\n"));
++      returnedMessage.Append(formattedString);
++      returnedMessage.Append(NS_LITERAL_STRING("\n"));
++    }
++    else {
++      returnedMessage.Append(NS_LITERAL_STRING(" ("));
++      returnedMessage.Append(idU);
++      returnedMessage.Append(NS_LITERAL_STRING(")"));
++    }
+   }
+ 
+   return NS_OK;
+ }
+ 
+ static nsresult
+ displayAlert(nsAFlatString &formattedString, nsNSSSocketInfo *infoObject)
+ {
+@@ -798,22 +983,25 @@ nsHandleSSLError(nsNSSSocketInfo *socket
+   nsCOMPtr<nsINSSComponent> nssComponent(do_GetService(nssComponentCID, &rv));
+   if (NS_FAILED(rv))
+     return rv;
+ 
+   nsXPIDLCString hostName;
+   socketInfo->GetHostName(getter_Copies(hostName));
+   NS_ConvertASCIItoUTF16 hostNameU(hostName);
+ 
+-  nsString formattedString;
+-  rv = getErrorMessage(err, hostNameU, nssComponent, formattedString);
++  PRInt32 port;
++  socketInfo->GetPort(&port);
+ 
+   PRBool external = PR_FALSE;
+   socketInfo->GetExternalErrorReporting(&external);
+   
++  nsString formattedString;
++  rv = getErrorMessage(err, hostNameU, port, external, nssComponent, formattedString);
++
+   if (external)
+   {
+     socketInfo->SetErrorMessage(formattedString.get());
+   }
+   else
+   {
+     nsPSMUITracker tracker;
+     if (tracker.isUIForbidden()) {
+@@ -825,40 +1013,46 @@ nsHandleSSLError(nsNSSSocketInfo *socket
+   }
+   return rv;
+ }
+ 
+ static nsresult
+ nsHandleInvalidCertError(nsNSSSocketInfo *socketInfo, 
+                          PRUint32 multipleCollectedErrors, 
+                          const nsACString &host, 
+-                         const nsACString &hostWithPort, 
+-                         PRInt32 err,
++                         const nsACString &hostWithPort,
++                         PRInt32 port,
++                         PRErrorCode errorCodeToReport,
++                         PRErrorCode errTrust, 
++                         PRErrorCode errMismatch, 
++                         PRErrorCode errExpired,
+                          nsIX509Cert* ix509)
+ {
+   nsresult rv;
+   NS_DEFINE_CID(nssComponentCID, NS_NSSCOMPONENT_CID);
+   nsCOMPtr<nsINSSComponent> nssComponent(do_GetService(nssComponentCID, &rv));
+   if (NS_FAILED(rv))
+     return rv;
+ 
+   NS_ConvertASCIItoUTF16 hostU(host);
+   NS_ConvertASCIItoUTF16 hostWithPortU(hostWithPort);
+ 
+-  nsString formattedString;
+-  rv = getInvalidCertErrorMessage(multipleCollectedErrors, err, hostU, hostWithPortU, 
+-                                  ix509, nssComponent, formattedString);
+-
+   // What mechanism is used to inform the user?
+   // The highest priority has the "external error reporting" feature,
+   // if set, we'll provide the strings to be used by the nsINSSErrorsService
+ 
+   PRBool external = PR_FALSE;
+   socketInfo->GetExternalErrorReporting(&external);
+   
++  nsString formattedString;
++  rv = getInvalidCertErrorMessage(multipleCollectedErrors, errorCodeToReport,
+++                                 errTrust, errMismatch, errExpired,
++                                  hostU, hostWithPortU, port, 
++                                  ix509, external, nssComponent, formattedString);
++
+   if (external)
+   {
+     socketInfo->SetErrorMessage(formattedString.get());
+   }
+   else
+   {
+     nsPSMUITracker tracker;
+     if (tracker.isUIForbidden()) {
+@@ -2322,21 +2516,19 @@ nsNSSBadCertHandler(void *arg, PRFileDes
+ 
+   nsCOMPtr<nsIX509Cert> ix509 = static_cast<nsIX509Cert*>(nssCert.get());
+ 
+   SECStatus srv;
+   nsresult nsrv;
+   PRUint32 collected_errors = 0;
+   PRUint32 remaining_display_errors = 0;
+ 
+-  // There may be multiple problems with a cert, but we can only report 
+-  // a single error code to the caller. We'll use the first code we see.
+-  // However, in our error string we'll use a string that mentions
+-  // all of expired/not-yet-valid/domain-mismatch/untrusted.
+-  PRErrorCode errorCodeToReport = SECSuccess;
++  PRErrorCode errorCodeTrust = SECSuccess;
++  PRErrorCode errorCodeMismatch = SECSuccess;
++  PRErrorCode errorCodeExpired = SECSuccess;
+   
+   char *hostname = SSL_RevealURL(sslSocket);
+   charCleaner hostnameCleaner(hostname); 
+   nsDependentCString hostString(hostname);
+ 
+   PRInt32 port;
+   infoObject->GetPort(&port);
+ 
+@@ -2345,17 +2537,17 @@ nsNSSBadCertHandler(void *arg, PRFileDes
+   hostWithPortString.AppendInt(port);
+ 
+   NS_ConvertUTF8toUTF16 hostWithPortStringUTF16(hostWithPortString);
+ 
+   // Check the name field against the desired hostname.
+   if (hostname && hostname[0] &&
+       CERT_VerifyCertName(peerCert, hostname) != SECSuccess) {
+     collected_errors |= nsICertOverrideService::ERROR_MISMATCH;
+-    errorCodeToReport = SSL_ERROR_BAD_CERT_DOMAIN;
++    errorCodeMismatch = SSL_ERROR_BAD_CERT_DOMAIN;
+   }
+ 
+   {
+     PRArenaPool *log_arena = PORT_NewArena(DER_DEFAULT_CHUNKSIZE);
+     if (!log_arena)    
+       return cancel_and_failure(infoObject);
+ 
+     PRArenaPoolCleanerFalseParam log_arena_cleaner(log_arena);
+@@ -2377,35 +2569,40 @@ nsNSSBadCertHandler(void *arg, PRFileDes
+     // Either it is a failure, which is expected, and we'll process the
+     //                         verify log below.
+     // Or it is a success, then a domain mismatch is the only 
+     //                     possible failure. 
+ 
+     CERTVerifyLogNode *i_node;
+     for (i_node = verify_log->head; i_node; i_node = i_node->next)
+     {
+-      if (errorCodeToReport == SECSuccess) {
+-        errorCodeToReport = i_node->error;
+-      }
+-
+       switch (i_node->error)
+       {
+         case SEC_ERROR_UNKNOWN_ISSUER:
+         case SEC_ERROR_CA_CERT_INVALID:
+         case SEC_ERROR_UNTRUSTED_ISSUER:
+         case SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE:
+         case SEC_ERROR_UNTRUSTED_CERT:
+           // We group all these errors as "cert not trusted"
+           collected_errors |= nsICertOverrideService::ERROR_UNTRUSTED;
++          if (errorCodeTrust == SECSuccess) {
++            errorCodeTrust = i_node->error;
++          }
+           break;
+         case SSL_ERROR_BAD_CERT_DOMAIN:
+           collected_errors |= nsICertOverrideService::ERROR_MISMATCH;
++          if (errorCodeMismatch == SECSuccess) {
++            errorCodeMismatch = i_node->error;
++          }
+           break;
+         case SEC_ERROR_EXPIRED_CERTIFICATE:
+           collected_errors |= nsICertOverrideService::ERROR_TIME;
++          if (errorCodeExpired == SECSuccess) {
++            errorCodeExpired = i_node->error;
++          }
+           break;
+         default:
+           // we are not willing to continue on any other error
+           nsHandleSSLError(infoObject, i_node->error);
+           return cancel_and_failure(infoObject);
+       }
+     }
+   }
+@@ -2491,23 +2688,36 @@ nsNSSBadCertHandler(void *arg, PRFileDes
+ 
+   nsCOMPtr<nsIRecentBadCertsService> recentBadCertsService = 
+     do_GetService(NS_RECENTBADCERTS_CONTRACTID);
+ 
+   if (recentBadCertsService) {
+     recentBadCertsService->AddBadCert(hostWithPortStringUTF16, status);
+   }
+ 
++  // pick the error code to report by priority
++  PRErrorCode errorCodeToReport = SECSuccess;
++  if (remaining_display_errors & nsICertOverrideService::ERROR_UNTRUSTED)
++    errorCodeToReport = errorCodeTrust;
++  else if (remaining_display_errors & nsICertOverrideService::ERROR_MISMATCH)
++    errorCodeToReport = errorCodeMismatch;
++  else if (remaining_display_errors & nsICertOverrideService::ERROR_TIME)
++    errorCodeToReport = errorCodeExpired;
++
+   PR_SetError(errorCodeToReport, 0);
+   if (!suppressMessage) {
+     nsHandleInvalidCertError(infoObject,
+                              remaining_display_errors,
+                              hostString,
+-                             hostWithPortString, 
+-                             errorCodeToReport, 
++                             hostWithPortString,
++                             port,
++                             errorCodeToReport,
++                             errorCodeTrust,
++                             errorCodeMismatch,
++                             errorCodeExpired,
+                              ix509);
+   }
+ 
+   return cancel_and_failure(infoObject);
+ }
+ 
+ static PRFileDesc*
+ nsSSLIOLayerImportFD(PRFileDesc *fd,
+Index: toolkit/themes/pinstripe/global/netError.css
+===================================================================
+RCS file: /cvsroot/mozilla/toolkit/themes/pinstripe/global/netError.css,v
+retrieving revision 1.5
+diff -u -8 -p -r1.5 netError.css
+--- toolkit/themes/pinstripe/global/netError.css	24 Jul 2007 01:56:48 -0000	1.5
++++ toolkit/themes/pinstripe/global/netError.css	30 Oct 2007 20:20:32 -0000
+@@ -63,16 +63,17 @@ body[dir="rtl"] #errorPageContainer {
+   -moz-margin-start: 80px;
+ }
+ 
+ #errorShortDesc > p {
+   overflow: auto;
+   border-bottom: 1px solid ThreeDLightShadow;
+   padding-bottom: 1em;
+   font-size: 130%;
++  white-space: -moz-pre-wrap;
+ }
+ 
+ #errorLongDesc {
+   -moz-padding-end: 3em;
+   font-size: 110%;
+ }
+ 
+ #errorLongDesc > p {
+Index: toolkit/themes/winstripe/global/netError.css
+===================================================================
+RCS file: /cvsroot/mozilla/toolkit/themes/winstripe/global/netError.css,v
+retrieving revision 1.5
+diff -u -8 -p -r1.5 netError.css
+--- toolkit/themes/winstripe/global/netError.css	24 Jul 2007 01:56:48 -0000	1.5
++++ toolkit/themes/winstripe/global/netError.css	30 Oct 2007 20:20:32 -0000
+@@ -63,16 +63,17 @@ body[dir="rtl"] #errorPageContainer {
+   -moz-margin-start: 80px;
+ }
+ 
+ #errorShortDesc > p {
+   overflow: auto;
+   border-bottom: 1px solid ThreeDLightShadow;
+   padding-bottom: 1em;
+   font-size: 130%;
++  white-space: -moz-pre-wrap;
+ }
+ 
+ #errorLongDesc {
+   -moz-padding-end: 3em;
+   font-size: 110%;
+ }
+ 
+ #errorLongDesc > p {

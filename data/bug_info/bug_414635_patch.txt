@@ -1,0 +1,74 @@
+diff -u10dpN security/nss/lib/cryptohi security/nss/lib/cryptohi 
+Common subdirectories: security/nss/lib/cryptohi/CVS and security/nss/lib/cryptohi/CVS
+diff -u10dpN security/nss/lib/cryptohi/sechash.c security/nss/lib/cryptohi/sechash.c
+--- security/nss/lib/cryptohi/sechash.c	2008-02-05 16:14:47.226693400 +0100
++++ security/nss/lib/cryptohi/sechash.c	2008-02-22 15:07:50.312944700 +0100
+@@ -408,12 +408,15 @@ void
+ HASH_End(HASHContext *context,
+ 	 unsigned char *result,
+ 	 unsigned int *result_len,
+ 	 unsigned int max_result_len)
+ {
+     (* context->hashobj->end)(context->hash_context, result, result_len,
+ 			      max_result_len);
+     return;
+ }
+ 
+-
+-
++HASH_HashType
++HASH_GetType(HASHContext *context)
++{
++    return(context->hashobj->type);
++}
+diff -u10dpN security/nss/lib/cryptohi/sechash.h security/nss/lib/cryptohi/sechash.h
+--- security/nss/lib/cryptohi/sechash.h	2008-02-05 16:14:47.257943400 +0100
++++ security/nss/lib/cryptohi/sechash.h	2008-02-22 15:07:50.359818800 +0100
+@@ -67,20 +67,22 @@ extern void          HASH_Destroy(HASHCo
+ extern void          HASH_Begin(HASHContext *context);
+ 
+ extern void          HASH_Update(HASHContext *context,
+ 				const unsigned char *src,
+ 				unsigned int len);
+ 
+ extern void          HASH_End(HASHContext *context,
+ 			     unsigned char *result,
+ 			     unsigned int *result_len,
+ 			     unsigned int max_result_len);
++			     
++extern HASH_HashType HASH_GetType(HASHContext *context);
+ 
+ extern const SECHashObject * HASH_GetHashObject(HASH_HashType type);
+ 
+ extern const SECHashObject * HASH_GetHashObjectByOidTag(SECOidTag hashOid);
+ 
+ extern HASH_HashType HASH_GetHashTypeByOidTag(SECOidTag hashOid);
+ extern SECOidTag HASH_GetHashOidTagByHMACOidTag(SECOidTag hmacOid);
+ extern SECOidTag HASH_GetHMACOidTagByHashOidTag(SECOidTag hashOid);
+ 
+ SEC_END_PROTOS
+diff -u10dpN security/nss/lib/nss/nss.def security/nss/lib/nss/nss.def 
+--- security/nss/lib/nss/nss.def	2008-02-05 16:15:05.648600400 +0100
++++ security/nss/lib/nss/nss.def	2008-02-22 15:14:40.178564000 +0100
+@@ -916,20 +916,21 @@ CERT_EncodeInhibitAnyExtension;
+ CERT_EncodeNoticeReference;
+ CERT_EncodePolicyConstraintsExtension;
+ CERT_EncodePolicyMappingExtension;
+ CERT_EncodeUserNotice;
+ CERT_FindCRLEntryReasonExten;
+ CERT_FindCRLNumberExten;
+ CERT_FindNameConstraintsExten;
+ CERT_GetValidDNSPatternsFromCert;
+ CERT_SetOCSPTimeout;
+ CERT_PKIXVerifyCert;
++HASH_GetType;
+ PK11_CreateGenericObject;
+ PK11_CreatePBEV2AlgorithmID;
+ PK11_GenerateKeyPairWithOpFlags;
+ PK11_GetAllSlotsForCert;
+ PK11_GetPBECryptoMechanism;
+ PK11_WriteRawAttribute;
+ SECKEY_ECParamsToBasePointOrderLen;
+ SECKEY_ECParamsToKeySize;
+ SECMOD_DeleteModuleEx;
+ SEC_GetRegisteredHttpClient;

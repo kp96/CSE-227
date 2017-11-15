@@ -1,0 +1,733 @@
+Index: mozilla/security/manager/pki/resources/content/exceptionDialog.js
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/exceptionDialog.js,v
+retrieving revision 1.1
+diff -u -1 -0 -p -r1.1 exceptionDialog.js
+--- mozilla/security/manager/pki/resources/content/exceptionDialog.js	3 Oct 2007 11:56:06 -0000	1.1
++++ mozilla/security/manager/pki/resources/content/exceptionDialog.js	3 Oct 2007 22:14:46 -0000
+@@ -76,34 +76,65 @@ function initExceptionDialog() {
+   gBundleBrand = srGetStrBundle("chrome://branding/locale/brand.properties");
+   gPKIBundle = srGetStrBundle("chrome://pippki/locale/pippki.properties");
+ 
+   var brandName = gBundleBrand.GetStringFromName("brandShortName");
+   
+   setText("warningText", gPKIBundle.formatStringFromName("addExceptionBrandedWarning",
+                                                          [brandName], 1));
+   gDialog.getButton("extra1").disabled = true;
+ }
+ 
++// returns true if found and global status could be set
++function findRecentBadCert(uri) {
++  try {
++    var recentCertsSvc = Components.classes["@mozilla.org/security/recentbadcerts;1"]
++                         .getService(Components.interfaces.nsIRecentBadCertsService);
++    if (!recentCertsSvc)
++      return false;
++
++    var hostWithPort = uri.host + ":" + uri.port;
++    gSSLStatus = recentCertsSvc.getRecentBadCert(hostWithPort);
++    if (!gSSLStatus)
++      return false;
++
++    gCert = gSSLStatus.QueryInterface(Components.interfaces.nsISSLStatus).serverCert;
++    if (!gCert)
++      return false;
++
++    gBroken = true;
++  }
++  catch (e) {
++    return false;
++  }
++  updateCertStatus();  
++  return true;
++}
++
+ /**
+  * Attempt to download the certificate for the location specified, and populate
+  * the Certificate Status section with the result.
+  */
+ function checkCert() {
+   
+   gCert = null;
+   gSSLStatus = null;
+   gChecking = true;
+   gBroken = false;
+   updateCertStatus();
+ 
+-  var req = new XMLHttpRequest();
+   var uri = getURI();
++
++  // Is the cert already known in the list of recently seen bad certs?
++  if (findRecentBadCert(uri) == true)
++    return;
++
++  var req = new XMLHttpRequest();
+   try {
+     if(uri) {
+       req.open('GET', uri.prePath, false);
+       req.channel.notificationCallbacks = new badCertListener();
+       req.send(null);
+     }
+   } catch (e) {
+     // We *expect* exceptions if there are problems with the certificate
+     // presented by the site.  Log it, just in case, but we can proceed here,
+     // with appropriate sanity checks
+Index: mozilla/security/manager/ssl/public/Makefile.in
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/public/Makefile.in,v
+retrieving revision 1.34
+diff -u -1 -0 -p -r1.34 Makefile.in
+--- mozilla/security/manager/ssl/public/Makefile.in	3 Oct 2007 11:49:54 -0000	1.34
++++ mozilla/security/manager/ssl/public/Makefile.in	3 Oct 2007 22:14:46 -0000
+@@ -55,20 +55,21 @@ SDK_XPIDLSRCS = \
+     nsICertificateDialogs.idl \
+     nsICRLInfo.idl \
+     nsIX509Cert.idl \
+     nsIX509CertDB.idl \
+     nsIX509CertValidity.idl \
+     nsIIdentityInfo.idl \
+     $(NULL)
+ 
+ XPIDLSRCS = \
+     nsICertOverrideService.idl \
++    nsIRecentBadCertsService.idl \
+     nsIFormSigningDialog.idl \
+     nsIX509Cert2.idl \
+     nsIX509Cert3.idl \
+     nsIX509CertDB2.idl \
+     nsIX509CertList.idl \
+     nsIPKCS11Slot.idl \
+     nsIPK11TokenDB.idl \
+     nsICertPickDialogs.idl \
+     nsIClientAuthDialogs.idl \
+     nsIDOMCryptoDialogs.idl \
+Index: mozilla/security/manager/ssl/public/nsIRecentBadCertsService.idl
+===================================================================
+RCS file: mozilla/security/manager/ssl/public/nsIRecentBadCertsService.idl
+diff -N mozilla/security/manager/ssl/public/nsIRecentBadCertsService.idl
+--- /dev/null	1 Jan 1970 00:00:00 -0000
++++ mozilla/security/manager/ssl/public/nsIRecentBadCertsService.idl	3 Oct 2007 22:14:46 -0000
+@@ -0,0 +1,79 @@
++/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
++ *
++ * ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is mozilla.org code.
++ *
++ * The Initial Developer of the Original Code is
++ * Red Hat, Inc.
++ * Portions created by the Initial Developer are Copyright (C) 2006
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *   Kai Engert <kengert@redhat.com>
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either the GNU General Public License Version 2 or later (the "GPL"), or
++ * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++#include "nsISupports.idl"
++
++interface nsIArray;
++interface nsIX509Cert;
++interface nsISSLStatus;
++
++%{C++
++#define NS_RECENTBADCERTS_CONTRACTID "@mozilla.org/security/recentbadcerts;1"
++%}
++
++/**
++ * This represents a global list of recently seen bad ssl status
++ * including the bad cert.
++ * The implementation will decide how many entries it will hold,
++ * the number is expected to be small.
++ */
++[scriptable, uuid(a5ae8b05-a76e-408f-b0ba-02a831265749)]
++interface nsIRecentBadCertsService : nsISupports {
++
++  /**
++   *  Retrieve the recently seen bad ssl status for the given hostname:port.
++   *  If no SSL cert was recently seen for the given hostname:port, return null.
++   *  If a good cert was seen for the given hostname:port, return null.
++   *
++   *  @param aHostNameWithPort The host:port whose entry should be tested
++   *  @return null or a recently seen bad ssl status with cert
++   */
++  nsISSLStatus getRecentBadCert(in AString aHostNameWithPort);
++
++  /**
++   *  A bad certificate that should be remembered by the service.
++   *  Will be added as the most recently seen cert.
++   *  The service may forget older entries to make room for the new one.
++   *
++   *  @param aHostNameWithPort The host:port whose entry should be tested
++   *  @param aCert The bad ssl status with certificate
++   */
++  void addBadCert(in AString aHostNameWithPort,
++                  in nsISSLStatus aStatus);
++};
+Index: mozilla/security/manager/ssl/src/Makefile.in
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/Makefile.in,v
+retrieving revision 1.83
+diff -u -1 -0 -p -r1.83 Makefile.in
+--- mozilla/security/manager/ssl/src/Makefile.in	3 Oct 2007 11:49:55 -0000	1.83
++++ mozilla/security/manager/ssl/src/Makefile.in	3 Oct 2007 22:14:46 -0000
+@@ -52,20 +52,21 @@ MODULE_NAME	= NSS
+ EXPORT_LIBRARY	= 1
+ META_COMPONENT	= crypto
+ GRE_MODULE	= 1
+ LIBXUL_LIBRARY	= 1
+ 
+ PACKAGE_FILE = pipnss.pkg
+ 
+ CPPSRCS = 				\
+ 	nsNSSCleaner.cpp                \
+ 	nsCertOverrideService.cpp   \
++	nsRecentBadCerts.cpp \
+ 	nsPSMBackgroundThread.cpp       \
+ 	nsSSLThread.cpp                 \
+ 	nsCertVerificationThread.cpp    \
+ 	nsCipherInfo.cpp \
+ 	nsNSSCallbacks.cpp		\
+ 	nsNSSComponent.cpp		\
+ 	nsNSSErrors.cpp			\
+ 	nsNSSIOLayer.cpp		\
+ 	nsSSLStatus.cpp		\
+ 	nsNSSModule.cpp			\
+Index: mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp,v
+retrieving revision 1.134
+diff -u -1 -0 -p -r1.134 nsNSSIOLayer.cpp
+--- mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp	3 Oct 2007 11:49:55 -0000	1.134
++++ mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp	3 Oct 2007 22:14:47 -0000
+@@ -53,20 +53,21 @@
+ #include "nsIChannel.h"
+ #include "nsNSSCertificate.h"
+ #include "nsIX509CertValidity.h"
+ #include "nsIProxyObjectManager.h"
+ #include "nsProxiedService.h"
+ #include "nsIDateTimeFormat.h"
+ #include "nsDateTimeFormatCID.h"
+ #include "nsIClientAuthDialogs.h"
+ #include "nsICertOverrideService.h"
+ #include "nsIBadCertListener2.h"
++#include "nsRecentBadCerts.h"
+ 
+ #include "nsXPIDLString.h"
+ #include "nsReadableUtils.h"
+ #include "nsHashSets.h"
+ #include "nsCRT.h"
+ #include "nsAutoPtr.h"
+ #include "nsPrintfCString.h"
+ #include "nsAutoLock.h"
+ #include "nsSSLThread.h"
+ #include "nsNSSShutDown.h"
+@@ -2335,21 +2336,22 @@ nsNSSBadCertHandler(void *arg, PRFileDes
+   char *hostname = SSL_RevealURL(sslSocket);
+   charCleaner hostnameCleaner(hostname); 
+   nsDependentCString hostString(hostname);
+ 
+   PRInt32 port;
+   infoObject->GetPort(&port);
+ 
+   nsCString hostWithPortString = hostString;
+   hostWithPortString.AppendLiteral(":");
+   hostWithPortString.AppendInt(port);
+-  
++
++  NS_ConvertUTF8toUTF16 hostWithPortStringUTF16(hostWithPortString);
+ 
+   // Check the name field against the desired hostname.
+   if (hostname && hostname[0] &&
+       CERT_VerifyCertName(peerCert, hostname) != SECSuccess) {
+     collected_errors |= nsICertOverrideService::ERROR_MISMATCH;
+     errorCodeToReport = SSL_ERROR_BAD_CERT_DOMAIN;
+   }
+ 
+   {
+     PRArenaPool *log_arena = PORT_NewArena(DER_DEFAULT_CHUNKSIZE);
+@@ -2437,21 +2439,21 @@ nsNSSBadCertHandler(void *arg, PRFileDes
+   nsCOMPtr<nsICertOverrideService> overrideService = 
+     do_GetService(NS_CERTOVERRIDE_CONTRACTID);
+   // it is fine to continue without the nsICertOverrideService
+ 
+   PRUint32 storedOverrideBits = 0; 
+ 
+   if (overrideService)
+   {
+     PRBool haveStoredOverride;
+   
+-    nsrv = overrideService->HasMatchingOverride(NS_ConvertUTF8toUTF16(hostWithPortString), 
++    nsrv = overrideService->HasMatchingOverride(hostWithPortStringUTF16,
+                                                 ix509, 
+                                                 &storedOverrideBits, 
+                                                 &haveStoredOverride);
+     if (NS_SUCCEEDED(nsrv) && haveStoredOverride) 
+     {
+       // remove the errors that are already overriden
+       remaining_display_errors -= storedOverrideBits;
+     }
+   }
+ 
+@@ -2480,29 +2482,37 @@ nsNSSBadCertHandler(void *arg, PRFileDes
+                            NS_PROXY_SYNC,
+                            (void**)&proxy_bcl);
+       if (proxy_bcl) {
+         nsIInterfaceRequestor *csi = static_cast<nsIInterfaceRequestor*>(infoObject);
+         rv = proxy_bcl->NotifyCertProblem(csi, status, hostWithPortString, 
+                                           &suppressMessage);
+       }
+     }
+   }
+ 
++  nsCOMPtr<nsIRecentBadCertsService> recentBadCertsService = 
++    do_GetService(NS_RECENTBADCERTS_CONTRACTID);
++
++  if (recentBadCertsService) {
++    recentBadCertsService->AddBadCert(hostWithPortStringUTF16, status);
++  }
++
+   PR_SetError(errorCodeToReport, 0);
+   if (!suppressMessage) {
+     nsHandleInvalidCertError(infoObject,
+                              remaining_display_errors,
+                              hostString,
+                              hostWithPortString, 
+                              errorCodeToReport, 
+                              ix509);
+   }
++
+   return cancel_and_failure(infoObject);
+ }
+ 
+ static PRFileDesc*
+ nsSSLIOLayerImportFD(PRFileDesc *fd,
+                      nsNSSSocketInfo *infoObject,
+                      const char *host)
+ {
+   nsNSSShutDownPreventionLock locker;
+   PRFileDesc* sslSock = SSL_ImportFD(nsnull, fd);
+Index: mozilla/security/manager/ssl/src/nsNSSModule.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSModule.cpp,v
+retrieving revision 1.43
+diff -u -1 -0 -p -r1.43 nsNSSModule.cpp
+--- mozilla/security/manager/ssl/src/nsNSSModule.cpp	3 Oct 2007 11:49:55 -0000	1.43
++++ mozilla/security/manager/ssl/src/nsNSSModule.cpp	3 Oct 2007 22:14:47 -0000
+@@ -66,20 +66,21 @@
+ #include "nsCertPicker.h"
+ #include "nsCURILoader.h"
+ #include "nsICategoryManager.h"
+ #include "nsCRLManager.h"
+ #include "nsCipherInfo.h"
+ #include "nsNTLMAuthModule.h"
+ #include "nsStreamCipher.h"
+ #include "nsKeyModule.h"
+ #include "nsDataSignatureVerifier.h"
+ #include "nsCertOverrideService.h"
++#include "nsRecentBadCerts.h"
+ 
+ // We must ensure that the nsNSSComponent has been loaded before
+ // creating any other components.
+ static void EnsureNSSInitialized(PRBool triggeredByNSSComponent)
+ {
+   static PRBool haveLoaded = PR_FALSE;
+   if (haveLoaded)
+     return;
+ 
+   haveLoaded = PR_TRUE;
+@@ -187,20 +188,21 @@ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(PR_FA
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(PR_FALSE, nsCertPicker)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(PR_FALSE, nsCRLManager)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(PR_FALSE, nsCipherInfoService)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR_INIT(PR_FALSE, nsNTLMAuthModule, InitTest)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(PR_FALSE, nsCryptoHash)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(PR_FALSE, nsStreamCipher)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(PR_FALSE, nsKeyObject)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(PR_FALSE, nsKeyObjectFactory)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(PR_FALSE, nsDataSignatureVerifier)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR_INIT(PR_FALSE, nsCertOverrideService, Init)
++NS_NSS_GENERIC_FACTORY_CONSTRUCTOR_INIT(PR_FALSE, nsRecentBadCertsService, Init)
+ 
+ static NS_METHOD RegisterPSMContentListeners(
+                       nsIComponentManager *aCompMgr,
+                       nsIFile *aPath, const char *registryLocation, 
+                       const char *componentType, const nsModuleComponentInfo *info)
+ {
+   nsresult rv;
+   nsCOMPtr<nsICategoryManager> catman = 
+     do_GetService(NS_CATEGORYMANAGER_CONTRACTID, &rv);
+   if (NS_FAILED(rv)) return rv;
+@@ -456,14 +458,21 @@ static const nsModuleComponentInfo compo
+     NS_DATASIGNATUREVERIFIER_CID,
+     NS_DATASIGNATUREVERIFIER_CONTRACTID,
+     nsDataSignatureVerifierConstructor
+   },
+ 
+   {
+     "PSM Cert Override Settings Service",
+     NS_CERTOVERRIDE_CID,
+     NS_CERTOVERRIDE_CONTRACTID,
+     nsCertOverrideServiceConstructor
++  },
++
++  {
++    "PSM Recent Bad Certs Service",
++    NS_RECENTBADCERTS_CID,
++    NS_RECENTBADCERTS_CONTRACTID,
++    nsRecentBadCertsServiceConstructor
+   }
+ };
+ 
+ NS_IMPL_NSGETMODULE(NSS, components)
+Index: mozilla/security/manager/ssl/src/nsRecentBadCerts.cpp
+===================================================================
+RCS file: mozilla/security/manager/ssl/src/nsRecentBadCerts.cpp
+diff -N mozilla/security/manager/ssl/src/nsRecentBadCerts.cpp
+--- /dev/null	1 Jan 1970 00:00:00 -0000
++++ mozilla/security/manager/ssl/src/nsRecentBadCerts.cpp	3 Oct 2007 22:14:47 -0000
+@@ -0,0 +1,190 @@
++/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
++ *
++ * ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is mozilla.org code.
++ *
++ * The Initial Developer of the Original Code is
++ * Red Hat, Inc.
++ * Portions created by the Initial Developer are Copyright (C) 2006
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *   Kai Engert <kengert@redhat.com>
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either the GNU General Public License Version 2 or later (the "GPL"), or
++ * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++#include "nsRecentBadCerts.h"
++#include "nsIX509Cert.h"
++#include "nsSSLStatus.h"
++#include "nsCOMPtr.h"
++#include "nsNSSCertificate.h"
++#include "nsCRT.h"
++#include "nsPromiseFlatString.h"
++#include "nsStringBuffer.h"
++#include "nsAutoLock.h"
++#include "nsAutoPtr.h"
++#include "nspr.h"
++#include "pk11pub.h"
++#include "certdb.h"
++#include "sechash.h"
++
++#include "nsNSSCleaner.h"
++NSSCleanupAutoPtrClass(CERTCertificate, CERT_DestroyCertificate)
++
++NS_IMPL_THREADSAFE_ISUPPORTS1(nsRecentBadCertsService, 
++                              nsIRecentBadCertsService)
++
++nsRecentBadCertsService::nsRecentBadCertsService()
++:mNextStorePosition(0)
++{
++  monitor = PR_NewMonitor();
++}
++
++nsRecentBadCertsService::~nsRecentBadCertsService()
++{
++  if (monitor)
++    PR_DestroyMonitor(monitor);
++}
++
++nsresult
++nsRecentBadCertsService::Init()
++{
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++nsRecentBadCertsService::GetRecentBadCert(const nsAString & aHostNameWithPort, 
++                                          nsISSLStatus **aStatus)
++{
++  NS_ENSURE_ARG_POINTER(aStatus);
++  if (!aHostNameWithPort.Length())
++    return NS_ERROR_INVALID_ARG;
++
++  *aStatus = nsnull;
++  nsCOMPtr<nsSSLStatus> status = new nsSSLStatus();
++  if (!status)
++    return NS_ERROR_OUT_OF_MEMORY;
++
++  SECItem foundDER;
++  foundDER.len = 0;
++  foundDER.data = nsnull;
++
++  PRBool isDomainMismatch;
++  PRBool isNotValidAtThisTime;
++  PRBool isUntrusted;
++
++  {
++    nsAutoMonitor lock(monitor);
++    for (size_t i=0; i<const_recently_seen_list_size; ++i) {
++      if (mCerts[i].mHostWithPort.Equals(aHostNameWithPort)) {
++        SECStatus srv = SECITEM_CopyItem(nsnull, &foundDER, &mCerts[i].mDERCert);
++        if (srv != SECSuccess)
++          return NS_ERROR_OUT_OF_MEMORY;
++
++        isDomainMismatch = mCerts[i].isDomainMismatch;
++        isNotValidAtThisTime = mCerts[i].isNotValidAtThisTime;
++        isUntrusted = mCerts[i].isUntrusted;
++      }
++    }
++  }
++
++  if (foundDER.len) {
++    CERTCertificate *nssCert;
++    CERTCertDBHandle *certdb = CERT_GetDefaultCertDB();
++    nssCert = CERT_FindCertByDERCert(certdb, &foundDER);
++    if (!nssCert) 
++      nssCert = CERT_NewTempCertificate(certdb, &foundDER,
++                                        nsnull, // no nickname
++                                        PR_FALSE, // not perm
++                                        PR_TRUE); // copy der
++
++    SECITEM_FreeItem(&foundDER, PR_FALSE);
++
++    if (!nssCert)
++      return NS_ERROR_FAILURE;
++
++    status->mServerCert = new nsNSSCertificate(nssCert);
++    CERT_DestroyCertificate(nssCert);
++
++    status->mHaveCertStatus = PR_TRUE;
++    status->mIsDomainMismatch = isDomainMismatch;
++    status->mIsNotValidAtThisTime = isNotValidAtThisTime;
++    status->mIsUntrusted = isUntrusted;
++
++    *aStatus = status;
++    NS_IF_ADDREF(*aStatus);
++  }
++
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++nsRecentBadCertsService::AddBadCert(const nsAString &hostWithPort, 
++                                    nsISSLStatus *aStatus)
++{
++  NS_ENSURE_ARG(aStatus);
++
++  nsCOMPtr<nsIX509Cert> cert;
++  nsresult rv;
++  rv = aStatus->GetServerCert(getter_AddRefs(cert));
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  PRBool isDomainMismatch;
++  PRBool isNotValidAtThisTime;
++  PRBool isUntrusted;
++
++  rv = aStatus->GetIsDomainMismatch(&isDomainMismatch);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  rv = aStatus->GetIsNotValidAtThisTime(&isNotValidAtThisTime);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  rv = aStatus->GetIsUntrusted(&isUntrusted);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  SECItem tempItem;
++  rv = cert->GetRawDER(&tempItem.len, (PRUint8 **)&tempItem.data);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  {
++    nsAutoMonitor lock(monitor);
++    RecentBadCert &updatedEntry = mCerts[mNextStorePosition];
++
++    ++mNextStorePosition;
++    if (mNextStorePosition == const_recently_seen_list_size)
++      mNextStorePosition = 0;
++
++    updatedEntry.Clear();
++    updatedEntry.mHostWithPort = hostWithPort;
++    updatedEntry.mDERCert = tempItem; // consume
++    updatedEntry.isDomainMismatch = isDomainMismatch;
++    updatedEntry.isNotValidAtThisTime = isNotValidAtThisTime;
++    updatedEntry.isUntrusted = isUntrusted;
++  }
++
++  return NS_OK;
++}
+Index: mozilla/security/manager/ssl/src/nsRecentBadCerts.h
+===================================================================
+RCS file: mozilla/security/manager/ssl/src/nsRecentBadCerts.h
+diff -N mozilla/security/manager/ssl/src/nsRecentBadCerts.h
+--- /dev/null	1 Jan 1970 00:00:00 -0000
++++ mozilla/security/manager/ssl/src/nsRecentBadCerts.h	3 Oct 2007 22:14:47 -0000
+@@ -0,0 +1,124 @@
++/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
++ *
++ * ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is mozilla.org code.
++ *
++ * The Initial Developer of the Original Code is
++ * Red Hat, Inc.
++ * Portions created by the Initial Developer are Copyright (C) 2006
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *   Kai Engert <kengert@redhat.com>
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either the GNU General Public License Version 2 or later (the "GPL"), or
++ * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++#ifndef __RECENTBADCERTS_H__
++#define __RECENTBADCERTS_H__
++
++#include "nsIRecentBadCertsService.h"
++#include "nsTHashtable.h"
++#include "nsString.h"
++#include "prmon.h"
++#include "secitem.h"
++
++class RecentBadCert
++{
++public:
++
++  RecentBadCert()
++  {
++    mDERCert.len = 0;
++    mDERCert.data = nsnull;
++    isDomainMismatch = PR_FALSE;
++    isNotValidAtThisTime = PR_FALSE;
++    isUntrusted = PR_FALSE;
++  }
++
++  ~RecentBadCert()
++  {
++    Clear();
++  }
++
++  void Clear()
++  {
++    mHostWithPort.Truncate();
++    if (mDERCert.len)
++      nsMemory::Free(mDERCert.data);
++    mDERCert.len = 0;
++    mDERCert.data = nsnull;
++  }
++
++  nsString mHostWithPort;
++  SECItem mDERCert;
++  PRBool isDomainMismatch;
++  PRBool isNotValidAtThisTime;
++  PRBool isUntrusted;
++
++private:
++  RecentBadCert(const RecentBadCert &other)
++  {
++    NS_NOTREACHED("RecentBadCert(const RecentBadCert &other) not implemented");
++    this->operator=(other);
++  }
++
++  RecentBadCert &operator=(const RecentBadCert &other)
++  {
++    NS_NOTREACHED("RecentBadCert &operator=(const RecentBadCert &other) not implemented");
++    return *this;
++  }
++};
++
++class nsRecentBadCertsService : public nsIRecentBadCertsService
++{
++public:
++  NS_DECL_ISUPPORTS
++  NS_DECL_NSIRECENTBADCERTSSERVICE
++
++  nsRecentBadCertsService();
++  ~nsRecentBadCertsService();
++
++  nsresult Init();
++
++protected:
++    PRMonitor *monitor;
++
++    enum {const_recently_seen_list_size = 5};
++    RecentBadCert mCerts[const_recently_seen_list_size];
++
++    // will be in the range of 0 to list_size-1
++    PRUint32 mNextStorePosition;
++};
++
++#define NS_RECENTBADCERTS_CID { /* e7caf8c0-3570-47fe-aa1b-da47539b5d07 */ \
++    0xe7caf8c0,                                                        \
++    0x3570,                                                            \
++    0x47fe,                                                            \
++    {0xaa, 0x1b, 0xda, 0x47, 0x53, 0x9b, 0x5d, 0x07}                   \
++  }
++
++#endif

@@ -1,0 +1,26 @@
+Index: mozilla/security/manager/ssl/src/nsCertOverrideService.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsCertOverrideService.cpp,v
+retrieving revision 1.7
+diff -u -u -r1.7 nsCertOverrideService.cpp
+--- mozilla/security/manager/ssl/src/nsCertOverrideService.cpp	24 Apr 2008 02:05:37 -0000	1.7
++++ mozilla/security/manager/ssl/src/nsCertOverrideService.cpp	15 Oct 2008 02:54:58 -0000
+@@ -875,10 +875,12 @@
+ nsCertOverrideService::GetHostWithPort(const nsACString & aHostName, PRInt32 aPort, nsACString& _retval)
+ {
+   nsCAutoString hostPort(aHostName);
+-  if (aPort == -1)
++  if (aPort == -1) {
+     aPort = 443;
+-  hostPort.AppendLiteral(":");
+-  hostPort.AppendInt(aPort);
+-  
++  }
++  if (!hostPort.IsEmpty()) {
++    hostPort.AppendLiteral(":");
++    hostPort.AppendInt(aPort);
++  }
+   _retval.Assign(hostPort);
+-}
+\ No newline at end of file
++}

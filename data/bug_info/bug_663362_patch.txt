@@ -1,0 +1,23 @@
+diff --git a/security/manager/pki/resources/content/editcerts.js b/security/manager/pki/resources/content/editcerts.js
+--- a/security/manager/pki/resources/content/editcerts.js
++++ b/security/manager/pki/resources/content/editcerts.js
+@@ -143,31 +143,25 @@ function doLoadForSSLCert()
+@@ -254,17 +242,17 @@ function getCaCertForEntityCert(cert)
+    var lastSubjectName="";
+    while(true)
+    {
+      if(nextCertInChain == null)
+      {
+         return null;
+      }
+      if((nextCertInChain.type == nsIX509Cert.CA_CERT) || 
+-                                 (nextCertInChain.subjectName = lastSubjectName))
++        (nextCertInChain.subjectName == lastSubjectName))
+      {
+         break;
+      }
+ 
+      lastSubjectName = nextCertInChain.subjectName;
+      nextCertInChain = nextCertInChain.issuer;
+    }
+ 

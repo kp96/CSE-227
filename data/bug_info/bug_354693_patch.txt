@@ -1,0 +1,1274 @@
+Index: caps/idl/nsIScriptSecurityManager.idl
+===================================================================
+RCS file: /cvsroot/mozilla/caps/idl/nsIScriptSecurityManager.idl,v
+retrieving revision 1.70
+diff -u -p -d -8 -r1.70 nsIScriptSecurityManager.idl
+--- caps/idl/nsIScriptSecurityManager.idl	21 Aug 2006 22:15:20 -0000	1.70
++++ caps/idl/nsIScriptSecurityManager.idl	28 Sep 2006 14:38:28 -0000
+@@ -34,19 +34,19 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "nsISupports.idl"
+ #include "nsIPrincipal.idl"
+ #include "nsIXPCSecurityManager.idl"
+ interface nsIURI;
++interface nsIChannel;
+ 
+-
+-[scriptable, uuid(5a46e611-cf4a-4407-a5b4-002fcf051120)]
++[scriptable, uuid(c61d3ad1-00aa-407c-b7d7-de48b3f18662)]
+ interface nsIScriptSecurityManager : nsIXPCSecurityManager
+ {
+     ///////////////// Security Checks //////////////////
+     /**
+      * Checks whether the running script is allowed to access aProperty.
+      */
+     [noscript] void checkPropertyAccess(in JSContextPtr aJSContext,
+                                         in JSObjectPtr aJSObject,
+@@ -288,14 +288,21 @@ interface nsIScriptSecurityManager : nsI
+      * are equivalent if their schemes, hosts, and ports (if any) match.  This
+      * method returns true if aSubjectURI and aObjectURI have the same origin,
+      * false otherwise.
+      // FIXME: Bug 327243 -- this is no longer used outside caps.
+      // Should it even be exposed?
+      */
+     [noscript] boolean securityCompareURIs(in nsIURI aSubjectURI,
+                                            in nsIURI aObjectURI);
++
++    /**
++     * Get the principal for the given channel.  This will typically be the
++     * channel owner if there is one, and the codebase principal for the
++     * channel's URI otherwise.  aChannel must not be null.
++     */
++    [noscript] nsIPrincipal getChannelPrincipal(in nsIChannel aChannel);
+ };
+ 
+ %{C++
+ #define NS_SCRIPTSECURITYMANAGER_CONTRACTID "@mozilla.org/scriptsecuritymanager;1"
+ #define NS_SCRIPTSECURITYMANAGER_CLASSNAME "scriptsecuritymanager"
+ %}
+Index: caps/src/nsScriptSecurityManager.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/caps/src/nsScriptSecurityManager.cpp,v
+retrieving revision 1.310
+diff -u -p -d -8 -r1.310 nsScriptSecurityManager.cpp
+--- caps/src/nsScriptSecurityManager.cpp	21 Aug 2006 22:15:20 -0000	1.310
++++ caps/src/nsScriptSecurityManager.cpp	28 Sep 2006 14:36:47 -0000
+@@ -357,16 +357,44 @@ nsScriptSecurityManager::SecurityCompare
+                     *result = targetPort == sourcePort;
+                 }
+             }
+         }
+     }
+     return NS_OK;
+ }
+ 
++NS_IMETHODIMP
++nsScriptSecurityManager::GetChannelPrincipal(nsIChannel* aChannel,
++                                             nsIPrincipal** aPrincipal)
++{
++    NS_PRECONDITION(aChannel, "Must have channel!");
++    nsCOMPtr<nsISupports> owner;
++    aChannel->GetOwner(getter_AddRefs(owner));
++    if (owner) {
++        CallQueryInterface(owner, aPrincipal);
++        if (*aPrincipal) {
++            return NS_OK;
++        }
++    }
++
++    // OK, get the principal from the URI.  Make sure this does the same thing
++    // as nsDocument::Reset and nsXULDocument::StartDocumentLoad.
++    nsCOMPtr<nsIURI> uri;
++    nsLoadFlags loadFlags = 0;
++    nsresult rv = aChannel->GetLoadFlags(&loadFlags);
++    if (NS_SUCCEEDED(rv) && (loadFlags & nsIChannel::LOAD_REPLACE)) {
++      aChannel->GetURI(getter_AddRefs(uri));
++    } else {
++      aChannel->GetOriginalURI(getter_AddRefs(uri));
++    }
++
++    return GetCodebasePrincipal(uri, aPrincipal);
++}
++
+ ////////////////////
+ // Policy Storage //
+ ////////////////////
+ 
+ // Table of security levels
+ PR_STATIC_CALLBACK(PRBool)
+ DeleteCapability(nsHashKey *aKey, void *aData, void* closure)
+ {
+@@ -2940,25 +2968,27 @@ nsScriptSecurityManager::CanAccessSecuri
+ /////////////////////////////////////////////
+ // Method implementing nsIChannelEventSink //
+ /////////////////////////////////////////////
+ NS_IMETHODIMP
+ nsScriptSecurityManager::OnChannelRedirect(nsIChannel* oldChannel, 
+                                            nsIChannel* newChannel,
+                                            PRUint32 redirFlags)
+ {
+-    nsCOMPtr<nsIURI> oldURI, newURI;
+-    oldChannel->GetURI(getter_AddRefs(oldURI));
++    nsCOMPtr<nsIPrincipal> oldPrincipal;
++    GetChannelPrincipal(oldChannel, getter_AddRefs(oldPrincipal));
++
++    nsCOMPtr<nsIURI> newURI;
+     newChannel->GetURI(getter_AddRefs(newURI));
+ 
+-    NS_ENSURE_STATE(oldURI && newURI);
++    NS_ENSURE_STATE(oldPrincipal && newURI);
+ 
+     const PRUint32 flags = nsIScriptSecurityManager::DISALLOW_FROM_MAIL |
+                            nsIScriptSecurityManager::DISALLOW_SCRIPT;
+-    return CheckLoadURI(oldURI, newURI, flags);
++    return CheckLoadURIWithPrincipal(oldPrincipal, newURI, flags);
+ }
+ 
+ 
+ /////////////////////////////////////
+ // Method implementing nsIObserver //
+ /////////////////////////////////////
+ static const char sPrincipalPrefix[] = "capability.principal";
+ static const char sPolicyPrefix[] = "capability.policy.";
+Index: content/base/public/nsIDocument.h
+===================================================================
+RCS file: /cvsroot/mozilla/content/base/public/nsIDocument.h,v
+retrieving revision 3.246
+diff -u -p -d -8 -r3.246 nsIDocument.h
+--- content/base/public/nsIDocument.h	15 Aug 2006 17:31:16 -0000	3.246
++++ content/base/public/nsIDocument.h	28 Sep 2006 04:53:12 -0000
+@@ -86,18 +86,18 @@ class nsIHTMLCSSStyleSheet;
+ class nsILayoutHistoryState;
+ class nsIVariant;
+ class nsIDOMUserDataHandler;
+ template<class E> class nsCOMArray;
+ class nsIDocumentObserver;
+ 
+ // IID for the nsIDocument interface
+ #define NS_IDOCUMENT_IID      \
+-{ 0x3a5ce97e, 0x4f41, 0x42ef, \
+- { 0xa7, 0xc9, 0xcc, 0x3d, 0x4e, 0x7a, 0x3d, 0x00 } }
++{ 0xb138a9aa, 0x3d0d, 0x4d0b, \
++ { 0x98, 0x02, 0x72, 0x15, 0x54, 0x27, 0xe0, 0x2e } }
+ 
+ // Flag for AddStyleSheet().
+ #define NS_STYLESHEET_FROM_CATALOG                (1 << 0)
+ 
+ //----------------------------------------------------------------------
+ 
+ // Document interface.  This is implemented by all document objects in
+ // Gecko.
+@@ -590,23 +590,27 @@ public:
+   nsNodeInfoManager* NodeInfoManager() const
+   {
+     return mNodeInfoManager;
+   }
+ 
+   /**
+    * Reset the document using the given channel and loadgroup.  This works
+    * like ResetToURI, but also sets the document's channel to aChannel.
++   * The principal of the document will be set from the channel.
+    */
+   virtual void Reset(nsIChannel* aChannel, nsILoadGroup* aLoadGroup) = 0;
+ 
+   /**
+-   * Reset this document to aURI and aLoadGroup.  aURI must not be null.
++   * Reset this document to aURI, aLoadGroup, and aPrincipal.  aURI must not be
++   * null.  If aPrincipal is null, a codebase principal based on aURI will be
++   * used.
+    */
+-  virtual void ResetToURI(nsIURI *aURI, nsILoadGroup* aLoadGroup) = 0;
++  virtual void ResetToURI(nsIURI *aURI, nsILoadGroup* aLoadGroup,
++                          nsIPrincipal* aPrincipal) = 0;
+ 
+   /**
+    * Set the container (docshell) for this document.
+    */
+   void SetContainer(nsISupports *aContainer)
+   {
+     mDocumentContainer = do_GetWeakReference(aContainer);
+   }
+Index: webshell/public/nsIDocumentLoaderFactory.idl
+===================================================================
+RCS file: /cvsroot/mozilla/webshell/public/nsIDocumentLoaderFactory.idl,v
+retrieving revision 1.7
+diff -u -p -d -8 -r1.7 nsIDocumentLoaderFactory.idl
+--- webshell/public/nsIDocumentLoaderFactory.idl	17 Apr 2004 16:50:28 -0000	1.7
++++ webshell/public/nsIDocumentLoaderFactory.idl	28 Sep 2006 14:06:46 -0000
+@@ -38,33 +38,40 @@
+ 
+ #include "nsISupports.idl"
+ 
+ interface nsIChannel;
+ interface nsIContentViewer;
+ interface nsIStreamListener;
+ interface nsIDocument;
+ interface nsILoadGroup;
++interface nsIPrincipal;
+ 
+ /**
+  * To get a component that implements nsIDocumentLoaderFactory
+  * for a given mimetype, use nsICategoryManager to find an entry
+  * with the mimetype as its name in the category "Gecko-Content-Viewers".
+  * The value of the entry is the contractid of the component.
+  * The component is a service, so use GetService, not CreateInstance to get it.
+  */
+ 
+-[scriptable, uuid(df15f850-5d98-11d4-9f4d-0010a4053fd0)]
++[scriptable, uuid(5e7d2967-5a07-444f-95d5-25b533252d38)]
+ interface nsIDocumentLoaderFactory : nsISupports {
+     nsIContentViewer createInstance(in string aCommand,
+                               in nsIChannel aChannel,
+                               in nsILoadGroup aLoadGroup,
+                               in string aContentType, 
+                               in nsISupports aContainer,
+                               in nsISupports aExtraInfo,
+                               out nsIStreamListener aDocListenerResult);
+ 
+     nsIContentViewer createInstanceForDocument(in nsISupports aContainer,
+                                          in nsIDocument aDocument,
+                                          in string aCommand);
+ 
+-    nsIDocument createBlankDocument(in nsILoadGroup aLoadGroup);
++    /**
++     * Create a blank document using the given loadgroup and given
++     * principal.  aPrincipal is allowed to be null, in which case the
++     * new document will get the about:blank codebase principal.
++     */
++    nsIDocument createBlankDocument(in nsILoadGroup aLoadGroup,
++                                    in nsIPrincipal aPrincipal);
+ };
+Index: content/base/src/nsDocument.h
+===================================================================
+RCS file: /cvsroot/mozilla/content/base/src/nsDocument.h,v
+retrieving revision 3.314
+diff -u -p -d -8 -r3.314 nsDocument.h
+--- content/base/src/nsDocument.h	5 Sep 2006 10:22:52 -0000	3.314
++++ content/base/src/nsDocument.h	28 Sep 2006 14:16:22 -0000
+@@ -292,17 +292,18 @@ class nsDocument : public nsIDocument,
+                    public nsIScriptObjectPrincipal,
+                    public nsIRadioGroupContainer,
+                    public nsStubMutationObserver
+ {
+ public:
+   NS_DECL_ISUPPORTS
+ 
+   virtual void Reset(nsIChannel *aChannel, nsILoadGroup *aLoadGroup);
+-  virtual void ResetToURI(nsIURI *aURI, nsILoadGroup *aLoadGroup);
++  virtual void ResetToURI(nsIURI *aURI, nsILoadGroup *aLoadGroup,
++                          nsIPrincipal* aPrincipal);
+ 
+   // StartDocumentLoad is pure virtual so that subclasses must override it.
+   // The nsDocument StartDocumentLoad does some setup, but does NOT set
+   // *aDocListener; this is the job of subclasses.
+   virtual nsresult StartDocumentLoad(const char* aCommand,
+                                      nsIChannel* aChannel,
+                                      nsILoadGroup* aLoadGroup,
+                                      nsISupports* aContainer,
+Index: content/base/src/nsDocument.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/content/base/src/nsDocument.cpp,v
+retrieving revision 3.683
+diff -u -p -d -8 -r3.683 nsDocument.cpp
+--- content/base/src/nsDocument.cpp	25 Sep 2006 22:50:01 -0000	3.683
++++ content/base/src/nsDocument.cpp	28 Sep 2006 14:35:07 -0000
+@@ -875,45 +875,45 @@ nsDocument::AddXMLEventsContent(nsIConte
+   mXMLEventsManager->AddXMLEventsContent(aXMLEventsElement);
+   return NS_OK;
+ }
+ 
+ void
+ nsDocument::Reset(nsIChannel* aChannel, nsILoadGroup* aLoadGroup)
+ {
+   nsCOMPtr<nsIURI> uri;
++  nsCOMPtr<nsIPrincipal> principal;
+   if (aChannel) {
+-    // Note: this code is duplicated in nsXULDocument::StartDocumentLoad.
++    // Note: this code is duplicated in nsXULDocument::StartDocumentLoad and
++    // nsScriptSecurityManager::GetChannelPrincipal.    
+     // Note: this should match nsDocShell::OnLoadingSite
+     nsLoadFlags loadFlags = 0;
+     nsresult rv = aChannel->GetLoadFlags(&loadFlags);
+     if (NS_SUCCEEDED(rv) && (loadFlags & nsIChannel::LOAD_REPLACE)) {
+       aChannel->GetURI(getter_AddRefs(uri));
+     } else {
+       aChannel->GetOriginalURI(getter_AddRefs(uri));
+     }
+-  }
+-
+-  ResetToURI(uri, aLoadGroup);
+ 
+-  if (aChannel) {
+-    nsCOMPtr<nsISupports> owner;
+-    if (NS_SUCCEEDED(aChannel->GetOwner(getter_AddRefs(owner)))) {
+-      nsCOMPtr<nsIPrincipal> principal = do_QueryInterface(owner);
+-      if (principal) {
+-        SetPrincipal(principal);
+-      }
++    nsIScriptSecurityManager *securityManager =
++      nsContentUtils::GetSecurityManager();
++    if (securityManager) {
++      securityManager->GetChannelPrincipal(aChannel,
++                                           getter_AddRefs(principal));
+     }
+   }
+ 
++  ResetToURI(uri, aLoadGroup, principal);
++
+   mChannel = aChannel;
+ }
+ 
+ void
+-nsDocument::ResetToURI(nsIURI *aURI, nsILoadGroup *aLoadGroup)
++nsDocument::ResetToURI(nsIURI *aURI, nsILoadGroup *aLoadGroup,
++                       nsIPrincipal* aPrincipal)
+ {
+   NS_PRECONDITION(aURI, "Null URI passed to ResetToURI");
+ 
+ #ifdef PR_LOGGING
+   if (gDocumentLeakPRLog && PR_LOG_TEST(gDocumentLeakPRLog, PR_LOG_DEBUG)) {
+     nsCAutoString spec;
+     aURI->GetSpec(spec);
+     PR_LogPrint("DOCUMENT %p ResetToURI %s", this, spec.get());
+@@ -977,25 +977,29 @@ nsDocument::ResetToURI(nsIURI *aURI, nsI
+   mContentType.Truncate();
+   mContentLanguage.Truncate();
+   mBaseTarget.Truncate();
+   mReferrer.Truncate();
+ 
+   mXMLDeclarationBits = 0;
+ 
+   // Now get our new principal
+-  nsIScriptSecurityManager *securityManager =
+-    nsContentUtils::GetSecurityManager();
+-  if (securityManager) {
+-    nsCOMPtr<nsIPrincipal> principal;
+-    nsresult rv =
+-      securityManager->GetCodebasePrincipal(mDocumentURI,
+-                                            getter_AddRefs(principal));
+-    if (NS_SUCCEEDED(rv)) {
+-      SetPrincipal(principal);
++  if (aPrincipal) {
++    SetPrincipal(aPrincipal);
++  } else {
++    nsIScriptSecurityManager *securityManager =
++      nsContentUtils::GetSecurityManager();
++    if (securityManager) {
++      nsCOMPtr<nsIPrincipal> principal;
++      nsresult rv =
++        securityManager->GetCodebasePrincipal(mDocumentURI,
++                                              getter_AddRefs(principal));
++      if (NS_SUCCEEDED(rv)) {
++        SetPrincipal(principal);
++      }
+     }
+   }
+ }
+ 
+ nsresult
+ nsDocument::ResetStylesheetsToURI(nsIURI* aURI)
+ {
+   NS_PRECONDITION(aURI, "Null URI passed to ResetStylesheetsToURI");
+Index: content/xul/document/src/nsXULDocument.h
+===================================================================
+RCS file: /cvsroot/mozilla/content/xul/document/src/nsXULDocument.h,v
+retrieving revision 1.183
+diff -u -p -d -8 -r1.183 nsXULDocument.h
+--- content/xul/document/src/nsXULDocument.h	2 Jul 2006 07:23:08 -0000	1.183
++++ content/xul/document/src/nsXULDocument.h	28 Sep 2006 14:23:27 -0000
+@@ -90,17 +90,18 @@ public:
+     virtual ~nsXULDocument();
+ 
+     // nsISupports interface
+     NS_DECL_ISUPPORTS_INHERITED
+     NS_DECL_NSISTREAMLOADEROBSERVER
+ 
+     // nsIDocument interface
+     virtual void Reset(nsIChannel* aChannel, nsILoadGroup* aLoadGroup);
+-    virtual void ResetToURI(nsIURI *aURI, nsILoadGroup* aLoadGroup);
++    virtual void ResetToURI(nsIURI *aURI, nsILoadGroup* aLoadGroup,
++                            nsIPrincipal* aPrincipal);
+ 
+     virtual nsresult StartDocumentLoad(const char* aCommand,
+                                        nsIChannel *channel,
+                                        nsILoadGroup* aLoadGroup,
+                                        nsISupports* aContainer,
+                                        nsIStreamListener **aDocListener,
+                                        PRBool aReset = PR_TRUE,
+                                        nsIContentSink* aSink = nsnull);
+Index: content/xul/document/src/nsXULDocument.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/content/xul/document/src/nsXULDocument.cpp,v
+retrieving revision 1.734
+diff -u -p -d -8 -r1.734 nsXULDocument.cpp
+--- content/xul/document/src/nsXULDocument.cpp	14 Sep 2006 04:29:01 -0000	1.734
++++ content/xul/document/src/nsXULDocument.cpp	28 Sep 2006 15:08:20 -0000
+@@ -312,17 +312,18 @@ NS_INTERFACE_MAP_END_INHERITING(nsXMLDoc
+ 
+ void
+ nsXULDocument::Reset(nsIChannel* aChannel, nsILoadGroup* aLoadGroup)
+ {
+     NS_NOTREACHED("Reset");
+ }
+ 
+ void
+-nsXULDocument::ResetToURI(nsIURI* aURI, nsILoadGroup* aLoadGroup)
++nsXULDocument::ResetToURI(nsIURI* aURI, nsILoadGroup* aLoadGroup,
++                          nsIPrincipal* aPrincipal)
+ {
+     NS_NOTREACHED("ResetToURI");
+ }
+ 
+ // Override the nsDocument.cpp method to keep from returning the
+ // "cached XUL" type which is completely internal and may confuse
+ // people
+ NS_IMETHODIMP
+@@ -353,18 +354,19 @@ nsXULDocument::StartDocumentLoad(const c
+     
+     mDocumentLoadGroup = do_GetWeakReference(aLoadGroup);
+ 
+     mDocumentTitle.SetIsVoid(PR_TRUE);
+ 
+     mChannel = aChannel;
+ 
+     // Get the URI.  Note that this should match nsDocShell::OnLoadingSite
+-    // XXXbz this code is repeated from nsDocument::Reset; we
+-    // really need to refactor this part better.
++    // XXXbz this code is repeated from nsDocument::Reset and
++    // nsScriptSecurityManager::GetChannelPrincipal; we really need to refactor
++    // this part better.
+     nsLoadFlags loadFlags = 0;
+     nsresult rv = aChannel->GetLoadFlags(&loadFlags);
+     if (NS_SUCCEEDED(rv)) {
+         if (loadFlags & nsIChannel::LOAD_REPLACE) {
+             rv = aChannel->GetURI(getter_AddRefs(mDocumentURI));
+         } else {
+             rv = aChannel->GetOriginalURI(getter_AddRefs(mDocumentURI));
+         }
+@@ -406,17 +408,17 @@ nsXULDocument::StartDocumentLoad(const c
+         // which will add style sheet clones to each document.
+         PRBool loaded;
+         rv = proto->AwaitLoadDone(this, &loaded);
+         if (NS_FAILED(rv)) return rv;
+ 
+         mMasterPrototype = mCurrentPrototype = proto;
+ 
+         // Set up the right principal on ourselves.
+-        SetPrincipal(proto->GetDocumentPrincipal());
++        SetPrincipal(proto->DocumentPrincipal());
+ 
+         // Add cloned style sheet references only if the prototype has in
+         // fact already loaded.  It may still be loading when we hit the XUL
+         // prototype cache.
+         if (loaded) {
+             rv = AddPrototypeSheets();
+             if (NS_FAILED(rv)) return rv;
+         }
+@@ -2070,22 +2072,19 @@ nsXULDocument::PrepareToLoad(nsISupports
+                              const char* aCommand,
+                              nsIChannel* aChannel,
+                              nsILoadGroup* aLoadGroup,
+                              nsIParser** aResult)
+ {
+     nsresult rv;
+ 
+     // Get the document's principal
+-    nsCOMPtr<nsISupports> owner;
+-    rv = aChannel->GetOwner(getter_AddRefs(owner));
+-    if (NS_FAILED(rv)) return rv;
+-
+-    nsCOMPtr<nsIPrincipal> principal = do_QueryInterface(owner);
+-
++    nsCOMPtr<nsIPrincipal> principal;
++    nsContentUtils::GetSecurityManager()->
++        GetChannelPrincipal(aChannel, getter_AddRefs(principal));
+     return PrepareToLoadPrototype(mDocumentURI, aCommand, principal, aResult);
+ }
+ 
+ 
+ nsresult
+ nsXULDocument::PrepareToLoadPrototype(nsIURI* aURI, const char* aCommand,
+                                       nsIPrincipal* aDocumentPrincipal,
+                                       nsIParser** aResult)
+@@ -2093,31 +2092,27 @@ nsXULDocument::PrepareToLoadPrototype(ns
+     nsresult rv;
+ 
+     // Create a new prototype document.
+     rv = NS_NewXULPrototypeDocument(nsnull,
+                                     NS_GET_IID(nsIXULPrototypeDocument),
+                                     getter_AddRefs(mCurrentPrototype));
+     if (NS_FAILED(rv)) return rv;
+ 
++    rv = mCurrentPrototype->InitPrincipal(aURI, aDocumentPrincipal);
++    if (NS_FAILED(rv)) {
++        mCurrentPrototype = nsnull;
++        return rv;
++    }    
++
+     // Bootstrap the master document prototype.
+-    PRBool isMasterProto = PR_FALSE;
+     if (! mMasterPrototype) {
+         mMasterPrototype = mCurrentPrototype;
+-        mMasterPrototype->SetDocumentPrincipal(aDocumentPrincipal);
+-        isMasterProto = PR_TRUE;
+-    }
+-
+-    rv = mCurrentPrototype->SetURI(aURI);
+-    if (NS_FAILED(rv)) return rv;
+-
+-    if (isMasterProto) {
+-        // Set our principal based on the master proto.  Note that this MUST
+-        // come after the SetURI and SetDocumentPrincipal calls above.
+-        SetPrincipal(mMasterPrototype->GetDocumentPrincipal());
++        // Set our principal based on the master proto.
++        SetPrincipal(aDocumentPrincipal);
+     }
+ 
+     // Create a XUL content sink, a parser, and kick off a load for
+     // the overlay.
+     nsCOMPtr<nsIXULContentSink> sink;
+     rv = NS_NewXULContentSink(getter_AddRefs(sink));
+     NS_ASSERTION(NS_SUCCEEDED(rv), "unable to create XUL content sink");
+     if (NS_FAILED(rv)) return rv;
+@@ -2656,16 +2651,20 @@ nsXULDocument::LoadOverlayInternal(nsIUR
+         // cache already, we must manually call ResumeWalk.
+         if (aIsDynamic)
+             return ResumeWalk();
+     }
+     else {
+         // Not there. Initiate a load.
+         PR_LOG(gXULLog, PR_LOG_DEBUG, ("xul: overlay was not cached"));
+ 
++        // No one ever uses overlay principals for anything, so it's OK to give
++        // them the null principal.  Too bad this code insists on the sort of
++        // syncloading that can't provide us the right principal from the
++        // channel...
+         nsCOMPtr<nsIParser> parser;
+         rv = PrepareToLoadPrototype(aURI, "view", nsnull, getter_AddRefs(parser));
+         if (NS_FAILED(rv)) return rv;
+ 
+         // Predicate mIsWritingFastLoad on the XUL cache being enabled,
+         // so we don't have to re-check whether the cache is enabled all
+         // the time.
+         mIsWritingFastLoad = useXULCache;
+Index: content/xul/document/src/nsXULPrototypeDocument.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/content/xul/document/src/nsXULPrototypeDocument.cpp,v
+retrieving revision 1.80
+diff -u -p -d -8 -r1.80 nsXULPrototypeDocument.cpp
+--- content/xul/document/src/nsXULPrototypeDocument.cpp	5 Sep 2006 22:53:46 -0000	1.80
++++ content/xul/document/src/nsXULPrototypeDocument.cpp	28 Sep 2006 15:04:38 -0000
+@@ -124,50 +124,49 @@ public:
+ 
+     // nsISupports interface
+     NS_DECL_ISUPPORTS
+ 
+     // nsISerializable interface
+     NS_DECL_NSISERIALIZABLE
+ 
+     // nsIXULPrototypeDocument interface
++    NS_IMETHOD InitPrincipal(nsIURI* aURI, nsIPrincipal* aPrincipal);
++    
+     NS_IMETHOD GetURI(nsIURI** aResult);
+-    NS_IMETHOD SetURI(nsIURI* aURI);
+ 
+     NS_IMETHOD GetRootElement(nsXULPrototypeElement** aResult);
+     NS_IMETHOD SetRootElement(nsXULPrototypeElement* aElement);
+ 
+     NS_IMETHOD AddStyleSheetReference(nsIURI* aStyleSheet);
+     NS_IMETHOD GetStyleSheetReferences(nsISupportsArray** aResult);
+ 
+     NS_IMETHOD AddOverlayReference(nsIURI* aURI);
+     NS_IMETHOD GetOverlayReferences(nsISupportsArray** aResult);
+ 
+     NS_IMETHOD GetHeaderData(nsIAtom* aField, nsAString& aData) const;
+     NS_IMETHOD SetHeaderData(nsIAtom* aField, const nsAString& aData);
+ 
+-    virtual nsIPrincipal *GetDocumentPrincipal();
+-    void SetDocumentPrincipal(nsIPrincipal *aPrincipal);
++    virtual nsIPrincipal *DocumentPrincipal();
+ 
+     NS_IMETHOD AwaitLoadDone(nsIXULDocument* aDocument, PRBool* aResult);
+     NS_IMETHOD NotifyLoadDone();
+     
+     virtual nsNodeInfoManager *GetNodeInfoManager();
+ 
+     // nsIScriptGlobalObjectOwner methods
+     virtual nsIScriptGlobalObject* GetScriptGlobalObject();
+ 
+     NS_DEFINE_STATIC_CID_ACCESSOR(NS_XULPROTOTYPEDOCUMENT_CID);
+ 
+ protected:
+     nsCOMPtr<nsIURI> mURI;
+     nsXULPrototypeElement* mRoot;
+     nsCOMPtr<nsISupportsArray> mStyleSheetReferences;
+     nsCOMPtr<nsISupportsArray> mOverlayReferences;
+-    nsCOMPtr<nsIPrincipal> mDocumentPrincipal;
+ 
+     nsCOMPtr<nsIScriptGlobalObject> mGlobalObject;
+ 
+     PRPackedBool mLoaded;
+     nsCOMPtr<nsICollection> mPrototypeWaiters;
+ 
+     nsRefPtr<nsNodeInfoManager> mNodeInfoManager;
+ 
+@@ -309,25 +308,21 @@ NS_NewXULPrototypeDocument(nsISupports* 
+ // that have the system principal as their security principal.   Called by
+ // nsXULPrototypeDocument::Read and nsXULPDGlobalObject::GetGlobalObject.
+ // This method greatly reduces the number of nsXULPDGlobalObjects and their
+ // nsIScriptContexts in apps that load many XUL documents via chrome: URLs.
+ 
+ nsresult
+ nsXULPrototypeDocument::NewXULPDGlobalObject(nsIScriptGlobalObject** aResult)
+ {
+-    nsIPrincipal *principal = GetDocumentPrincipal();
+-    if (!principal)
+-        return NS_ERROR_FAILURE;
+-
+-    // Now that GetDocumentPrincipal has succeeded, we can safely compare its
+-    // result to gSystemPrincipal, in order to create gSystemGlobal if the two
+-    // pointers are equal.  Thus, gSystemGlobal implies gSystemPrincipal.
++    // Now compare DocumentPrincipal() to gSystemPrincipal, in order to create
++    // gSystemGlobal if the two pointers are equal.  Thus, gSystemGlobal
++    // implies gSystemPrincipal.
+     nsCOMPtr<nsIScriptGlobalObject> global;
+-    if (principal == gSystemPrincipal) {
++    if (DocumentPrincipal() == gSystemPrincipal) {
+         if (!gSystemGlobal) {
+             gSystemGlobal = new nsXULPDGlobalObject();
+             if (! gSystemGlobal)
+                 return NS_ERROR_OUT_OF_MEMORY;
+             NS_ADDREF(gSystemGlobal);
+         }
+         global = gSystemGlobal;
+     } else {
+@@ -369,27 +364,21 @@ nsXULPrototypeDocument::Read(nsIObjectIn
+     // nsISupportsArray mOverlayReferences
+     rv |= aStream->Read32(&referenceCount);
+     for (i = 0; i < referenceCount; ++i) {
+         rv |= aStream->ReadObject(PR_TRUE, getter_AddRefs(referenceURI));
+         
+         mOverlayReferences->AppendElement(referenceURI);
+     }
+ 
+-    // nsIPrincipal mDocumentPrincipal
++    // nsIPrincipal mNodeInfoManager->mPrincipal
+     nsCOMPtr<nsIPrincipal> principal;
+-    rv |= NS_ReadOptionalObject(aStream, PR_TRUE, getter_AddRefs(principal));
+-    if (! principal) {
+-        principal = GetDocumentPrincipal();
+-        if (!principal)
+-            rv |= NS_ERROR_FAILURE;
+-    } else {
+-        mNodeInfoManager->SetDocumentPrincipal(principal);
+-        mDocumentPrincipal = principal;
+-    }
++    rv |= aStream->ReadObject(PR_TRUE, getter_AddRefs(principal));
++    // Better safe than sorry....
++    mNodeInfoManager->SetDocumentPrincipal(principal);
+ 
+     // nsIScriptGlobalObject mGlobalObject
+     NewXULPDGlobalObject(getter_AddRefs(mGlobalObject));
+     if (! mGlobalObject)
+         return NS_ERROR_OUT_OF_MEMORY;
+ 
+     mRoot = new nsXULPrototypeElement();
+     if (! mRoot)
+@@ -496,18 +485,19 @@ nsXULPrototypeDocument::Write(nsIObjectO
+     rv |= aStream->Write32(referenceCount);
+     
+     for (i = 0; i < referenceCount; ++i) {
+         mOverlayReferences->QueryElementAt(i, NS_GET_IID(nsIURI), getter_AddRefs(referenceURI));
+         
+         rv |= aStream->WriteCompoundObject(referenceURI, NS_GET_IID(nsIURI), PR_TRUE);
+     }
+ 
+-    // nsIPrincipal mDocumentPrincipal
+-    rv |= NS_WriteOptionalObject(aStream, mDocumentPrincipal, PR_TRUE);
++    // nsIPrincipal mNodeInfoManager->mPrincipal
++    rv |= aStream->WriteObject(mNodeInfoManager->DocumentPrincipal(),
++                               PR_TRUE);
+     
+     // nsINodeInfo table
+     nsCOMArray<nsINodeInfo> nodeInfos;
+     if (mRoot)
+         rv |= GetNodeInfos(mRoot, nodeInfos);
+ 
+     PRInt32 nodeInfoCount = nodeInfos.Count();
+     rv |= aStream->Write32(nodeInfoCount);
+@@ -536,37 +526,31 @@ nsXULPrototypeDocument::Write(nsIObjectO
+ 
+ 
+ //----------------------------------------------------------------------
+ //
+ // nsIXULPrototypeDocument methods
+ //
+ 
+ NS_IMETHODIMP
+-nsXULPrototypeDocument::GetURI(nsIURI** aResult)
++nsXULPrototypeDocument::InitPrincipal(nsIURI* aURI, nsIPrincipal* aPrincipal)
+ {
+-    *aResult = mURI;
+-    NS_IF_ADDREF(*aResult);
++    NS_ENSURE_ARG_POINTER(aURI);
++
++    mURI = aURI;
++    mNodeInfoManager->SetDocumentPrincipal(aPrincipal);
+     return NS_OK;
+ }
+-
++    
+ 
+ NS_IMETHODIMP
+-nsXULPrototypeDocument::SetURI(nsIURI* aURI)
++nsXULPrototypeDocument::GetURI(nsIURI** aResult)
+ {
+-    NS_ASSERTION(!mURI, "Can't change the uri of a xul prototype document");
+-    if (mURI)
+-        return NS_ERROR_ALREADY_INITIALIZED;
+-
+-    mURI = aURI;
+-    if (!mDocumentPrincipal) {
+-        // If the document doesn't have a principal yet we'll force the creation of one
+-        // so that mNodeInfoManager properly gets one.
+-        GetDocumentPrincipal();
+-    }
++    *aResult = mURI;
++    NS_IF_ADDREF(*aResult);
+     return NS_OK;
+ }
+ 
+ 
+ NS_IMETHODIMP
+ nsXULPrototypeDocument::GetRootElement(nsXULPrototypeElement** aResult)
+ {
+     *aResult = mRoot;
+@@ -639,57 +623,23 @@ nsXULPrototypeDocument::SetHeaderData(ns
+ {
+     // XXX Not implemented
+     return NS_OK;
+ }
+ 
+ 
+ 
+ nsIPrincipal*
+-nsXULPrototypeDocument::GetDocumentPrincipal()
++nsXULPrototypeDocument::DocumentPrincipal()
+ {
+     NS_PRECONDITION(mNodeInfoManager, "missing nodeInfoManager");
+-    if (!mDocumentPrincipal) {
+-        nsIScriptSecurityManager *securityManager =
+-            nsContentUtils::GetSecurityManager();
+-        nsresult rv = NS_OK;
+-
+-        // XXX This should be handled by the security manager, see bug 160042
+-        PRBool isChrome = PR_FALSE;
+-        if (NS_SUCCEEDED(mURI->SchemeIs("chrome", &isChrome)) && isChrome) {
+-            if (gSystemPrincipal) {
+-                mDocumentPrincipal = gSystemPrincipal;
+-            } else {
+-                rv = securityManager->
+-                     GetSystemPrincipal(getter_AddRefs(mDocumentPrincipal));
+-                NS_IF_ADDREF(gSystemPrincipal = mDocumentPrincipal);
+-            }
+-        } else {
+-            rv = securityManager->
+-                 GetCodebasePrincipal(mURI, getter_AddRefs(mDocumentPrincipal));
+-        }
+-
+-        if (NS_FAILED(rv))
+-            return nsnull;
+-
+-        mNodeInfoManager->SetDocumentPrincipal(mDocumentPrincipal);
+-    }
+-
+-    return mDocumentPrincipal;
++    return mNodeInfoManager->DocumentPrincipal();
+ }
+ 
+ 
+-void
+-nsXULPrototypeDocument::SetDocumentPrincipal(nsIPrincipal *aPrincipal)
+-{
+-    NS_PRECONDITION(mNodeInfoManager, "missing nodeInfoManager");
+-    mDocumentPrincipal = aPrincipal;
+-    mNodeInfoManager->SetDocumentPrincipal(aPrincipal);
+-}
+-
+ nsNodeInfoManager*
+ nsXULPrototypeDocument::GetNodeInfoManager()
+ {
+     return mNodeInfoManager;
+ }
+ 
+ 
+ NS_IMETHODIMP
+@@ -956,11 +906,11 @@ nsXULPDGlobalObject::GetPrincipal()
+         if (this == nsXULPrototypeDocument::gSystemGlobal) {
+             return nsXULPrototypeDocument::gSystemPrincipal;
+         }
+         return nsnull;
+     }
+     nsCOMPtr<nsIXULPrototypeDocument> protoDoc
+       = do_QueryInterface(mGlobalObjectOwner);
+ 
+-    return protoDoc->GetDocumentPrincipal();
++    return protoDoc->DocumentPrincipal();
+ }
+ 
+Index: content/xul/document/public/nsIXULPrototypeDocument.h
+===================================================================
+RCS file: /cvsroot/mozilla/content/xul/document/public/nsIXULPrototypeDocument.h,v
+retrieving revision 1.15
+diff -u -p -d -8 -r1.15 nsIXULPrototypeDocument.h
+--- content/xul/document/public/nsIXULPrototypeDocument.h	28 Nov 2005 23:56:22 -0000	1.15
++++ content/xul/document/public/nsIXULPrototypeDocument.h	28 Sep 2006 04:51:47 -0000
+@@ -54,27 +54,36 @@ class nsIURI;
+ class nsString;
+ class nsVoidArray;
+ class nsXULPrototypeElement;
+ class nsIXULDocument;
+ class nsNodeInfoManager;
+ class nsISupportsArray;
+ 
+ #define NS_IXULPROTOTYPEDOCUMENT_IID \
+-{ 0x726f0ab8, 0xb3cb, 0x11d8, { 0xb2, 0x67, 0x00, 0x0a, 0x95, 0xdc, 0x23, 0x4c } }
++{ 0x054a0bfe, 0xe7bc, 0x44b0, \
++ { 0x90, 0x97, 0x6c, 0x95, 0xe4, 0xd6, 0x5f, 0xa3 } }
+ 
+ class nsIXULPrototypeDocument : public nsISerializable
+ {
+ public:
+     NS_DECLARE_STATIC_IID_ACCESSOR(NS_IXULPROTOTYPEDOCUMENT_IID)
+ 
+     /**
++     * Method to initialize a prototype document's principal.  Either this
++     * method or Read() must be called immediately after the prototype document
++     * is created.  aURI must be non-null.  aPrincipal is allowed to be null;
++     * in this case the prototype will get a null principal object.  If this
++     * method returns error, do NOT use the prototype document for anything.
++     */
++    NS_IMETHOD InitPrincipal(nsIURI* aURI, nsIPrincipal* aPrincipal) = 0;
++
++    /**
+      * Retrieve the URI of the document
+      */
+-    NS_IMETHOD SetURI(nsIURI* aURI) = 0;
+     NS_IMETHOD GetURI(nsIURI** aResult) = 0;
+ 
+     /**
+      * Retrieve the root XULPrototype element of the document.
+      */
+     NS_IMETHOD GetRootElement(nsXULPrototypeElement** aResult) = 0;
+     NS_IMETHOD SetRootElement(nsXULPrototypeElement* aElement) = 0;
+ 
+@@ -82,18 +91,19 @@ public:
+     NS_IMETHOD GetStyleSheetReferences(nsISupportsArray** aResult) = 0;
+ 
+     NS_IMETHOD AddOverlayReference(nsIURI* aURI) = 0;
+     NS_IMETHOD GetOverlayReferences(nsISupportsArray** aResult) = 0;
+ 
+     NS_IMETHOD GetHeaderData(nsIAtom* aField, nsAString& aData) const = 0;
+     NS_IMETHOD SetHeaderData(nsIAtom* aField, const nsAString& aData) = 0;
+ 
+-    virtual nsIPrincipal *GetDocumentPrincipal() = 0;
+-    virtual void SetDocumentPrincipal(nsIPrincipal *aPrincipal) = 0;
++    // Guaranteed to return non-null for a properly-initialized prototype
++    // document.
++    virtual nsIPrincipal *DocumentPrincipal() = 0;
+ 
+     virtual nsNodeInfoManager *GetNodeInfoManager() = 0;
+ 
+     NS_IMETHOD AwaitLoadDone(nsIXULDocument* aDocument, PRBool* aResult) = 0;
+     NS_IMETHOD NotifyLoadDone() = 0;
+ };
+ 
+ NS_DEFINE_STATIC_IID_ACCESSOR(nsIXULPrototypeDocument,
+Index: content/xul/document/public/nsIXULPrototypeCache.h
+===================================================================
+RCS file: /cvsroot/mozilla/content/xul/document/public/nsIXULPrototypeCache.h,v
+retrieving revision 1.40
+diff -u -p -d -8 -r1.40 nsIXULPrototypeCache.h
+--- content/xul/document/public/nsIXULPrototypeCache.h	5 Sep 2006 22:53:46 -0000	1.40
++++ content/xul/document/public/nsIXULPrototypeCache.h	28 Sep 2006 03:56:35 -0000
+@@ -125,15 +125,15 @@ NS_NewXULPrototypeCache(nsISupports* aOu
+ 
+ 
+ const char XUL_FASTLOAD_FILE_BASENAME[] = "XUL";
+ 
+ // Increase the subtractor when changing version, say when changing the
+ // (opaque to XPCOM FastLoad code) format of XUL-specific XDR serializations.
+ // See also JSXDR_BYTECODE_VERSION in jsxdrapi.h, which tracks incompatible JS
+ // bytecode version changes.
+-#define XUL_FASTLOAD_FILE_VERSION       (0xfeedbeef - 20)
++#define XUL_FASTLOAD_FILE_VERSION       (0xfeedbeef - 21)
+ 
+ #define XUL_SERIALIZATION_BUFFER_SIZE   (64 * 1024)
+ #define XUL_DESERIALIZATION_BUFFER_SIZE (8 * 1024)
+ 
+ 
+ #endif // nsIXULPrototypeCache_h__
+Index: content/xml/document/src/nsXMLDocument.h
+===================================================================
+RCS file: /cvsroot/mozilla/content/xml/document/src/nsXMLDocument.h,v
+retrieving revision 1.84
+diff -u -p -d -8 -r1.84 nsXMLDocument.h
+--- content/xml/document/src/nsXMLDocument.h	5 Sep 2006 10:22:54 -0000	1.84
++++ content/xml/document/src/nsXMLDocument.h	28 Sep 2006 14:19:37 -0000
+@@ -58,17 +58,18 @@ class nsXMLDocument : public nsDocument,
+ {
+ public:
+   nsXMLDocument(const char* aContentType = "application/xml");
+   virtual ~nsXMLDocument();
+ 
+   NS_DECL_ISUPPORTS_INHERITED
+ 
+   virtual void Reset(nsIChannel* aChannel, nsILoadGroup* aLoadGroup);
+-  virtual void ResetToURI(nsIURI *aURI, nsILoadGroup *aLoadGroup);
++  virtual void ResetToURI(nsIURI *aURI, nsILoadGroup *aLoadGroup,
++                          nsIPrincipal* aPrincipal);
+ 
+   virtual nsresult StartDocumentLoad(const char* aCommand, nsIChannel* channel,
+                                      nsILoadGroup* aLoadGroup,
+                                      nsISupports* aContainer,
+                                      nsIStreamListener **aDocListener,
+                                      PRBool aReset = PR_TRUE,
+                                      nsIContentSink* aSink = nsnull);
+ 
+Index: content/xml/document/src/nsXMLDocument.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/content/xml/document/src/nsXMLDocument.cpp,v
+retrieving revision 1.248
+diff -u -p -d -8 -r1.248 nsXMLDocument.cpp
+--- content/xml/document/src/nsXMLDocument.cpp	5 Sep 2006 10:22:54 -0000	1.248
++++ content/xml/document/src/nsXMLDocument.cpp	28 Sep 2006 14:21:23 -0000
+@@ -219,25 +219,26 @@ void
+ nsXMLDocument::Reset(nsIChannel* aChannel, nsILoadGroup* aLoadGroup)
+ {
+   nsDocument::Reset(aChannel, aLoadGroup);
+ 
+   mScriptContext = nsnull;
+ }
+ 
+ void
+-nsXMLDocument::ResetToURI(nsIURI *aURI, nsILoadGroup *aLoadGroup)
++nsXMLDocument::ResetToURI(nsIURI *aURI, nsILoadGroup *aLoadGroup,
++                          nsIPrincipal* aPrincipal)
+ {
+   if (mChannelIsPending) {
+     StopDocumentLoad();
+     mChannel->Cancel(NS_BINDING_ABORTED);
+     mChannelIsPending = nsnull;
+   }
+   
+-  nsDocument::ResetToURI(aURI, aLoadGroup);
++  nsDocument::ResetToURI(aURI, aLoadGroup, aPrincipal);
+ }
+ 
+ /////////////////////////////////////////////////////
+ // nsIInterfaceRequestor methods:
+ //
+ NS_IMETHODIMP
+ nsXMLDocument::GetInterface(const nsIID& aIID, void** aSink)
+ {
+@@ -413,23 +414,24 @@ nsXMLDocument::Load(const nsAString& aUr
+   if (NS_FAILED(rv)) {
+     return rv;
+   }
+ 
+   // Partial Reset, need to restore principal for security reasons and
+   // event listener manager so that load listeners etc. will
+   // remain. This should be done before the security check is done to
+   // ensure that the document is reset even if the new document can't
+-  // be loaded.
++  // be loaded.  Note that we need to hold a strong ref to |principal|
++  // here, because ResetToURI will null out our node principal before
++  // setting the new one.
+   nsCOMPtr<nsIPrincipal> principal = NodePrincipal();
+   nsCOMPtr<nsIEventListenerManager> elm(mListenerManager);
+ 
+-  ResetToURI(uri, nsnull);
++  ResetToURI(uri, nsnull, principal);
+ 
+-  SetPrincipal(principal);
+   mListenerManager = elm;
+ 
+   // Get security manager, check to see if we're allowed to load this URI
+   nsCOMPtr<nsIScriptSecurityManager> secMan = 
+            do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID, &rv);
+   if (NS_FAILED(rv)) {
+     return rv;
+   }
+Index: content/html/document/src/nsHTMLDocument.h
+===================================================================
+RCS file: /cvsroot/mozilla/content/html/document/src/nsHTMLDocument.h,v
+retrieving revision 3.197
+diff -u -p -d -8 -r3.197 nsHTMLDocument.h
+--- content/html/document/src/nsHTMLDocument.h	14 Aug 2006 22:36:13 -0000	3.197
++++ content/html/document/src/nsHTMLDocument.h	28 Sep 2006 14:21:59 -0000
+@@ -76,17 +76,18 @@ public:
+   virtual nsresult Init();
+ 
+   NS_IMETHOD QueryInterface(REFNSIID aIID, void** aInstancePtr);
+ 
+   NS_IMETHOD_(nsrefcnt) AddRef(void);
+   NS_IMETHOD_(nsrefcnt) Release(void);
+ 
+   virtual void Reset(nsIChannel* aChannel, nsILoadGroup* aLoadGroup);
+-  virtual void ResetToURI(nsIURI* aURI, nsILoadGroup* aLoadGroup);
++  virtual void ResetToURI(nsIURI* aURI, nsILoadGroup* aLoadGroup,
++                          nsIPrincipal* aPrincipal);
+   virtual nsStyleSet::sheetType GetAttrSheetType();
+ 
+   virtual nsresult CreateShell(nsPresContext* aContext,
+                                nsIViewManager* aViewManager,
+                                nsStyleSet* aStyleSet,
+                                nsIPresShell** aInstancePtrResult);
+ 
+   virtual nsresult StartDocumentLoad(const char* aCommand,
+Index: content/html/document/src/nsHTMLDocument.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/content/html/document/src/nsHTMLDocument.cpp,v
+retrieving revision 3.696
+diff -u -p -d -8 -r3.696 nsHTMLDocument.cpp
+--- content/html/document/src/nsHTMLDocument.cpp	18 Aug 2006 02:38:40 -0000	3.696
++++ content/html/document/src/nsHTMLDocument.cpp	28 Sep 2006 14:22:30 -0000
+@@ -399,21 +399,22 @@ nsHTMLDocument::Reset(nsIChannel* aChann
+   nsDocument::Reset(aChannel, aLoadGroup);
+ 
+   if (aChannel) {
+     aChannel->GetLoadFlags(&mLoadFlags);
+   }
+ }
+ 
+ void
+-nsHTMLDocument::ResetToURI(nsIURI *aURI, nsILoadGroup *aLoadGroup)
++nsHTMLDocument::ResetToURI(nsIURI *aURI, nsILoadGroup *aLoadGroup,
++                           nsIPrincipal* aPrincipal)
+ {
+   mLoadFlags = nsIRequest::LOAD_NORMAL;
+ 
+-  nsDocument::ResetToURI(aURI, aLoadGroup);
++  nsDocument::ResetToURI(aURI, aLoadGroup, aPrincipal);
+ 
+   InvalidateHashTables();
+   PrePopulateHashTables();
+ 
+   mImages = nsnull;
+   mApplets = nsnull;
+   mEmbeds = nsnull;
+   mLinks = nsnull;
+Index: layout/build/nsContentDLF.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/layout/build/nsContentDLF.cpp,v
+retrieving revision 1.77
+diff -u -p -d -8 -r1.77 nsContentDLF.cpp
+--- layout/build/nsContentDLF.cpp	11 Sep 2006 15:26:19 -0000	1.77
++++ layout/build/nsContentDLF.cpp	28 Sep 2006 14:10:58 -0000
+@@ -314,31 +314,33 @@ nsContentDLF::CreateInstanceForDocument(
+     rv = cv->LoadStart(aDocument);
+     NS_ADDREF(*aDocViewerResult = cv);
+   } while (PR_FALSE);
+ 
+   return rv;
+ }
+ 
+ NS_IMETHODIMP
+-nsContentDLF::CreateBlankDocument(nsILoadGroup *aLoadGroup, nsIDocument **aDocument)
++nsContentDLF::CreateBlankDocument(nsILoadGroup *aLoadGroup,
++                                  nsIPrincipal* aPrincipal,
++                                  nsIDocument **aDocument)
+ {
+   *aDocument = nsnull;
+ 
+   nsresult rv = NS_ERROR_FAILURE;
+ 
+   // create a new blank HTML document
+   nsCOMPtr<nsIDocument> blankDoc(do_CreateInstance(kHTMLDocumentCID));
+ 
+   if (blankDoc) {
+     // initialize
+     nsCOMPtr<nsIURI> uri;
+     NS_NewURI(getter_AddRefs(uri), NS_LITERAL_CSTRING("about:blank"));
+     if (uri) {
+-      blankDoc->ResetToURI(uri, aLoadGroup);
++      blankDoc->ResetToURI(uri, aLoadGroup, aPrincipal);
+       rv = NS_OK;
+     }
+   }
+ 
+   // add some simple content structure
+   if (NS_SUCCEEDED(rv)) {
+     rv = NS_ERROR_FAILURE;
+ 
+Index: docshell/base/nsDocShell.h
+===================================================================
+RCS file: /cvsroot/mozilla/docshell/base/nsDocShell.h,v
+retrieving revision 1.205
+diff -u -p -d -8 -r1.205 nsDocShell.h
+--- docshell/base/nsDocShell.h	15 Aug 2006 17:31:15 -0000	1.205
++++ docshell/base/nsDocShell.h	28 Sep 2006 14:09:55 -0000
+@@ -215,17 +215,19 @@ public:
+ protected:
+     // Object Management
+     virtual ~nsDocShell();
+     virtual void DestroyChildren();
+ 
+     // Content Viewer Management
+     NS_IMETHOD EnsureContentViewer();
+     NS_IMETHOD EnsureDeviceContext();
+-    nsresult CreateAboutBlankContentViewer();
++    // aPrincipal can be passed in if the caller wants.  If null is
++    // passed in, the about:blank principal will end up being used.
++    nsresult CreateAboutBlankContentViewer(nsIPrincipal* aPrincipal);
+     NS_IMETHOD CreateContentViewer(const char * aContentType, 
+         nsIRequest * request, nsIStreamListener ** aContentHandler);
+     NS_IMETHOD NewContentViewerObj(const char * aContentType, 
+         nsIRequest * request, nsILoadGroup * aLoadGroup, 
+         nsIStreamListener ** aContentHandler, nsIContentViewer ** aViewer);
+     NS_IMETHOD SetupNewViewer(nsIContentViewer * aNewViewer);
+ 
+     void SetupReferrerFromChannel(nsIChannel * aChannel);
+Index: docshell/base/nsDocShell.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/docshell/base/nsDocShell.cpp,v
+retrieving revision 1.815
+diff -u -p -d -8 -r1.815 nsDocShell.cpp
+--- docshell/base/nsDocShell.cpp	1 Sep 2006 15:58:17 -0000	1.815
++++ docshell/base/nsDocShell.cpp	28 Sep 2006 14:09:39 -0000
+@@ -4936,31 +4936,27 @@ nsDocShell::EnsureContentViewer()
+     if (piDOMWindow) {
+         principal = piDOMWindow->GetOpenerScriptPrincipal();
+     }
+ 
+     if (!principal) {
+         principal = GetInheritedPrincipal(PR_FALSE);
+     }
+ 
+-    nsresult rv = CreateAboutBlankContentViewer();
++    nsresult rv = CreateAboutBlankContentViewer(principal);
+ 
+     if (NS_SUCCEEDED(rv)) {
+         nsCOMPtr<nsIDOMDocument> domDoc;
+         mContentViewer->GetDOMDocument(getter_AddRefs(domDoc));
+         nsCOMPtr<nsIDocument> doc(do_QueryInterface(domDoc));
+         NS_ASSERTION(doc,
+                      "Should have doc if CreateAboutBlankContentViewer "
+                      "succeeded!");
+ 
+         doc->SetIsInitialDocument(PR_TRUE);
+-
+-        if (principal) {
+-            doc->SetPrincipal(principal);
+-        }
+     }
+ 
+     return rv;
+ }
+ 
+ NS_IMETHODIMP
+ nsDocShell::EnsureDeviceContext()
+ {
+@@ -4981,17 +4977,17 @@ nsDocShell::EnsureDeviceContext()
+     float twip2dev;
+     twip2dev = mDeviceContext->TwipsToDevUnits();
+     mDeviceContext->SetAppUnitsToDevUnits(twip2dev);
+ 
+     return NS_OK;
+ }
+ 
+ nsresult
+-nsDocShell::CreateAboutBlankContentViewer()
++nsDocShell::CreateAboutBlankContentViewer(nsIPrincipal* aPrincipal)
+ {
+   nsCOMPtr<nsIDocument> blankDoc;
+   nsCOMPtr<nsIContentViewer> viewer;
+   nsresult rv = NS_ERROR_FAILURE;
+ 
+   /* mCreatingDocument should never be true at this point. However, it's
+      a theoretical possibility. We want to know about it and make it stop,
+      and this sounds like a job for an assertion. */
+@@ -5037,17 +5033,18 @@ nsDocShell::CreateAboutBlankContentViewe
+   nsXPIDLCString contractId;
+   rv = catMan->GetCategoryEntry("Gecko-Content-Viewers", "text/html", getter_Copies(contractId));
+   if (NS_FAILED(rv))
+     return rv;
+ 
+   nsCOMPtr<nsIDocumentLoaderFactory> docFactory(do_GetService(contractId));
+   if (docFactory) {
+     // generate (about:blank) document to load
+-    docFactory->CreateBlankDocument(mLoadGroup, getter_AddRefs(blankDoc));
++    docFactory->CreateBlankDocument(mLoadGroup, aPrincipal,
++                                    getter_AddRefs(blankDoc));
+     if (blankDoc) {
+       blankDoc->SetContainer(NS_STATIC_CAST(nsIDocShell *, this));
+ 
+       // create a content viewer for us and the new document
+       docFactory->CreateInstanceForDocument(NS_ISUPPORTS_CAST(nsIDocShell *, this),
+                     blankDoc, "view", getter_AddRefs(viewer));
+ 
+       // hook 'em up
+@@ -6537,17 +6534,17 @@ nsDocShell::InternalLoad(nsIURI * aURI,
+         // Disallow external chrome: loads targetted at content windows
+         PRBool isChrome = PR_FALSE;
+         if (NS_SUCCEEDED(aURI->SchemeIs("chrome", &isChrome)) && isChrome) {
+             NS_WARNING("blocked external chrome: url -- use '-chrome' option");
+             return NS_ERROR_FAILURE;
+         }
+ 
+         // clear the decks to prevent context bleed-through (bug 298255)
+-        rv = CreateAboutBlankContentViewer();
++        rv = CreateAboutBlankContentViewer(nsnull);
+         if (NS_FAILED(rv))
+             return NS_ERROR_FAILURE;
+ 
+         // reset loadType so we don't have to add lots of tests for
+         // LOAD_NORMAL_EXTERNAL after this point
+         aLoadType = LOAD_NORMAL;
+     }
+ 
+@@ -7819,17 +7816,17 @@ nsDocShell::LoadHistoryEntry(nsISHEntry 
+     nsCOMPtr<nsISHEntry> kungFuDeathGrip(aEntry);
+     PRBool isJS;
+     nsresult rv = uri->SchemeIs("javascript", &isJS);
+     if (NS_FAILED(rv) || isJS) {
+         // We're loading a URL that will execute script from inside asyncOpen.
+         // Replace the current document with about:blank now to prevent
+         // anything from the current document from leaking into any JavaScript
+         // code in the URL.
+-        rv = CreateAboutBlankContentViewer();
++        rv = CreateAboutBlankContentViewer(nsnull);
+ 
+         if (NS_FAILED(rv)) {
+             // The creation of the intermittent about:blank content
+             // viewer failed for some reason (potentially because the
+             // user prevented it). Interrupt the history load.
+             return NS_OK;
+         }
+ 
+Index: xpfe/components/directory/nsDirectoryViewer.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/xpfe/components/directory/nsDirectoryViewer.cpp,v
+retrieving revision 1.126
+diff -u -p -d -8 -r1.126 nsDirectoryViewer.cpp
+--- xpfe/components/directory/nsDirectoryViewer.cpp	14 Aug 2006 22:36:15 -0000	1.126
++++ xpfe/components/directory/nsDirectoryViewer.cpp	28 Sep 2006 15:20:51 -0000
+@@ -1503,14 +1503,15 @@ nsDirectoryViewerFactory::CreateInstance
+                                                     nsIContentViewer** aDocViewerResult)
+ {
+   NS_NOTYETIMPLEMENTED("didn't expect to get here");
+   return NS_ERROR_NOT_IMPLEMENTED;
+ }
+ 
+ NS_IMETHODIMP
+ nsDirectoryViewerFactory::CreateBlankDocument(nsILoadGroup *aLoadGroup,
++                                              nsIPrincipal *aPrincipal,
+                                               nsIDocument **_retval) {
+ 
+   NS_NOTYETIMPLEMENTED("didn't expect to get here");
+   return NS_ERROR_NOT_IMPLEMENTED;
+ }
+ 

@@ -1,0 +1,28 @@
+diff --git a/mail/extensions/smime/content/msgHdrViewSMIMEOverlay.js b/mail/extensions/smime/content/msgHdrViewSMIMEOverlay.js
+--- a/mail/extensions/smime/content/msgHdrViewSMIMEOverlay.js
++++ b/mail/extensions/smime/content/msgHdrViewSMIMEOverlay.js
+@@ -112,22 +112,22 @@ var smimeHeaderSink =
+     {
+       gEncryptedUINode.setAttribute("encrypted", "ok");
+       gStatusBar.setAttribute("encrypted", "ok");
+     }
+     else
+     {
+       gEncryptedUINode.setAttribute("encrypted", "notok");
+       gStatusBar.setAttribute("encrypted", "notok");
+     }
+-    
++
+     if (gEncryptedURIService)
+     {
+-      gMyLastEncryptedURI = GetLoadedMessage();
++      gMyLastEncryptedURI = gFolderDisplay.selectedMessageUris[0];
+       gEncryptedURIService.rememberEncrypted(gMyLastEncryptedURI);
+     }
+ 
+     switch (aEncryptionStatus)
+     {
+     case nsICMSMessageErrors.SUCCESS:
+     case nsICMSMessageErrors.ENCRYPT_INCOMPLETE:
+       break;
+     default:

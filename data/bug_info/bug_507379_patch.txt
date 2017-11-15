@@ -1,0 +1,31 @@
+From: timeless@mozdev.org
+
+Bug 507379 hostname from SSL_RevealURL is null checked too late [@ nsDependentCString - nsNSSBadCertHandler]
+r=kaie
+
+
+diff --git a/security/manager/ssl/src/nsNSSIOLayer.cpp b/security/manager/ssl/src/nsNSSIOLayer.cpp
+--- a/security/manager/ssl/src/nsNSSIOLayer.cpp
++++ b/security/manager/ssl/src/nsNSSIOLayer.cpp
+@@ -3225,8 +3225,11 @@ nsNSSBadCertHandler(void *arg, PRFileDes
+   PRErrorCode errorCodeTrust = SECSuccess;
+   PRErrorCode errorCodeMismatch = SECSuccess;
+   PRErrorCode errorCodeExpired = SECSuccess;
+-  
++
+   char *hostname = SSL_RevealURL(sslSocket);
++  if (!hostname)
++    return cancel_and_failure(infoObject);
++
+   charCleaner hostnameCleaner(hostname); 
+   nsDependentCString hostString(hostname);
+ 
+@@ -3240,7 +3243,7 @@ nsNSSBadCertHandler(void *arg, PRFileDes
+   NS_ConvertUTF8toUTF16 hostWithPortStringUTF16(hostWithPortString);
+ 
+   // Check the name field against the desired hostname.
+-  if (hostname && hostname[0] &&
++  if (hostname[0] &&
+       CERT_VerifyCertName(peerCert, hostname) != SECSuccess) {
+     collected_errors |= nsICertOverrideService::ERROR_MISMATCH;
+     errorCodeMismatch = SSL_ERROR_BAD_CERT_DOMAIN;

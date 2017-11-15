@@ -1,0 +1,223 @@
+Index: caps/include/nsPrincipal.h
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/caps/include/nsPrincipal.h,v
+retrieving revision 1.17
+diff -u -p -d -8 -r1.17 nsPrincipal.h
+--- caps/include/nsPrincipal.h	22 Jul 2005 19:05:39 -0000	1.17
++++ caps/include/nsPrincipal.h	2 May 2006 20:54:08 -0000
+@@ -133,16 +133,17 @@ protected:
+   // cost of keeping a certificate, this is a good tradeoff though since
+   // it is very rare that we actually have a certificate.
+   nsAutoPtr<Certificate> mCert;
+ 
+   DomainPolicy* mSecurityPolicy;
+ 
+   nsCOMPtr<nsIURI> mCodebase;
+   nsCOMPtr<nsIURI> mDomain;
++  nsCOMPtr<nsIURI> mOrigin;
+   PRPackedBool mTrusted;
+   PRPackedBool mInitialized;
+ };
+ 
+ 
+ #define NS_PRINCIPAL_CLASSNAME  "principal"
+ #define NS_PRINCIPAL_CONTRACTID "@mozilla.org/principal;1"
+ #define NS_PRINCIPAL_CID \
+Index: caps/src/nsPrincipal.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/caps/src/nsPrincipal.cpp,v
+retrieving revision 1.41
+diff -u -p -d -8 -r1.41 nsPrincipal.cpp
+--- caps/src/nsPrincipal.cpp	30 Mar 2006 18:40:38 -0000	1.41
++++ caps/src/nsPrincipal.cpp	2 May 2006 21:22:54 -0000
+@@ -110,16 +110,19 @@ nsPrincipal::Init(const nsACString& aCer
+ {
+   NS_ENSURE_STATE(!mInitialized);
+   NS_ENSURE_ARG(!aCertFingerprint.IsEmpty() || aCodebase); // better have one of these.
+ 
+   mInitialized = PR_TRUE;
+ 
+   mCodebase = aCodebase;
+ 
++  // Invalidate our cached origin
++  mOrigin = nsnull;
++
+   nsresult rv;
+   if (!aCertFingerprint.IsEmpty()) {
+     rv = SetCertificate(aCertFingerprint, aSubjectName, aPrettyName, aCert);
+     if (NS_SUCCEEDED(rv)) {
+       rv = mJSPrincipals.Init(this, mCert->fingerprint.get());
+     }
+   }
+   else {
+@@ -160,45 +163,51 @@ nsPrincipal::GetJSPrincipals(JSContext *
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsPrincipal::GetOrigin(char **aOrigin)
+ {
+   *aOrigin = nsnull;
+ 
+-  nsIURI* uri = mDomain ? mDomain : mCodebase;
+-  if (!uri) {
++  if (!mOrigin) {
++    nsIURI* uri = mDomain ? mDomain : mCodebase;
++    if (uri) {
++      mOrigin = NS_GetInnermostURI(uri);
++    }
++  }
++  
++  if (!mOrigin) {
+     NS_ASSERTION(mCert, "No Domain or Codebase for a non-cert principal");
+     return NS_ERROR_FAILURE;
+   }
+ 
+   nsCAutoString hostPort;
+ 
+   // chrome: URLs don't have a meaningful origin, so make
+   // sure we just get the full spec for them.
+   // XXX this should be removed in favor of the solution in
+   // bug 160042.
+   PRBool isChrome;
+-  nsresult rv = uri->SchemeIs("chrome", &isChrome);
++  nsresult rv = mOrigin->SchemeIs("chrome", &isChrome);
+   if (NS_SUCCEEDED(rv) && !isChrome) {
+-    rv = uri->GetHostPort(hostPort);
++    rv = mOrigin->GetHostPort(hostPort);
+   }
+ 
+   if (NS_SUCCEEDED(rv) && !isChrome) {
+     nsCAutoString scheme;
+-    rv = uri->GetScheme(scheme);
++    rv = mOrigin->GetScheme(scheme);
+     NS_ENSURE_SUCCESS(rv, rv);
+     *aOrigin = ToNewCString(scheme + NS_LITERAL_CSTRING("://") + hostPort);
+   }
+   else {
+     // Some URIs (e.g., nsSimpleURI) don't support host. Just
+     // get the full spec.
+     nsCAutoString spec;
+-    rv = uri->GetSpec(spec);
++    rv = mOrigin->GetSpec(spec);
+     NS_ENSURE_SUCCESS(rv, rv);
+     *aOrigin = ToNewCString(spec);
+   }
+ 
+   return *aOrigin ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
+ }
+ 
+ NS_IMETHODIMP
+@@ -522,16 +531,19 @@ nsPrincipal::GetURI(nsIURI** aURI)
+ 
+   return NS_OK;
+ }
+ 
+ void
+ nsPrincipal::SetURI(nsIURI* aURI)
+ {
+   mCodebase = aURI;
++
++  // Invalidate our cached origin
++  mOrigin = nsnull;
+ }
+ 
+ 
+ nsresult
+ nsPrincipal::SetCertificate(const nsACString& aFingerprint,
+                             const nsACString& aSubjectName,
+                             const nsACString& aPrettyName,
+                             nsISupports* aCert)
+@@ -620,16 +632,19 @@ nsPrincipal::GetDomain(nsIURI** aDomain)
+ 
+ NS_IMETHODIMP
+ nsPrincipal::SetDomain(nsIURI* aDomain)
+ {
+   mDomain = aDomain;
+   // Domain has changed, forget cached security policy
+   SetSecurityPolicy(nsnull);
+ 
++  // Invalidate our cached origin
++  mOrigin = nsnull;
++
+   return NS_OK;
+ }
+ 
+ nsresult
+ nsPrincipal::InitFromPersistent(const char* aPrefName,
+                                 const nsCString& aToken,
+                                 const nsCString& aSubjectName,
+                                 const nsACString& aPrettyName,
+@@ -658,16 +673,19 @@ nsPrincipal::InitFromPersistent(const ch
+   else {
+     rv = NS_NewURI(getter_AddRefs(mCodebase), aToken, nsnull);
+     if (NS_FAILED(rv)) {
+       NS_ERROR("Malformed URI in capability.principal preference.");
+       return rv;
+     }
+ 
+     mTrusted = aTrusted;
++
++    // Invalidate our cached origin
++    mOrigin = nsnull;
+   }
+ 
+   rv = mJSPrincipals.Init(this, aToken.get());
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   //-- Save the preference name
+   mPrefName = aPrefName;
+ 
+Index: caps/src/nsScriptSecurityManager.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/caps/src/nsScriptSecurityManager.cpp,v
+retrieving revision 1.299
+diff -u -p -d -8 -r1.299 nsScriptSecurityManager.cpp
+--- caps/src/nsScriptSecurityManager.cpp	4 May 2006 15:23:43 -0000	1.299
++++ caps/src/nsScriptSecurityManager.cpp	5 May 2006 20:10:20 -0000
+@@ -893,16 +893,21 @@ nsScriptSecurityManager::CheckSameOrigin
+             return NS_OK;
+     }
+ 
+     // Allow access to about:blank, except from null principals (which
+     // never have access to anything but themselves).  If SchemeIs
+     // fails, just deny access -- better safe than sorry.
+     // XXXbz when this gets removed, also remove the asymmetry between
+     // aSourceURI and aTargetURI in SecurityCompareURIs.    
++    // XXXbz once this is removed, we can probably just make
++    // nsPrincipal::Equals call CheckSameOriginPrincipal(), which will also
++    // make sure it hits the domain check above.  At the same time as we remove
++    // this we should also be able to remove the about:blank hackery in
++    // nsPrincipal::Subsumes.
+     PRBool nullSubject = PR_FALSE;
+     // Subject URI could be null here.... 
+     if (subjectURI) {
+         rv = subjectURI->SchemeIs(NS_NULLPRINCIPAL_SCHEME, &nullSubject);
+     }
+     if (NS_SUCCEEDED(rv) && !nullSubject) {
+         nsXPIDLCString origin;
+         rv = aObject->GetOrigin(getter_Copies(origin));
+@@ -985,23 +990,16 @@ nsScriptSecurityManager::LookupPolicy(ns
+             return rv;
+  
+         char *start = origin.BeginWriting();
+         const char *nextToLastDot = nsnull;
+         const char *lastDot = nsnull;
+         const char *colon = nsnull;
+         char *p = start;
+ 
+-        //-- skip (nested) jar schemes to reach the "real" URI
+-        // FIXME: bug 327241 -- that's not what we do in SecurityCompareURIs!
+-        // We should do something more like that, except I guess this is faster
+-        // than QI followed by getter, etc... :(
+-        while (*p == 'j' && *(++p) == 'a' && *(++p) == 'r' && *(++p) == ':')
+-            start = ++p;
+-        
+         //-- search domain (stop at the end of the string or at the 3rd slash)
+         for (PRUint32 slashes=0; *p; p++)
+         {
+             if (*p == '/' && ++slashes == 3) 
+             {
+                 *p = '\0'; // truncate at 3rd slash
+                 break;
+             }

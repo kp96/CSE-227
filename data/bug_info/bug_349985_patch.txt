@@ -1,0 +1,290 @@
+# HG changeset patch
+
+Bug 349985: about: needs privileges to xpconnect. Original patch by Mike Hommey. r=bzbarsky
+
+diff --git a/docshell/base/nsAboutRedirector.cpp b/docshell/base/nsAboutRedirector.cpp
+--- a/docshell/base/nsAboutRedirector.cpp
++++ b/docshell/base/nsAboutRedirector.cpp
+@@ -59,16 +59,18 @@ struct RedirEntry {
+   URI_SAFE_FOR_UNTRUSTED_CONTENT in the third argument to each map item below
+   unless your about: page really needs chrome privileges. Security review is
+   required before adding new map entries without
+   URI_SAFE_FOR_UNTRUSTED_CONTENT.  Also note, however, that adding
+   URI_SAFE_FOR_UNTRUSTED_CONTENT will allow random web sites to link to that
+   URI.  Perhaps we should separate the two concepts out...
+  */
+ static RedirEntry kRedirMap[] = {
++    { "", "chrome://global/content/about.xhtml",
++      nsIAboutModule::ALLOW_SCRIPT },
+     { "about", "chrome://global/content/aboutAbout.xhtml", 0 },
+     { "credits", "http://www.mozilla.org/credits/",
+       nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT },
+     { "mozilla", "chrome://global/content/mozilla.xhtml",
+       nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT },
+     { "plugins", "chrome://global/content/plugins.html", 0 },
+     { "config", "chrome://global/content/config.xul", 0 },
+ #ifdef MOZ_CRASHREPORTER
+diff --git a/docshell/build/nsDocShellModule.cpp b/docshell/build/nsDocShellModule.cpp
+--- a/docshell/build/nsDocShellModule.cpp
++++ b/docshell/build/nsDocShellModule.cpp
+@@ -166,16 +166,17 @@ const mozilla::Module::CIDEntry kDocShel
+   { &kNS_DOWNLOADHISTORY_CID, false, NULL, nsDownloadHistoryConstructor },
+   { NULL }
+ };
+ 
+ const mozilla::Module::ContractIDEntry kDocShellContracts[] = {
+   { "@mozilla.org/docshell;1", &kNS_DOCSHELL_CID },
+   { NS_URIFIXUP_CONTRACTID, &kNS_DEFAULTURIFIXUP_CID },
+   { NS_WEBNAVIGATION_INFO_CONTRACTID, &kNS_WEBNAVIGATION_INFO_CID },
++  { NS_ABOUT_MODULE_CONTRACTID_PREFIX "", &kNS_ABOUT_REDIRECTOR_MODULE_CID },
+   { NS_ABOUT_MODULE_CONTRACTID_PREFIX "about", &kNS_ABOUT_REDIRECTOR_MODULE_CID },
+   { NS_ABOUT_MODULE_CONTRACTID_PREFIX "config", &kNS_ABOUT_REDIRECTOR_MODULE_CID },
+ #ifdef MOZ_CRASHREPORTER
+   { NS_ABOUT_MODULE_CONTRACTID_PREFIX "crashes", &kNS_ABOUT_REDIRECTOR_MODULE_CID },
+ #endif
+   { NS_ABOUT_MODULE_CONTRACTID_PREFIX "credits", &kNS_ABOUT_REDIRECTOR_MODULE_CID },
+   { NS_ABOUT_MODULE_CONTRACTID_PREFIX "plugins", &kNS_ABOUT_REDIRECTOR_MODULE_CID },
+   { NS_ABOUT_MODULE_CONTRACTID_PREFIX "mozilla", &kNS_ABOUT_REDIRECTOR_MODULE_CID },
+diff --git a/toolkit/content/about.xhtml b/toolkit/content/about.xhtml
+--- a/toolkit/content/about.xhtml
++++ b/toolkit/content/about.xhtml
+@@ -63,19 +63,17 @@
+       <img src="about:logo" alt="&brandShortName;"/>
+ #expand <p id="version">&about.version; __MOZ_APP_VERSION__</p>
+     </a>
+   </div>
+ 
+   <ul id="aboutPageList">
+     <li>&about.credits.beforeLink;<a href="about:credits">&about.credits.linkTitle;</a>&about.credits.afterLink;</li>
+     <li>&about.license.beforeTheLink;<a href="about:license">&about.license.linkTitle;</a>&about.license.afterTheLink;</li>
+-    <!-- Release notes link removed pending fix for bug 349985
+     <li>&about.relnotes.beforeTheLink;<a id="releaseNotesURL" href="">&about.relnotes.linkTitle;</a>&about.relnotes.afterTheLink;</li>
+-    -->
+     <li>&about.buildconfig.beforeTheLink;<a href="about:buildconfig">&about.buildconfig.linkTitle;</a>&about.buildconfig.afterTheLink;</li>
+     <script type="application/javascript">
+       // get release notes URL from prefs
+       try {
+         var formatter = Components.classes["@mozilla.org/toolkit/URLFormatterService;1"]
+                                   .getService(Components.interfaces.nsIURLFormatter);
+         var releaseNotesURL = formatter.formatURLPref("app.releaseNotesURL");
+         var relnotes = document.getElementById("releaseNotesURL");
+diff --git a/xpfe/appshell/src/Makefile.in b/xpfe/appshell/src/Makefile.in
+--- a/xpfe/appshell/src/Makefile.in
++++ b/xpfe/appshell/src/Makefile.in
+@@ -55,17 +55,16 @@ LIBXUL_LIBRARY	= 1
+ CPPSRCS		= \
+ 		nsChromeTreeOwner.cpp \
+ 		nsContentTreeOwner.cpp \
+ 		nsXULWindow.cpp \
+ 		nsAppShellService.cpp \
+ 		nsAppShellWindowEnumerator.cpp \
+ 		nsWebShellWindow.cpp \
+ 		nsWindowMediator.cpp \
+-		nsAbout.cpp \
+ 		nsAppShellFactory.cpp \
+ 		$(NULL)
+ 
+ ifeq (,$(filter-out WINCE WINNT,$(OS_ARCH)))
+ EXTRA_DSO_LIBS	= gkgfx
+ endif
+ 
+ EXTRA_DSO_LDOPTS = \
+diff --git a/xpfe/appshell/src/nsAbout.cpp b/xpfe/appshell/src/nsAbout.cpp
+deleted file mode 100644
+--- a/xpfe/appshell/src/nsAbout.cpp
++++ /dev/null
+@@ -1,84 +0,0 @@
+-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+-/* ***** BEGIN LICENSE BLOCK *****
+- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
+- *
+- * The contents of this file are subject to the Mozilla Public License Version
+- * 1.1 (the "License"); you may not use this file except in compliance with
+- * the License. You may obtain a copy of the License at
+- * http://www.mozilla.org/MPL/
+- *
+- * Software distributed under the License is distributed on an "AS IS" basis,
+- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
+- * for the specific language governing rights and limitations under the
+- * License.
+- *
+- * The Original Code is mozilla.org code.
+- *
+- * The Initial Developer of the Original Code is
+- * Netscape Communications Corporation.
+- * Portions created by the Initial Developer are Copyright (C) 1998
+- * the Initial Developer. All Rights Reserved.
+- *
+- * Contributor(s):
+- *
+- * Alternatively, the contents of this file may be used under the terms of
+- * either of the GNU General Public License Version 2 or later (the "GPL"),
+- * or the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
+- * in which case the provisions of the GPL or the LGPL are applicable instead
+- * of those above. If you wish to allow use of your version of this file only
+- * under the terms of either the GPL or the LGPL, and not to allow others to
+- * use your version of this file under the terms of the MPL, indicate your
+- * decision by deleting the provisions above and replace them with the notice
+- * and other provisions required by the GPL or the LGPL. If you do not delete
+- * the provisions above, a recipient may use your version of this file under
+- * the terms of any one of the MPL, the GPL or the LGPL.
+- *
+- * ***** END LICENSE BLOCK ***** */
+-
+-#include "nsAbout.h"
+-#include "nsIIOService.h"
+-#include "nsIServiceManager.h"
+-#include "nsIChannel.h"
+-#include "nsCOMPtr.h"
+-#include "nsIURI.h"
+-#include "nsNetCID.h"
+-#include "nsIScriptSecurityManager.h"
+-#include "nsLiteralString.h"
+-
+-NS_IMPL_ISUPPORTS1(nsAbout, nsIAboutModule)
+-
+-static const char kURI[] = "chrome://global/content/about.xhtml";
+-
+-NS_IMETHODIMP
+-nsAbout::NewChannel(nsIURI *aURI, nsIChannel **result)
+-{
+-    nsresult rv;
+-    nsCOMPtr<nsIIOService> ioService(do_GetService(NS_IOSERVICE_CONTRACTID, &rv));
+-    NS_ENSURE_SUCCESS(rv, rv);
+-
+-    nsCOMPtr<nsIChannel> tempChannel;
+-    rv = ioService->NewChannel(NS_LITERAL_CSTRING(kURI), nsnull, nsnull, 
+-                               getter_AddRefs(tempChannel));
+-    NS_ENSURE_SUCCESS(rv, rv);
+-
+-    nsCOMPtr<nsIScriptSecurityManager> securityManager = 
+-             do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID, &rv);
+-    NS_ENSURE_SUCCESS(rv, rv);
+-
+-    nsCOMPtr<nsIPrincipal> principal;
+-    rv = securityManager->GetCodebasePrincipal(aURI, getter_AddRefs(principal));
+-    NS_ENSURE_SUCCESS(rv, rv);
+-
+-    nsCOMPtr<nsISupports> owner = do_QueryInterface(principal);
+-    rv = tempChannel->SetOwner(owner);
+-    *result = tempChannel.get();
+-    NS_ADDREF(*result);
+-    return rv;
+-}
+-
+-NS_IMETHODIMP
+-nsAbout::GetURIFlags(nsIURI *aURI, PRUint32 *result)
+-{
+-    *result = nsIAboutModule::ALLOW_SCRIPT;
+-    return NS_OK;
+-}
+diff --git a/xpfe/appshell/src/nsAbout.h b/xpfe/appshell/src/nsAbout.h
+deleted file mode 100644
+--- a/xpfe/appshell/src/nsAbout.h
++++ /dev/null
+@@ -1,58 +0,0 @@
+-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
+-/* ***** BEGIN LICENSE BLOCK *****
+- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
+- *
+- * The contents of this file are subject to the Mozilla Public License Version
+- * 1.1 (the "License"); you may not use this file except in compliance with
+- * the License. You may obtain a copy of the License at
+- * http://www.mozilla.org/MPL/
+- *
+- * Software distributed under the License is distributed on an "AS IS" basis,
+- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
+- * for the specific language governing rights and limitations under the
+- * License.
+- *
+- * The Original Code is mozilla.org code.
+- *
+- * The Initial Developer of the Original Code is
+- * Netscape Communications Corporation.
+- * Portions created by the Initial Developer are Copyright (C) 1998
+- * the Initial Developer. All Rights Reserved.
+- *
+- * Contributor(s):
+- *
+- * Alternatively, the contents of this file may be used under the terms of
+- * either of the GNU General Public License Version 2 or later (the "GPL"),
+- * or the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
+- * in which case the provisions of the GPL or the LGPL are applicable instead
+- * of those above. If you wish to allow use of your version of this file only
+- * under the terms of either the GPL or the LGPL, and not to allow others to
+- * use your version of this file under the terms of the MPL, indicate your
+- * decision by deleting the provisions above and replace them with the notice
+- * and other provisions required by the GPL or the LGPL. If you do not delete
+- * the provisions above, a recipient may use your version of this file under
+- * the terms of any one of the MPL, the GPL or the LGPL.
+- *
+- * ***** END LICENSE BLOCK ***** */
+-
+-#ifndef nsAbout_h_
+-#define nsAbout_h_
+-
+-#include "nsIAboutModule.h"
+-
+-#define NS_ABOUT_CID                                                           \
+-{ /* {1f1ce501-663a-11d3-b7a0-be426e4e69bc} */                                 \
+-0x1f1ce501, 0x663a, 0x11d3, { 0xb7, 0xa0, 0xbe, 0x42, 0x6e, 0x4e, 0x69, 0xbc } \
+-}
+-
+-class nsAbout : public nsIAboutModule
+-{
+-public:
+-    NS_DECL_ISUPPORTS
+-    NS_DECL_NSIABOUTMODULE
+-
+-    nsAbout() {}
+-    virtual ~nsAbout() {}
+-};
+-
+-#endif // nsAbout_h_
+diff --git a/xpfe/appshell/src/nsAppShellFactory.cpp b/xpfe/appshell/src/nsAppShellFactory.cpp
+--- a/xpfe/appshell/src/nsAppShellFactory.cpp
++++ b/xpfe/appshell/src/nsAppShellFactory.cpp
+@@ -33,43 +33,38 @@
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "mozilla/ModuleUtils.h"
+ #include "nscore.h"
+ #include "nsIWindowMediator.h"
+-#include "nsAbout.h"
+ 
+ #include "nsIAppShellService.h"
+ #include "nsAppShellService.h"
+ #include "nsWindowMediator.h"
+ #include "nsChromeTreeOwner.h"
+ #include "nsAppShellCID.h"
+ 
+ NS_GENERIC_FACTORY_CONSTRUCTOR(nsAppShellService)
+-NS_GENERIC_FACTORY_CONSTRUCTOR(nsAbout)
+ NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsWindowMediator, Init)
+ 
+ NS_DEFINE_NAMED_CID(NS_APPSHELLSERVICE_CID);
+ NS_DEFINE_NAMED_CID(NS_WINDOWMEDIATOR_CID);
+-NS_DEFINE_NAMED_CID(NS_ABOUT_CID);
+ 
+ static const mozilla::Module::CIDEntry kAppShellCIDs[] = {
+   { &kNS_APPSHELLSERVICE_CID, false, NULL, nsAppShellServiceConstructor },
+   { &kNS_WINDOWMEDIATOR_CID, false, NULL, nsWindowMediatorConstructor },
+-  { &kNS_ABOUT_CID, false, NULL, nsAboutConstructor },
+   { NULL }
+ };
+ 
+ static const mozilla::Module::ContractIDEntry kAppShellContracts[] = {
+   { NS_APPSHELLSERVICE_CONTRACTID, &kNS_APPSHELLSERVICE_CID },
+   { NS_WINDOWMEDIATOR_CONTRACTID, &kNS_WINDOWMEDIATOR_CID },
+-  { NS_ABOUT_MODULE_CONTRACTID_PREFIX, &kNS_ABOUT_CID },
+   { NULL }
+ };
+ 
+ static nsresult
+ nsAppShellModuleConstructor()
+ {
+   return nsChromeTreeOwner::InitGlobals();
+ }

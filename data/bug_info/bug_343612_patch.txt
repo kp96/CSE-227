@@ -1,0 +1,96 @@
+? patch.patch
+Index: password.js
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/password.js,v
+retrieving revision 1.21
+diff -U12 -r1.21 password.js
+--- password.js	9 Jan 2005 11:41:54 -0000	1.21
++++ password.js	5 Jul 2006 19:26:30 -0000
+@@ -33,25 +33,25 @@
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ const nsPK11TokenDB = "@mozilla.org/security/pk11tokendb;1";
+ const nsIPK11TokenDB = Components.interfaces.nsIPK11TokenDB;
+ const nsIDialogParamBlock = Components.interfaces.nsIDialogParamBlock;
+ const nsPKCS11ModuleDB = "@mozilla.org/security/pkcs11moduledb;1";
+ const nsIPKCS11ModuleDB = Components.interfaces.nsIPKCS11ModuleDB;
+ const nsIPKCS11Slot = Components.interfaces.nsIPKCS11Slot;
+ const nsIPK11Token = Components.interfaces.nsIPK11Token;
+-
++const nsIDialogParamBlock = Components.interfaces.nsIDialogParamBlock;
+ 
+ var params;
+ var tokenName="";
+ var pw1;
+ 
+ function onLoad()
+ {
+   document.documentElement.getButton("accept").disabled = true;
+ 
+   pw1 = document.getElementById("pw1");
+   try {
+      params = window.arguments[0].QueryInterface(nsIDialogParamBlock);
+Index: pref-masterpass.js
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/pref-masterpass.js,v
+retrieving revision 1.17
+diff -U12 -r1.17 pref-masterpass.js
+--- pref-masterpass.js	25 Apr 2004 15:02:32 -0000	1.17
++++ pref-masterpass.js	5 Jul 2006 08:28:57 -0000
+@@ -105,16 +105,17 @@
+ }
+ 
+ function ChangePW()
+ {
+   var params = Components.classes[nsDialogParamBlock].createInstance(nsIDialogParamBlock);
+   params.SetString(1,"");
+   window.openDialog("chrome://pippki/content/changepassword.xul","",
+                     "chrome,centerscreen,modal",params);
+ }
+ 
+ function ResetPW()
+ {
+-  window.open("chrome://pippki/content/resetpassword.xul",
+-              internal_token.tokenName,
+-              "chrome,centerscreen,modal");
++  var params = Components.classes[nsDialogParamBlock].createInstance(nsIDialogParamBlock);
++  params.SetString(1,internal_token.tokenName);
++  window.openDialog("chrome://pippki/content/resetpassword.xul", "",
++                    "chrome,centerscreen,modal", params);
+ }
+Index: resetpassword.js
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/resetpassword.js,v
+retrieving revision 1.8
+diff -U12 -r1.8 resetpassword.js
+--- resetpassword.js	22 Jun 2006 05:05:28 -0000	1.8
++++ resetpassword.js	5 Jul 2006 19:26:17 -0000
+@@ -27,24 +27,25 @@
+  * of those above. If you wish to allow use of your version of this file only
+  * under the terms of either the GPL or the LGPL, and not to allow others to
+  * use your version of this file under the terms of the MPL, indicate your
+  * decision by deleting the provisions above and replace them with the notice
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ const nsPK11TokenDB = "@mozilla.org/security/pk11tokendb;1";
+ const nsIPK11TokenDB = Components.interfaces.nsIPK11TokenDB;
++const nsIDialogParamBlock = Components.interfaces.nsIDialogParamBlock;
+ 
+ var tokenName;
+ 
+ function onLoad()
+ {
+   if ("arguments" in window) {
+     var params = window.arguments[0].QueryInterface(nsIDialogParamBlock);
+     tokenName = params.GetString(1);
+   } else {
+     tokenName = self.name;
+   }
+ }

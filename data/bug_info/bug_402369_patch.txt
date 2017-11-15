@@ -1,0 +1,108 @@
+Index: browser/base/content/browser.js
+===================================================================
+RCS file: /cvsroot/mozilla/browser/base/content/browser.js,v
+retrieving revision 1.880
+diff -u -8 -p -r1.880 browser.js
+--- browser/base/content/browser.js	5 Nov 2007 20:26:53 -0000	1.880
++++ browser/base/content/browser.js	5 Nov 2007 22:52:35 -0000
+@@ -2308,17 +2308,17 @@ function BrowserImport()
+  */
+ function BrowserOnCommand(event) {
+     
+     // Don't trust synthetic events
+     if (!event.isTrusted)
+       return;
+     
+     // If the event came from an ssl error page, it is probably either the "Add
+-    // Exception" or "Get Me Out Of Here" button
++    // Exception…" or "Get me out of here!" button
+     if (/^about:neterror\?e=nssBadCert/.test(event.originalTarget.ownerDocument.documentURI)) {
+       var ot = event.originalTarget;
+       var errorDoc = ot.ownerDocument;
+       
+       if (ot == errorDoc.getElementById('exceptionDialogButton')) {
+         var params = { location : content.location.href,
+                        exceptionAdded : false };
+         window.openDialog('chrome://pippki/content/exceptionDialog.xul',
+Index: browser/locales/en-US/chrome/overrides/netError.dtd
+===================================================================
+RCS file: /cvsroot/mozilla/browser/locales/en-US/chrome/overrides/netError.dtd,v
+retrieving revision 1.12
+diff -u -8 -p -r1.12 netError.dtd
+--- browser/locales/en-US/chrome/overrides/netError.dtd	3 Nov 2007 18:49:47 -0000	1.12
++++ browser/locales/en-US/chrome/overrides/netError.dtd	5 Nov 2007 22:52:35 -0000
+@@ -151,23 +151,23 @@ be temporary, and you can try again late
+ ">
+ 
+ <!ENTITY phishingBlocked.title "Suspected Web Forgery!">
+ <!ENTITY phishingBlocked.longDesc "
+ <p>Entering any personal information on this page may result in identity theft or other fraud.</p>
+ <p>These types of web forgeries are used in scams known as phishing attacks, in which fraudulent web pages and emails are used to imitate sources you may trust.</p>
+ ">
+ 
+-<!ENTITY securityOverride.linkText "Or you can add an exception...">
+-<!ENTITY securityOverride.getMeOutOfHereButton "Get Me Out of Here">
+-<!ENTITY securityOverride.exceptionButtonLabel "Add Exception">
++<!ENTITY securityOverride.linkText "Or you can add an exception…">
++<!ENTITY securityOverride.getMeOutOfHereButton "Get me out of here!">
++<!ENTITY securityOverride.exceptionButtonLabel "Add Exception…">
+ 
+ <!-- LOCALIZATION NOTE (securityOverride.warningText) - Do not translate the
+ contents of the <xul:button> tags.  The only language content is the label= field,
+ which uses strings already defined above. The button is included here (instead of
+ netError.xhtml) because it exposes functionality specific to firefox. -->
+ 
+ <!ENTITY securityOverride.warningText "
+-<p>You should not add an exception if you are using an internet connection that you do not trust completely, or if you are not used to seeing a warning for this server.</p>
++<p>You should not add an exception if you are using an internet connection that you do not trust completely or if you are not used to seeing a warning for this server.</p>
+ 
+ <xul:button xmlns:xul='http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul' id='getMeOutOfHereButton' label='&securityOverride.getMeOutOfHereButton;'/>
+ <xul:button xmlns:xul='http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul' id='exceptionDialogButton' label='&securityOverride.exceptionButtonLabel;'/>
+ ">
+Index: camino/embed-replacements/locale/en-US/global/netError.dtd
+===================================================================
+RCS file: /cvsroot/mozilla/camino/embed-replacements/locale/en-US/global/netError.dtd,v
+retrieving revision 1.8
+diff -u -8 -p -r1.8 netError.dtd
+--- camino/embed-replacements/locale/en-US/global/netError.dtd	3 Nov 2007 18:49:48 -0000	1.8
++++ camino/embed-replacements/locale/en-US/global/netError.dtd	5 Nov 2007 22:52:35 -0000
+@@ -68,14 +68,14 @@ Attack sites try to install programs tha
+ ">
+ 
+ <!ENTITY phishingBlocked.title "Suspected Web Forgery!">
+ <!ENTITY phishingBlocked.longDesc "
+ <p>Entering any personal information on this page may result in identity theft or other fraud.</p>
+ <p>These types of web forgeries are used in scams known as phishing attacks, in which fraudulent web pages and emails are used to imitate sources you may trust.</p>
+ ">
+ 
+-<!ENTITY securityOverride.linkText "Or you can add an exception...">
++<!ENTITY securityOverride.linkText "Or you can add an exception…">
+ <!ENTITY securityOverride.warningText "
+-<p>You should not add an exception if you are using an internet connection that you do not trust completely, or if you are not used to seeing a warning for this server.</p>
++<p>You should not add an exception if you are using an internet connection that you do not trust completely or if you are not used to seeing a warning for this server.</p>
+ <p>If you still wish to add an exception for this site, you can do so in your advanced encryption settings.</p>
+ ">
+ 
+Index: dom/locales/en-US/chrome/netError.dtd
+===================================================================
+RCS file: /cvsroot/mozilla/dom/locales/en-US/chrome/netError.dtd,v
+retrieving revision 1.12
+diff -u -8 -p -r1.12 netError.dtd
+--- dom/locales/en-US/chrome/netError.dtd	3 Nov 2007 18:49:48 -0000	1.12
++++ dom/locales/en-US/chrome/netError.dtd	5 Nov 2007 22:52:35 -0000
+@@ -68,13 +68,13 @@
+ ">
+ 
+ <!ENTITY phishingBlocked.title "Suspected Web Forgery!">
+ <!ENTITY phishingBlocked.longDesc "
+ <p>Entering any personal information on this page may result in identity theft or other fraud.</p>
+ <p>These types of web forgeries are used in scams known as phishing attacks, in which fraudulent web pages and emails are used to imitate sources you may trust.</p>
+ ">
+ 
+-<!ENTITY securityOverride.linkText "Or you can add an exception...">
++<!ENTITY securityOverride.linkText "Or you can add an exception…">
+ <!ENTITY securityOverride.warningText "
+-<p>You should not add an exception if you are using an internet connection that you do not trust completely, or if you are not used to seeing a warning for this server.</p>
++<p>You should not add an exception if you are using an internet connection that you do not trust completely or if you are not used to seeing a warning for this server.</p>
+ <p>If you still wish to add an exception for this site, you can do so in your advanced encryption settings.</p>
+ ">

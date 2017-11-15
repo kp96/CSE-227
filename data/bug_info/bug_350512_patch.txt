@@ -1,0 +1,66 @@
+16x CERT_CheckOCSPStatus
+12x trySendAndReceiveFcn
+
+CERT_CheckOCSPStatus subject CN=kuix.de,OU=Domain Control Validated - GeoTrust QuickSSL Premium(R),OU=See www.geotrust.com/resources/cps (c)05,OU=https://services.choicepoint.net/get.jsp?GT67445402,O=kuix.de,C=DE issuer CN=Equifax Secure Global eBusiness CA-1,O=Equifax Secure Inc.,C=US serial 02:66:87
+
+CERT_CheckOCSPStatus subject CN=www.google.com,O=Google Inc,L=Mountain View,ST=California,C=US issuer CN=Thawte SGC CA,O=Thawte Consulting (Pty) Ltd.,C=ZA serial 4b:a5:ae:59:de:dd:1c:c7:80:7c:89:22:91:f0:e2:43
+
+1115699520[1185530]: nsNSSHttpRequestSession::trySendAndReceiveFcn to http://ocsp.thawte.com:80/
+
+CERT_CheckOCSPStatus subject CN=www.paypal.com,OU=Terms of use at www.verisign.com/rpa (c)00,OU=Information Systems,O=Paypal Inc.,L=Mountain View,ST=California,C=US issuer OU=www.verisign.com/CPS Incorp.by Ref. LIABILITY LTD.(c)97 VeriSign,OU=VeriSign International Server CA - Class 3,OU="VeriSign, Inc.",O=VeriSign Trust Network serial 32:13:0c:ce:04:a9:23:e9:84:f5:23:dc:b0:41:f8:8c
+
+1115699520[1185530]: nsNSSHttpRequestSession::trySendAndReceiveFcn to http://ocsp.verisign.com:80/
+
+CERT_CheckOCSPStatus subject CN=www.wellsfargo.com,OU=Terms of use at www.verisign.com/rpa (c)00,OU=ISG,O=Wells Fargo and Company,L=San Francisco,ST=California,C=US issuer OU=www.verisign.com/CPS Incorp.by Ref. LIABILITY LTD.(c)97 VeriSign,OU=VeriSign International Server CA - Class 3,OU="VeriSign, Inc.",O=VeriSign Trust Network serial 36:ef:d9:e8:38:bb:4a:ba:62:56:9b:bb:97:d3:21:56
+
+1115699520[1185530]: nsNSSHttpRequestSession::trySendAndReceiveFcn to http://ocsp.verisign.com:80/
+
+CERT_CheckOCSPStatus subject CN=us.etrade.com,OU=Terms of use at www.verisign.com/rpa (c)00,OU=Global Information Security,O=E-Trade Group Inc.,L=Alpharetta,ST=Georgia,C=US issuer OU=www.verisign.com/CPS Incorp.by Ref. LIABILITY LTD.(c)97 VeriSign,OU=VeriSign International Server CA - Class 3,OU="VeriSign, Inc.",O=VeriSign Trust Network serial 56:a9:00:63:a1:84:f2:58:bf:ab:a7:1f:2f:37:ca:36
+
+1115699520[1185530]: nsNSSHttpRequestSession::trySendAndReceiveFcn to http://ocsp.verisign.com:80/
+
+CERT_CheckOCSPStatus subject CN=mail.google.com,O=Google Inc,L=Mountain View,ST=California,C=US issuer CN=Thawte SGC CA,O=Thawte Consulting (Pty) Ltd.,C=ZA serial 21:3f:02:8b:a7:de:08:2b:92:36:f1:db:db:66:e4:46
+
+1115699520[1185530]: nsNSSHttpRequestSession::trySendAndReceiveFcn to http://ocsp.thawte.com:80/
+
+CERT_CheckOCSPStatus subject CN=www.paypalobjects.com,OU=Terms of use at www.verisign.com/rpa (c)00,OU=Information Systems,O="Paypal, Inc.",L=Mountain View,ST=California,C=US issuer OU=www.verisign.com/CPS Incorp.by Ref. LIABILITY LTD.(c)97 VeriSign,OU=VeriSign International Server CA - Class 3,OU="VeriSign, Inc.",O=VeriSign Trust Network serial 39:1e:18:46:c6:75:b5:b7:21:80:46:bf:16:d2:bd:d5
+
+1115699520[1185530]: nsNSSHttpRequestSession::trySendAndReceiveFcn to http://ocsp.verisign.com:80/
+
+CERT_CheckOCSPStatus subject CN=a248.e.akamai.net,ST=Massachusetts,L=Cambridge,O=Akamai Technologies Inc,C=US issuer CN=GTE CyberTrust Global Root,OU="GTE CyberTrust Solutions, Inc.",O=GTE Corporation,C=US serial 04:00:03:f8
+
+CERT_CheckOCSPStatus subject CN=www.wellsfargo.com,OU=Terms of use at www.verisign.com/rpa (c)00,OU=ISG,O=Wells Fargo and Company,L=San Francisco,ST=California,C=US issuer OU=www.verisign.com/CPS Incorp.by Ref. LIABILITY LTD.(c)97 VeriSign,OU=VeriSign International Server CA - Class 3,OU="VeriSign, Inc.",O=VeriSign Trust Network serial 36:ef:d9:e8:38:bb:4a:ba:62:56:9b:bb:97:d3:21:56
+
+1115699520[1185530]: nsNSSHttpRequestSession::trySendAndReceiveFcn to http://ocsp.verisign.com:80/
+
+CERT_CheckOCSPStatus subject CN=switch.atdmt.com,OU=Secure Link SSL,OU=Atlas,O=aQuantive Inc,STREET=821 2nd Avenue,STREET=18th Floor,L=Seattle,ST=Washington,postalCode=98104,C=US issuer CN=Network Solutions Certificate Authority,O=Network Solutions L.L.C.,C=US serial 18:56:63:fa:6b:c7:11:69:d8:c1:25:73:c2:11:7b:69
+
+CERT_CheckOCSPStatus subject CN=www.paypal.com,OU=Terms of use at www.verisign.com/rpa (c)00,OU=Information Systems,O=Paypal Inc.,L=Mountain View,ST=California,C=US issuer OU=www.verisign.com/CPS Incorp.by Ref. LIABILITY LTD.(c)97 VeriSign,OU=VeriSign International Server CA - Class 3,OU="VeriSign, Inc.",O=VeriSign Trust Network serial 32:13:0c:ce:04:a9:23:e9:84:f5:23:dc:b0:41:f8:8c
+
+1115699520[1185530]: nsNSSHttpRequestSession::trySendAndReceiveFcn to http://ocsp.verisign.com:80/
+1115699520[1185530]: nsNSSHttpRequestSession::trySendAndReceiveFcn - sleeping and retrying: 1 of 5
+1115699520[1185530]: nsNSSHttpRequestSession::trySendAndReceiveFcn - sleeping and retrying: 2 of 5
+1115699520[1185530]: nsNSSHttpRequestSession::trySendAndReceiveFcn - sleeping and retrying: 3 of 5
+1115699520[1185530]: nsNSSHttpRequestSession::trySendAndReceiveFcn - success at attempt 4
+
+CERT_CheckOCSPStatus subject CN=www.paypal.com,OU=Terms of use at www.verisign.com/rpa (c)00,OU=Information Systems,O=Paypal Inc.,L=Mountain View,ST=California,C=US issuer OU=www.verisign.com/CPS Incorp.by Ref. LIABILITY LTD.(c)97 VeriSign,OU=VeriSign International Server CA - Class 3,OU="VeriSign, Inc.",O=VeriSign Trust Network serial 32:13:0c:ce:04:a9:23:e9:84:f5:23:dc:b0:41:f8:8c
+
+1115699520[1185530]: nsNSSHttpRequestSession::trySendAndReceiveFcn to http://ocsp.verisign.com:80/
+
+CERT_CheckOCSPStatus subject CN=paypalssl.doubleclick.net,OU=Terms of use at www.verisign.com/rpa (c)00,OU=operation,O=doubleclick,L=New York,ST=New York,C=US issuer OU=www.verisign.com/CPS Incorp.by Ref. LIABILITY LTD.(c)97 VeriSign,OU=VeriSign International Server CA - Class 3,OU="VeriSign, Inc.",O=VeriSign Trust Network serial 4a:2a:f1:8e:ef:dc:4d:4d:77:d3:6b:fa:a0:61:4c:8e
+
+1115699520[1185530]: nsNSSHttpRequestSession::trySendAndReceiveFcn to http://ocsp.verisign.com:80/
+1115699520[1185530]: nsNSSHttpRequestSession::trySendAndReceiveFcn - sleeping and retrying: 1 of 5
+1115699520[1185530]: nsNSSHttpRequestSession::trySendAndReceiveFcn - success at attempt 2
+
+CERT_CheckOCSPStatus subject CN=securepics.ebaystatic.com,OU=Site Operations,O=eBay Inc.,L=San Jose,ST=California,C=US issuer CN=Akamai Subordinate CA 2,O=Akamai,C=US serial 03:96
+
+CERT_CheckOCSPStatus subject CN=dcs.etrade.com,OU=Terms of use at www.verisign.com/rpa (c)00,OU=Global Information Security,O=E-Trade Group Inc.,L=Alpharetta,ST=Georgia,C=US issuer OU=www.verisign.com/CPS Incorp.by Ref. LIABILITY LTD.(c)97 VeriSign,OU=VeriSign International Server CA - Class 3,OU="VeriSign, Inc.",O=VeriSign Trust Network serial 0b:33:eb:6e:92:bc:ea:9b:57:2b:dd:a0:1c:50:05:73
+
+1115699520[1185530]: nsNSSHttpRequestSession::trySendAndReceiveFcn to http://ocsp.verisign.com:80/
+
+CERT_CheckOCSPStatus subject CN=*.112.2o7.net,OU=Terms of use at www.verisign.com/rpa (c)05,OU=Network Operations,O="Omniture, Inc.",L=Orem,ST=Utah,C=US issuer OU=Secure Server Certification Authority,O="RSA Data Security, Inc.",C=US serial 38:b9:a5:3f:2e:90:3f:45:c5:c2:30:4b:7f:62:e7:df
+
+1115699520[1185530]: nsNSSHttpRequestSession::trySendAndReceiveFcn to http://ocsp.verisign.com:80/
+1115699520[1185530]: nsNSSHttpRequestSession::trySendAndReceiveFcn - sleeping and retrying: 1 of 5
+1115699520[1185530]: nsNSSHttpRequestSession::trySendAndReceiveFcn - success at attempt 2

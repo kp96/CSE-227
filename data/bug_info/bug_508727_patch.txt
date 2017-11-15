@@ -1,0 +1,101 @@
+Index: resources/localized/English.lproj/Localizable.strings.in
+===================================================================
+RCS file: /cvsroot/mozilla/camino/resources/localized/English.lproj/Localizable.strings.in,v
+retrieving revision 1.42
+diff -u -8 -r1.42 Localizable.strings.in
+--- resources/localized/English.lproj/Localizable.strings.in	25 Aug 2009 21:22:25 -0000	1.42
++++ resources/localized/English.lproj/Localizable.strings.in	2 Sep 2009 15:44:56 -0000
+@@ -535,8 +535,9 @@
+    paragraph in <p></p> tags.  Because these strings appear in an XHTML page, 
+    each LongDescText string must begin with a <p> and end with a </p> or the 
+    safe browsing page will not display. */
+ "PhishingLongDescText" = "<p>Phishing sites are designed to trick you into revealing personal or financial information by creating copies of trusted websites.</p><p>Entering any information on this web page may result in identity theft or other fraud.</p>";
+ "MalwareLongDescText" = "<p>Malware sites try to install programs that steal private information, use your computer to attack others, or damage your system.</p><p>Some malware sites intentionally distribute harmful software, but many are compromised without the knowledge or permission of their owners.</p><p>Your computer can be infected just by proceeding to this site, without any further action on your part.</p>";
+ "MoreInformationFormat" = "For more information about why this site was blocked, see Camino’s <a href='%@'>Safe Browsing Documentation</a>.";
+ "GetMeOutButtonLabel" = "Close Page";
+ "IgnoreWarningButtonLabel" = "Ignore this warning";
++"PhishReportingDisabledToolTip" = "“Warn me when visiting potentially malicious sites” must be enabled to report phishing pages.";
+Index: src/application/MainController.mm
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/application/MainController.mm,v
+retrieving revision 1.288
+diff -u -8 -r1.288 MainController.mm
+--- src/application/MainController.mm	1 Sep 2009 04:02:01 -0000	1.288
++++ src/application/MainController.mm	2 Sep 2009 15:45:00 -0000
+@@ -1918,32 +1918,47 @@
+       action == @selector(makeTextSmaller:) ||
+       action == @selector(makeTextDefaultSize:) ||
+       action == @selector(makePageBigger:) ||
+       action == @selector(makePageSmaller:) ||
+       action == @selector(makePageDefaultSize:) ||
+       action == @selector(viewPageSource:) ||
+       action == @selector(sendURL:) ||
+       action == @selector(printDocument:) ||
+-      action == @selector(pageSetup:) ||
+-      action == @selector(reportPhishingPage:))
++      action == @selector(pageSetup:))
+   {
+     if ([browserController shouldSuppressWindowActions])
+       return NO;
+     return (browserController && [browserController validateActionBySelector:action]);
+   }
+ 
+   if (action == @selector(checkForUpdates:) &&
+       ![[[NSBundle mainBundle] objectForInfoDictionaryKey:@"SUEnableAutomaticChecks"] boolValue])
+   {
+     // Disable update checking if it's been turned off for this build.
+     [aMenuItem setToolTip:NSLocalizedString(@"AutoUpdateDisabledToolTip", @"")];
+     return NO;
+   }
+ 
++  if (action == @selector(reportPhishingPage:)) {
++    if ([browserController shouldSuppressWindowActions])
++      return NO;
++
++    BOOL phishingCheckingIsEnabled = 
++      [[SafeBrowsingListManager sharedInstance] updatesAreEnabledInPrefsForListType:eSafeBrowsingPhishingListType];
++    if (phishingCheckingIsEnabled) {
++      [aMenuItem setToolTip:nil];
++      return (browserController && [browserController canReportCurrentPageAsPhishing]);
++    }
++    else {
++      [aMenuItem setToolTip:NSLocalizedString(@"PhishReportingDisabledToolTip", @"")];
++      return NO;
++    }
++  }
++
+   // default return
+   return YES;
+ }
+ 
+ - (void)menuNeedsUpdate:(NSMenu *)menu
+ {
+   // Contrary to what the docs say, this method is also called whenever a key
+   // equivalent is triggered anywhere in the application.
+Index: src/browser/BrowserWindowController.mm
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/browser/BrowserWindowController.mm,v
+retrieving revision 1.411
+diff -u -8 -r1.411 BrowserWindowController.mm
+--- src/browser/BrowserWindowController.mm	25 Aug 2009 21:22:25 -0000	1.411
++++ src/browser/BrowserWindowController.mm	2 Sep 2009 15:45:01 -0000
+@@ -1935,19 +1935,16 @@
+   }
+   if (action == @selector(printDocument:) ||
+       action == @selector(pageSetup:) ||
+       action == @selector(savePage:))
+   {
+     return (![self bookmarkManagerIsVisible] && ![[self browserWrapper] isBlockedErrorOverlayShowing]);
+   }
+ 
+-  if (action == @selector(reportPhishingPage:))
+-    return [self canReportCurrentPageAsPhishing];
+-
+   return YES;
+ }
+ 
+ - (BOOL)shouldSuppressWindowActions
+ {
+   return ([[self window] attachedSheet] || [mContentView tabThumbnailGridViewIsVisible]);
+ }
+ 

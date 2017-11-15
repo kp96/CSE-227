@@ -1,0 +1,740 @@
+# HG changeset patch
+# User Bobby Holley <bobbyholley@gmail.com>
+
+Bug 713747 - Use UniversalXPConnect and UniversalXPConnect only in test coverage. v1
+
+diff --git a/browser/base/content/test/test_bug364677.html b/browser/base/content/test/test_bug364677.html
+index ac73b8f..969a5e4 100644
+--- a/browser/base/content/test/test_bug364677.html
++++ b/browser/base/content/test/test_bug364677.html
+@@ -18,17 +18,17 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=364677
+ <script class="testbody" type="text/javascript">
+ 
+ /** Test for Bug 364677 **/
+ SimpleTest.waitForExplicitFinish();
+ 
+ addLoadEvent(function() {
+   // Need privs because the feed seems to have an about:feeds principal or some
+   // such.  It's not same-origin with us in any case.
+-  netscape.security.PrivilegeManager.enablePrivilege("UniversalBrowserRead");
++  netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+   is($("testFrame").contentDocument.documentElement.id, "feedHandler",
+      "Feed served as text/xml without a channel/link should have been sniffed");
+ });
+ addLoadEvent(SimpleTest.finish);
+ </script>
+ </pre>
+ </body>
+ </html>
+diff --git a/browser/base/content/test/test_bug395533.html b/browser/base/content/test/test_bug395533.html
+index 231df83..013c878 100644
+--- a/browser/base/content/test/test_bug395533.html
++++ b/browser/base/content/test/test_bug395533.html
+@@ -18,17 +18,17 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=395533
+ <script class="testbody" type="text/javascript">
+ 
+ /** Test for Bug 395533 **/
+ SimpleTest.waitForExplicitFinish();
+ 
+ addLoadEvent(function() {
+   // Need privs because the feed seems to have an about:feeds principal or some
+   // such.  It's not same-origin with us in any case.
+-  netscape.security.PrivilegeManager.enablePrivilege("UniversalBrowserRead");
++  netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+   is($("testFrame").contentDocument.documentElement.id, "",
+      "Text got sniffed as a feed?");
+ });
+ addLoadEvent(SimpleTest.finish);
+ 
+ 
+ 
+ 
+diff --git a/browser/components/feeds/test/test_bug494328.html b/browser/components/feeds/test/test_bug494328.html
+index 8574385..1f6e2f5 100644
+--- a/browser/components/feeds/test/test_bug494328.html
++++ b/browser/components/feeds/test/test_bug494328.html
+@@ -16,17 +16,17 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=494328
+ </div>
+ <pre id="test">
+ <script class="testbody" type="text/javascript">
+ 
+ /** Test for Bug 494328 **/
+ SimpleTest.waitForExplicitFinish();
+ 
+ addLoadEvent(function() {
+-  netscape.security.PrivilegeManager.enablePrivilege("UniversalBrowserRead");
++  netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+   var links = $("testFrame").contentDocument.getElementById("feedContent").querySelectorAll("div.enclosure > a");
+   is(links[0].textContent, "Episode 1", "filename decoded incorrectly");
+   is(links[1].textContent, "Episode #2", "filename decoded incorrectly");
+   is(links[2].textContent, "http://www.example.com/podcasts/Episode #3/", "filename decoded incorrectly");
+   is(links[3].textContent, "Is This Episode #4?", "filename decoded incorrectly");
+ });
+ addLoadEvent(SimpleTest.finish);
+ 
+diff --git a/build/automation.py.in b/build/automation.py.in
+index ce89d12..72324c3 100644
+--- a/build/automation.py.in
++++ b/build/automation.py.in
+@@ -404,33 +404,27 @@ user_pref("extensions.getAddons.maxResults", 0);
+ user_pref("extensions.getAddons.get.url", "http://%(server)s/extensions-dummy/repositoryGetURL");
+ user_pref("extensions.getAddons.search.browseURL", "http://%(server)s/extensions-dummy/repositoryBrowseURL");
+ user_pref("extensions.getAddons.search.url", "http://%(server)s/extensions-dummy/repositorySearchURL");
+ """ % { "server" : self.webServer + ":" + str(self.httpPort) }
+     prefs.append(part)
+ 
+     if useServerLocations == False:
+       part = """
+-user_pref("capability.principal.codebase.p1.granted",
+-          "UniversalXPConnect UniversalBrowserRead UniversalBrowserWrite \
+-           UniversalPreferencesRead UniversalPreferencesWrite \
+-           UniversalFileRead");
++user_pref("capability.principal.codebase.p1.granted", "UniversalXPConnect");
+ user_pref("capability.principal.codebase.p1.id", "%(origin)s");
+ user_pref("capability.principal.codebase.p1.subjectName", "");
+ """  % { "origin": "http://" + self.webServer + ":" + str(self.httpPort) }
+       prefs.append(part)
+     else:
+       # Grant God-power to all the privileged servers on which tests run.
+       privileged = filter(lambda loc: "privileged" in loc.options, locations)
+       for (i, l) in itertools.izip(itertools.count(1), privileged):
+         part = """
+-user_pref("capability.principal.codebase.p%(i)d.granted",
+-          "UniversalXPConnect UniversalBrowserRead UniversalBrowserWrite \
+-           UniversalPreferencesRead UniversalPreferencesWrite \
+-           UniversalFileRead");
++user_pref("capability.principal.codebase.p%(i)d.granted", "UniversalXPConnect");
+ user_pref("capability.principal.codebase.p%(i)d.id", "%(origin)s");
+ user_pref("capability.principal.codebase.p%(i)d.subjectName", "");
+ """  % { "i": i,
+          "origin": (l.scheme + "://" + l.host + ":" + str(l.port)) }
+         prefs.append(part)
+ 
+       # We need to proxy every server but the primary one.
+       origins = ["'%s://%s:%s'" % (l.scheme, l.host, l.port)
+diff --git a/content/base/test/test_bug345339.html b/content/base/test/test_bug345339.html
+index c0a81b2..e31c7a5 100644
+--- a/content/base/test/test_bug345339.html
++++ b/content/base/test/test_bug345339.html
+@@ -57,17 +57,17 @@ function afterReload() {
+     is(iframeDoc.getElementById("radio1").checked, false,
+        "radio button #1 value preserved");
+     is(iframeDoc.getElementById("radio2").checked, true,
+        "radio button #2 value preserved");
+     isnot(iframeDoc.getElementById("password").value, "123456",
+        "password field value forgotten");
+     is(iframeDoc.getElementById("hidden").value, "gecko",
+        "hidden field value preserved");
+-    netscape.security.PrivilegeManager.enablePrivilege("UniversalFileRead");
++    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+     is(iframeDoc.getElementById("file").value, filePath,
+        "file field value preserved");
+ 
+     SimpleTest.finish();
+ }
+ </script>
+ </pre>
+ </body>
+diff --git a/content/base/test/test_bug380418.html b/content/base/test/test_bug380418.html
+index 0becc6c..08a0612 100644
+--- a/content/base/test/test_bug380418.html
++++ b/content/base/test/test_bug380418.html
+@@ -17,17 +17,17 @@
+ 
+ 	SimpleTest.waitForExplicitFinish();
+ 	
+ 	var request = new XMLHttpRequest();
+ 	request.open("GET", window.location.href, false);
+ 	request.send(null);
+ 	
+ 	// Try reading headers in privileged context
+-	netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect UniversalBrowserRead");
++	netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+ 	is(request.getResponseHeader("Set-Cookie"), "test", "Reading Set-Cookie response header in privileged context");
+ 	is(request.getResponseHeader("Set-Cookie2"), "test2", "Reading Set-Cookie2 response header in privileged context");
+ 	is(request.getResponseHeader("X-Dummy"), "test", "Reading X-Dummy response header in privileged context");
+ 	
+ 	ok(/\bSet-Cookie:/i.test(request.getAllResponseHeaders()), "Looking for Set-Cookie in all response headers in privileged context");
+ 	ok(/\bSet-Cookie2:/i.test(request.getAllResponseHeaders()), "Looking for Set-Cookie2 in all response headers in privileged context");
+ 	ok(/\bX-Dummy:/i.test(request.getAllResponseHeaders()), "Looking for X-Dummy in all response headers in privileged context");
+ 	
+diff --git a/content/base/test/test_xhr_forbidden_headers.html b/content/base/test/test_xhr_forbidden_headers.html
+index 48d04f0..c4cb6f4 100644
+--- a/content/base/test/test_xhr_forbidden_headers.html
++++ b/content/base/test/test_xhr_forbidden_headers.html
+@@ -50,17 +50,17 @@ var i, request;
+ 
+ // Try setting headers in unprivileged context
+ request = new XMLHttpRequest();
+ request.open("GET", window.location.href);
+ for (i = 0; i < headers.length; i++)
+   request.setRequestHeader(headers[i], "test" + i);
+ 
+ // Read out headers
+-netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect UniversalBrowserWrite");
++netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+ var channel = request.channel.QueryInterface(Components.interfaces.nsIHttpChannel);
+ for (i = 0; i < headers.length; i++) {
+   // Retrieving Content-Length will throw an exception
+   var value = null;
+   try {
+     value = channel.getRequestHeader(headers[i]);
+   }
+   catch(e) {}
+diff --git a/content/canvas/test/test_canvas.html b/content/canvas/test/test_canvas.html
+index 1dd5fb2..198dac9 100644
+--- a/content/canvas/test/test_canvas.html
++++ b/content/canvas/test/test_canvas.html
+@@ -21019,17 +21019,17 @@ ctx667.fillStyle = 'rgba(12, 16, 244, 0.25)';
+ ctx667.fillRect(75, 0, 25, 25);
+ var img = new Image();
+ deferTest();
+ img.onload = wrapFunction(function ()
+ {
+     ctx667.drawImage(img, 0, 25);
+     // (The alpha values do not really survive float->int conversion, so just
+     // do approximate comparisons)
+-    netscape.security.PrivilegeManager.enablePrivilege('UniversalBrowserRead');
++    netscape.security.PrivilegeManager.enablePrivilege('UniversalXPConnect');
+     isPixel(ctx667, 12,40, 1,3,254,255, 0);
+     isPixel(ctx667, 37,40, 8,252,248,191, 2);
+     isPixel(ctx667, 62,40, 6,10,250,127, 4);
+     isPixel(ctx667, 87,40, 12,16,244,63, 8);
+ });
+ img.src = canvas667.toDataURL();
+ 
+ 
+@@ -21146,17 +21146,17 @@ ctx672.fillRect(0, 40, 100, 10);
+ var data = canvas672.toDataURL();
+ ctx672.fillStyle = '#f00';
+ ctx672.fillRect(0, 0, 100, 50);
+ var img = new Image();
+ deferTest();
+ img.onload = wrapFunction(function ()
+ {
+     ctx672.drawImage(img, 0, 0);
+-    netscape.security.PrivilegeManager.enablePrivilege('UniversalBrowserRead');
++    netscape.security.PrivilegeManager.enablePrivilege('UniversalXPConnect');
+     isPixel(ctx672, 12,20, 255,255,0,255, 0);
+     isPixel(ctx672, 50,20, 0,255,255,255, 0);
+     isPixel(ctx672, 87,20, 0,0,255,255, 0);
+     isPixel(ctx672, 50,45, 255,255,255,255, 0);
+ });
+ img.src = data;
+ 
+ 
+diff --git a/content/html/content/test/test_bug143220.html b/content/html/content/test/test_bug143220.html
+index 9c1c784..27e6f19 100644
+--- a/content/html/content/test/test_bug143220.html
++++ b/content/html/content/test/test_bug143220.html
+@@ -31,17 +31,17 @@ function initVals() {
+   var file = dirSvc.get("XpcomLib", Components.interfaces.nsILocalFile);
+   isnot(file, null, "Must have file here");
+ 
+   leafName = file.leafName;
+   fullPath = file.path;
+ }
+ 
+ function initControl1() {
+-  netscape.security.PrivilegeManager.enablePrivilege("UniversalFileRead");
++  netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+   $("i1").value = fullPath;
+   is($("i1").value, fullPath, "Should have set full path 1");
+ }
+ 
+ function initControl2() {
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+   $("i2").value = fullPath;
+   is($("i2").value, fullPath, "Should have set full path 2");
+diff --git a/content/html/content/test/test_bug388558.html b/content/html/content/test/test_bug388558.html
+index 60b63eb..eea045c 100644
+--- a/content/html/content/test/test_bug388558.html
++++ b/content/html/content/test/test_bug388558.html
+@@ -18,17 +18,17 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=388558
+ <pre id="test">
+ <script class="testbody" type="text/javascript">
+ 
+ /** Test for Bug 388558 **/
+ var inputChange = 0;
+ var textareaChange = 0;
+ 
+ function testUserInput() {
+-  netscape.security.PrivilegeManager.enablePrivilege('UniversalBrowserWrite');
++  netscape.security.PrivilegeManager.enablePrivilege('UniversalXPConnect');
+   var input = document.getElementById("input");
+   var textarea = document.getElementById("textarea");
+ 
+   input.focus();
+   input.QueryInterface(Components.interfaces.nsIDOMNSEditableElement).setUserInput("foo");
+   input.blur();
+   is(inputChange, 1, "Input element should have got one change event.");
+ 
+diff --git a/content/svg/content/test/test_a_href_01.xhtml b/content/svg/content/test/test_a_href_01.xhtml
+index 6b00580..7f31949 100644
+--- a/content/svg/content/test/test_a_href_01.xhtml
++++ b/content/svg/content/test/test_a_href_01.xhtml
+@@ -37,17 +37,17 @@ function frameLoaded() {
+ 
+ function doNavigationIfReady() {
+   if (didWindowLoad && frameLoadCount == testCount) {
+     doNavigation();
+   }
+ }
+ 
+ function doNavigation() {
+-  netscape.security.PrivilegeManager.enablePrivilege("UniversalBrowserWrite");
++  netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+ 
+   // Test clicking on an unmodified <a>.
+   doNavigationTest(1, "a_href_helper_01.svg");
+   // Test clicking on an <a> whose xlink:href is modified by assigning to href.baseVal.
+   doNavigationTest(2, "a_href_helper_02_03.svg", function(a) { a.href.baseVal = "a_href_destination.svg"; });
+   // Test clicking on an <a> whose xlink:href is modified by a setAttributeNS call.
+   doNavigationTest(3, "a_href_helper_02_03.svg", function(a) { a.setAttributeNS("http://www.w3.org/1999/xlink", "xlink:href", "a_href_destination.svg"); });
+   // Test clicking on an <a> whose xlink:href is modified by animation.
+diff --git a/content/xml/tests/load/loadauth.html b/content/xml/tests/load/loadauth.html
+index 628cd27..8f63852 100644
+--- a/content/xml/tests/load/loadauth.html
++++ b/content/xml/tests/load/loadauth.html
+@@ -31,17 +31,17 @@ function documentLoaded(e) {
+     "Event properties:\n" + 
+     eventProperties;
+ }
+ 
+ xmlDoc.addEventListener("load", documentLoaded, false);
+ 
+ function execute()
+ {
+-  netscape.security.PrivilegeManager.enablePrivilege("UniversalBrowserRead");
++  netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+   xmlDoc.load("http://green/heikki/login/data.xml");
+ }
+ 
+ </script>
+ </head>
+ <body onload="execute();">
+ <h1>Synchronized document.load() test</h1>
+ 
+diff --git a/dom/tests/mochitest/bugs/bug346659-opener-echoer.html b/dom/tests/mochitest/bugs/bug346659-opener-echoer.html
+index 49c04cc..277d358 100644
+--- a/dom/tests/mochitest/bugs/bug346659-opener-echoer.html
++++ b/dom/tests/mochitest/bugs/bug346659-opener-echoer.html
+@@ -1,6 +1,6 @@
+ <script>
+-  netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect UniversalBrowserRead UniversalBrowserWrite");
++  netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+   window.opener.opener.postMessage(window.opener.testNum + " - " + window.x, "http://mochi.test:8888");
+   window.opener.close();
+   window.close();
+ </script>
+diff --git a/dom/tests/mochitest/bugs/bug346659-parent-echoer.html b/dom/tests/mochitest/bugs/bug346659-parent-echoer.html
+index eefb44c..e503539 100644
+--- a/dom/tests/mochitest/bugs/bug346659-parent-echoer.html
++++ b/dom/tests/mochitest/bugs/bug346659-parent-echoer.html
+@@ -1,5 +1,5 @@
+ <script>
+-  netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect UniversalBrowserRead UniversalBrowserWrite");
++  netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+   window.parent.opener.postMessage(window.parent.testNum + " - " + window.x, "http://mochi.test:8888");
+   window.parent.close();
+ </script>
+diff --git a/dom/tests/mochitest/bugs/test_bug346659.html b/dom/tests/mochitest/bugs/test_bug346659.html
+index d8ff23e..d2cc7a4 100644
+--- a/dom/tests/mochitest/bugs/test_bug346659.html
++++ b/dom/tests/mochitest/bugs/test_bug346659.html
+@@ -37,17 +37,17 @@ function handleCmd(evt) {
+   try {
+     cmd = JSON.parse(evt.data);
+   } catch (e) {
+     // Not json
+     return false;
+   }  
+ 
+   // Grab privileges so we can access cross-domain windows
+-  netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect UniversalBrowserRead UniversalBrowserWrite");
++  netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+ 
+   if ("load" in cmd) {
+     var testNum = cmd.load;
+     var win = wins[testNum];
+     win.childWin.x = testNum;
+     if (win.childWin.opener == win) {
+       if ("xsite" in cmd) {
+         var loc = r(window.location.href, "bug346659-opener-echoer.html");
+diff --git a/dom/tests/mochitest/general/test_focusrings.xul b/dom/tests/mochitest/general/test_focusrings.xul
+index f9a0d31..44d1440 100644
+--- a/dom/tests/mochitest/general/test_focusrings.xul
++++ b/dom/tests/mochitest/general/test_focusrings.xul
+@@ -33,17 +33,17 @@ function setOrRestoreTabFocus(newValue) {
+     }
+   } else {
+     prefs.setIntPref("tabfocus", newValue);
+   }
+ }
+ 
+ function snapShot(element) {
+   var rect = element.getBoundingClientRect();
+-  netscape.security.PrivilegeManager.enablePrivilege('UniversalBrowserRead');
++  netscape.security.PrivilegeManager.enablePrivilege('UniversalXPConnect');
+   var canvas = document.createElementNS("http://www.w3.org/1999/xhtml", "canvas");
+   canvas.setAttribute("width", rect.width + 12);
+   canvas.setAttribute("height", rect.height + 12);
+   var ctx = canvas.getContext("2d");
+   ctx.drawWindow(window, rect.left - 6, rect.top - 6, rect.width + 6, rect.height + 6,
+                  "transparent");
+   return canvas;
+ }
+diff --git a/dom/tests/mochitest/storageevent/interOriginFrame.js b/dom/tests/mochitest/storageevent/interOriginFrame.js
+index d3ff1bd..b01cd2d 100644
+--- a/dom/tests/mochitest/storageevent/interOriginFrame.js
++++ b/dom/tests/mochitest/storageevent/interOriginFrame.js
+@@ -1,11 +1,11 @@
+ function postMsg(message)
+ {
+-  netscape.security.PrivilegeManager.enablePrivilege("UniversalBrowserRead");
++  netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+   var l = parent.window.location;
+   parent.postMessage(message, l.protocol + "//" + l.host);
+ }
+ 
+ window.addEventListener("message", onMessageReceived, false);
+ 
+ function onMessageReceived(event)
+ {
+diff --git a/dom/tests/mochitest/storageevent/interOriginTest2.js b/dom/tests/mochitest/storageevent/interOriginTest2.js
+index 05f9a7e..e7ecdce 100644
+--- a/dom/tests/mochitest/storageevent/interOriginTest2.js
++++ b/dom/tests/mochitest/storageevent/interOriginTest2.js
+@@ -11,17 +11,16 @@ var todoRegExp = new RegExp("^TODO");
+ 
+ const framePath = "/tests/dom/tests/mochitest/storageevent/";
+ 
+ window.addEventListener("message", onMessageReceived, false);
+ 
+ function onMessageReceived(event)
+ {
+   netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+-  netscape.security.PrivilegeManager.enablePrivilege("UniversalBrowserRead");
+ 
+   switch (event.data)
+   {
+     // Indication of the frame onload event
+     case "frame loaded":
+       if (--frameLoadsPending)
+         break;
+ 
+diff --git a/image/test/mochitest/test_bug490949.html b/image/test/mochitest/test_bug490949.html
+index 1e257fd..378ed2e 100644
+--- a/image/test/mochitest/test_bug490949.html
++++ b/image/test/mochitest/test_bug490949.html
+@@ -49,17 +49,17 @@ RemoteCanvas.prototype.load = function(cb) {
+ };
+ 
+ RemoteCanvas.prototype.reload = function(cb, force) {
+     this.cb = cb;
+     window.frames[0].location.reload(force);
+ }
+ 
+ RemoteCanvas.prototype.handleEvent = function() {
+-    netscape.security.PrivilegeManager.enablePrivilege("UniversalBrowserRead");
++    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+ 
+     // Look back up the iframe by id
+     var ldrFrame = document.getElementById("test-iframe");
+     // Get a reference to the window object you need for the canvas
+     // drawWindow method
+     var remoteWindow = ldrFrame.contentWindow;
+ 
+     //Draw canvas
+diff --git a/image/test/mochitest/test_bug496292.html b/image/test/mochitest/test_bug496292.html
+index ee7a65d..18d4e43 100644
+--- a/image/test/mochitest/test_bug496292.html
++++ b/image/test/mochitest/test_bug496292.html
+@@ -54,17 +54,17 @@ RemoteCanvas.prototype.load = function(cb) {
+ };
+ 
+ RemoteCanvas.prototype.reload = function(cb, force) {
+     this.cb = cb;
+     window.frames[0].location.reload(force);
+ }
+ 
+ RemoteCanvas.prototype.handleEvent = function() {
+-    netscape.security.PrivilegeManager.enablePrivilege("UniversalBrowserRead");
++    netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+ 
+     // Look back up the iframe by id
+     var ldrFrame = document.getElementById("test-iframe-" + this.url);
+     // Get a reference to the window object you need for the canvas
+     // drawWindow method
+     var remoteWindow = ldrFrame.contentWindow;
+ 
+     //Draw canvas
+diff --git a/image/test/mochitest/test_bug497665.html b/image/test/mochitest/test_bug497665.html
+index e63e16a..0cfc76e 100644
+--- a/image/test/mochitest/test_bug497665.html
++++ b/image/test/mochitest/test_bug497665.html
+@@ -16,17 +16,17 @@ https://bugzilla.mozilla.org/show_bug.cgi?id=497665
+ <script type="application/javascript">
+ 
+ var image1first, image2first, image1second, image2second, image1third, image2third;
+ 
+ SimpleTest.waitForExplicitFinish();
+ 
+ function checkFirst()
+ {
+-  netscape.security.PrivilegeManager.enablePrivilege("UniversalBrowserRead");
++  netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+ 
+   var iframeelem = document.getElementById('test-iframe');
+   var canvas = document.getElementById('canvas');
+   var ctx = canvas.getContext('2d');
+ 
+   var firstimg = iframeelem.contentDocument.getElementById('image1');
+   var secondimg = iframeelem.contentDocument.getElementById('image2');
+   ctx.drawImage(firstimg, 0, 0);
+diff --git a/js/src/tests/user.js b/js/src/tests/user.js
+index 6bcaebc..5b73caa 100755
+--- a/js/src/tests/user.js
++++ b/js/src/tests/user.js
+@@ -1,16 +1,16 @@
+ user_pref("app.update.enabled", false);
+ user_pref("browser.dom.window.dump.enabled", true);
+ user_pref("browser.sessionstore.resume_from_crash", false);
+ user_pref("browser.shell.checkDefaultBrowser", false);
+ user_pref("browser.xul.error_pages.enabled", true);
+-user_pref("capability.principal.codebase.p0.granted", "UniversalPreferencesWrite UniversalXPConnect UniversalBrowserWrite UniversalPreferencesRead UniversalBrowserRead");
++user_pref("capability.principal.codebase.p0.granted", "UniversalXPConnect");
+ user_pref("capability.principal.codebase.p0.id", "file://");
+-user_pref("capability.principal.codebase.p1.granted", "UniversalPreferencesWrite UniversalXPConnect UniversalBrowserWrite UniversalPreferencesRead UniversalBrowserRead");
++user_pref("capability.principal.codebase.p1.granted", "UniversalXPConnect");
+ user_pref("capability.principal.codebase.p1.id", "http://localhost:4444");
+ user_pref("security.fileuri.strict_origin_policy", false);
+ user_pref("dom.allow_scripts_to_close_windows", true);
+ user_pref("dom.disable_open_during_load", false);
+ user_pref("dom.max_script_run_time", 0);
+ user_pref("hangmonitor.timeout", 0);
+ user_pref("dom.max_chrome_script_run_time", 0);
+ user_pref("javascript.allow.mailnews", true);
+diff --git a/layout/base/tests/bidi_numeral_test.js b/layout/base/tests/bidi_numeral_test.js
+index 8fd4b9c..1bffa95 100644
+--- a/layout/base/tests/bidi_numeral_test.js
++++ b/layout/base/tests/bidi_numeral_test.js
+@@ -27,17 +27,17 @@ RemoteCanvas.prototype.load = function(callback) {
+ 
+ RemoteCanvas.prototype.remotePageLoaded = function(callback) {
+   var ldrFrame = document.getElementById(this.id + "-iframe");
+   this.snapshot = snapshotWindow(ldrFrame.contentWindow);
+   callback(this);
+ };
+ 
+ function bidiNumeral(val) {
+-  netscape.security.PrivilegeManager.enablePrivilege('UniversalPreferencesRead UniversalPreferencesWrite UniversalXPConnect');
++  netscape.security.PrivilegeManager.enablePrivilege('UniversalXPConnect');
+   var prefs = Components.classes["@mozilla.org/preferences-service;1"]
+                         .getService(Components.interfaces.nsIPrefBranch);
+ 
+   if (typeof val == "undefined")
+     return prefs.getIntPref("bidi.numeral");
+   else
+     prefs.setIntPref("bidi.numeral", val);
+ }
+diff --git a/layout/base/tests/test_reftests_with_caret.html b/layout/base/tests/test_reftests_with_caret.html
+index 9a48474..92875b2 100644
+--- a/layout/base/tests/test_reftests_with_caret.html
++++ b/layout/base/tests/test_reftests_with_caret.html
+@@ -78,18 +78,17 @@ function createIframe(url,next) {
+ 
+ function refTest(test,ref) {
+   createIframe(test,ref);
+ };
+ 
+ var caretBlinkTime = null;
+ function endTest() {
+   SimpleTest.finish();
+-  netscape.security.PrivilegeManager.enablePrivilege(
+-   'UniversalPreferencesRead UniversalPreferencesWrite UniversalXPConnect');
++  netscape.security.PrivilegeManager.enablePrivilege('UniversalXPConnect');
+   var prefs = Components.classes["@mozilla.org/preferences-service;1"]
+                         .getService(Components.interfaces.nsIPrefBranch);
+   if (caretBlinkTime !== null) {
+     prefs.setIntPref("ui.caretBlinkTime", caretBlinkTime);
+   } else {
+     prefs.clearUserPref("ui.caretBlinkTime");
+   }
+ }
+@@ -156,18 +155,17 @@ function nextTest() {
+   } else {
+     endTest();
+   }
+ }
+ function runTests() {
+   try {
+     SimpleTest.waitForExplicitFinish();
+ 
+-    netscape.security.PrivilegeManager.enablePrivilege(
+-      'UniversalPreferencesRead UniversalPreferencesWrite UniversalXPConnect');
++    netscape.security.PrivilegeManager.enablePrivilege('UniversalXPConnect');
+     var prefs = Components.classes["@mozilla.org/preferences-service;1"]
+                           .getService(Components.interfaces.nsIPrefBranch);
+     try {
+       caretBlinkTime = prefs.getIntPref("ui.caretBlinkTime");
+     } catch (e) {}
+     prefs.setIntPref("ui.caretBlinkTime", -1);
+ 
+     nextTest();
+diff --git a/layout/generic/test/test_bug421839-1.html b/layout/generic/test/test_bug421839-1.html
+index a83ef3a..35377c0 100644
+--- a/layout/generic/test/test_bug421839-1.html
++++ b/layout/generic/test/test_bug421839-1.html
+@@ -27,17 +27,17 @@ var counter = 0;
+ 
+ SimpleTest.waitForExplicitFinish();
+ 
+ var doc = document;
+ if (document.getElementById('iframe'))
+   doc = document.getElementById('iframe').contentDocument;
+ 
+ function toggleIframe(){
+- netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect UniversalBrowserRead");
++ netscape.security.PrivilegeManager.enablePrivilege("UniversalXPConnect");
+   var x=document.getElementById('iframe');
+   x.style.display = x.style.display == 'none' ? x.style.display = '' : x.style.display = 'none';
+   setTimeout(toggleIframe,100);
+ 
+   if (++counter == 4)
+     setTimeout(finish, 200);
+ 
+ }
+diff --git a/layout/generic/test/test_selection_underline.html b/layout/generic/test/test_selection_underline.html
+index 65fe3c6..9669cfb 100644
+--- a/layout/generic/test/test_selection_underline.html
++++ b/layout/generic/test/test_selection_underline.html
+@@ -308,18 +308,17 @@ function run()
+     if (gDefaultFontSizeIndex == kDefaultFontSizes.length) {
+       SimpleTest.finish();
+       cleanup();
+       return;
+     }
+     gTestingIndex = 0;
+   }
+ 
+-  netscape.security.PrivilegeManager.enablePrivilege(
+-   'UniversalPreferencesRead UniversalPreferencesWrite UniversalXPConnect');
++  netscape.security.PrivilegeManager.enablePrivilege('UniversalXPConnect');
+ 
+   var prefs = Components.classes["@mozilla.org/preferences-service;1"]
+                         .getService(Components.interfaces.nsIPrefBranch);
+ 
+   if (gTestingIndex == 0) {
+     prefs.setIntPref("font.size.variable.x-western",
+                      kDefaultFontSizes[gDefaultFontSizeIndex++]);
+   }
+@@ -387,18 +386,17 @@ function doTest(aStyle, aSize)
+ 
+ function onLoad()
+ {
+   if (gFontMetrics.length == 0) {
+     SimpleTest.finish();
+     return;
+   }
+ 
+-  netscape.security.PrivilegeManager.enablePrivilege(
+-   'UniversalPreferencesRead UniversalPreferencesWrite UniversalXPConnect');
++  netscape.security.PrivilegeManager.enablePrivilege('UniversalXPConnect');
+ 
+   var prefs = Components.classes["@mozilla.org/preferences-service;1"]
+                         .getService(Components.interfaces.nsIPrefBranch);
+ 
+   for (var i = 0; i < gPrefs.length; i++) {
+     gPrefs[i].wasUserSetValue = prefs.prefHasUserValue(gPrefs[i].name);
+     if (gPrefs[i].wasUserSetValue) {
+       if (gPrefs[i].type == "char")
+@@ -411,18 +409,17 @@ function onLoad()
+     setPrefValue(prefs, gPrefs[i].name, gPrefs[i].type, gPrefs[i].newValue);
+   }
+ 
+   run();
+ }
+ 
+ function cleanup()
+ {
+-  netscape.security.PrivilegeManager.enablePrivilege(
+-   'UniversalPreferencesRead UniversalPreferencesWrite UniversalXPConnect');
++  netscape.security.PrivilegeManager.enablePrivilege('UniversalXPConnect');
+ 
+   var prefs = Components.classes["@mozilla.org/preferences-service;1"]
+                         .getService(Components.interfaces.nsIPrefBranch);
+ 
+   if (prefs.prefHasUserValue("font.size.variable.x-western"))
+     prefs.clearUserPref("font.size.variable.x-western");
+ 
+   for (var i = 0; i < gPrefs.length; i++) {
+diff --git a/layout/tools/reftest/remotereftest.py b/layout/tools/reftest/remotereftest.py
+index b162290..bedee73 100644
+--- a/layout/tools/reftest/remotereftest.py
++++ b/layout/tools/reftest/remotereftest.py
+@@ -344,17 +344,17 @@ user_pref("font.size.inflation.minTwips", 0);
+ user_pref("reftest.remote", true);
+ user_pref("toolkit.telemetry.prompted", true);
+ user_pref("reftest.uri", "%s");
+ """ % reftestlist)
+ 
+         #workaround for jsreftests.
+         if options.enablePrivilege:
+             fhandle.write("""
+-user_pref("capability.principal.codebase.p2.granted", "UniversalPreferencesWrite UniversalXPConnect UniversalBrowserWrite UniversalPreferencesRead UniversalBrowserRead");
++user_pref("capability.principal.codebase.p2.granted", "UniversalXPConnect");
+ user_pref("capability.principal.codebase.p2.id", "http://%s:%s");
+ """ % (options.remoteWebServer, options.httpPort))
+ 
+         # Close the file
+         fhandle.close()
+ 
+         if (self._devicemanager.pushDir(profileDir, options.remoteProfile) == None):
+             raise devicemanager.FileError("Failed to copy profiledir to device")
+diff --git a/testing/mozbase/mozprofile/mozprofile/permissions.py b/testing/mozbase/mozprofile/mozprofile/permissions.py
+index 763418f..9591006 100644
+--- a/testing/mozbase/mozprofile/mozprofile/permissions.py
++++ b/testing/mozbase/mozprofile/mozprofile/permissions.py
+@@ -216,17 +216,17 @@ class PermissionsManager(object):
+         take known locations and generate preferences to handle permissions and proxy
+         returns a tuple of prefs, user_prefs
+         """
+ 
+         # Grant God-power to all the privileged servers on which tests run.
+         prefs = []
+         privileged = filter(lambda loc: "privileged" in loc.options, self._locations)
+         for (i, l) in itertools.izip(itertools.count(1), privileged):
+-            prefs.append(("capability.principal.codebase.p%s.granted" % i, "UniversalPreferencesWrite UniversalXPConnect UniversalPreferencesRead"))
++            prefs.append(("capability.principal.codebase.p%s.granted" % i, "UniversalXPConnect"))
+ 
+             # TODO: do we need the port?
+             prefs.append(("capability.principal.codebase.p%s.id" % i, l.scheme + "://" + l.host))
+             prefs.append(("capability.principal.codebase.p%s.subjectName" % i, ""))
+ 
+         if proxy:
+             user_prefs = self.pacPrefs()
+         else:
+diff --git a/toolkit/content/tests/chrome/test_dialogfocus.xul b/toolkit/content/tests/chrome/test_dialogfocus.xul
+index 8112e52..87416a3 100644
+--- a/toolkit/content/tests/chrome/test_dialogfocus.xul
++++ b/toolkit/content/tests/chrome/test_dialogfocus.xul
+@@ -46,17 +46,17 @@ function runTest()
+ {
+   step++;
+   if (step > expected.length || (!fullKeyboardAccess && step == 2)) {
+     SimpleTest.finish();
+     return;
+   }
+ 
+   var expectedFocus = expected[step - 1];
+-  netscape.security.PrivilegeManager.enablePrivilege('UniversalBrowserWrite');
++  netscape.security.PrivilegeManager.enablePrivilege('UniversalXPConnect');
+   var win = window.openDialog("dialog_dialogfocus.xul", "_new", "chrome,dialog", step);
+ 
+   function checkDialogFocus(event)
+   {
+     // if full keyboard access is not on, just skip the tests
+     var match = false;
+     if (fullKeyboardAccess) {
+       if (!(event.target instanceof Element))

@@ -1,0 +1,51 @@
+diff --git a/mailnews/base/src/nsMsgContentPolicy.cpp b/mailnews/base/src/nsMsgContentPolicy.cpp
+--- a/mailnews/base/src/nsMsgContentPolicy.cpp
++++ b/mailnews/base/src/nsMsgContentPolicy.cpp
+@@ -417,7 +417,8 @@ nsMsgContentPolicy::IsSafeRequestingLoca
+ }
+ 
+ /**
+- * Determines if the content location is a scheme that we're willing to expose.
++ * Determines if the content location is a scheme that we're willing to expose
++ * for unlimited loading of content.
+  */
+ PRBool
+ nsMsgContentPolicy::IsExposedProtocol(nsIURI *aContentLocation)
+@@ -426,28 +427,15 @@ nsMsgContentPolicy::IsExposedProtocol(ns
+   nsresult rv = aContentLocation->GetScheme(contentScheme);
+   NS_ENSURE_SUCCESS(rv, PR_FALSE);
+ 
+-  PRBool isExposedProtocol = PR_FALSE;
+-#ifdef MOZ_THUNDERBIRD
+-  nsCOMPtr<nsIExternalProtocolService> extProtService =
+-    do_GetService(NS_EXTERNALPROTOCOLSERVICE_CONTRACTID, &rv);
+-  NS_ENSURE_SUCCESS(rv, PR_FALSE);
+-
+-  rv = extProtService->IsExposedProtocol(contentScheme.get(), &isExposedProtocol);
+-  NS_ENSURE_SUCCESS(rv, PR_FALSE);
+-
+-#else
+-  isExposedProtocol = contentScheme.LowerCaseEqualsLiteral("mailto") ||
+-    contentScheme.LowerCaseEqualsLiteral("news") ||
+-    contentScheme.LowerCaseEqualsLiteral("snews") ||
+-    contentScheme.LowerCaseEqualsLiteral("nntp") ||
+-    contentScheme.LowerCaseEqualsLiteral("imap") ||
+-    contentScheme.LowerCaseEqualsLiteral("addbook") ||
+-    contentScheme.LowerCaseEqualsLiteral("pop") ||
+-    contentScheme.LowerCaseEqualsLiteral("mailbox") ||
+-    contentScheme.LowerCaseEqualsLiteral("about");
+-#endif
+-
+-  if (isExposedProtocol)
++  if (contentScheme.LowerCaseEqualsLiteral("mailto") ||
++      contentScheme.LowerCaseEqualsLiteral("news") ||
++      contentScheme.LowerCaseEqualsLiteral("snews") ||
++      contentScheme.LowerCaseEqualsLiteral("nntp") ||
++      contentScheme.LowerCaseEqualsLiteral("imap") ||
++      contentScheme.LowerCaseEqualsLiteral("addbook") ||
++      contentScheme.LowerCaseEqualsLiteral("pop") ||
++      contentScheme.LowerCaseEqualsLiteral("mailbox") ||
++      contentScheme.LowerCaseEqualsLiteral("about"))
+     return PR_TRUE;
+ 
+   PRBool isData;

@@ -1,0 +1,670 @@
+diff --git a/caps/include/nsScriptSecurityManager.h b/caps/include/nsScriptSecurityManager.h
+--- a/caps/include/nsScriptSecurityManager.h
++++ b/caps/include/nsScriptSecurityManager.h
+@@ -45,17 +45,16 @@
+ #include "nsIScriptSecurityManager.h"
+ #include "nsIPrincipal.h"
+ #include "jsapi.h"
+ #include "jsdbgapi.h"
+ #include "nsIXPCSecurityManager.h"
+ #include "nsInterfaceHashtable.h"
+ #include "nsHashtable.h"
+ #include "nsCOMPtr.h"
+-#include "nsIPrefService.h"
+ #include "nsIChannelEventSink.h"
+ #include "nsIJSContextStack.h"
+ #include "nsIObserver.h"
+ #include "pldhash.h"
+ #include "plstr.h"
+ #include "nsIScriptExternalNameSet.h"
+ 
+ class nsIDocShell;
+@@ -612,34 +611,30 @@ private:
+     };
+ 
+     // JS strings we need to clean up on shutdown
+     static jsid sEnabledID;
+ 
+     inline void
+     ScriptSecurityPrefChanged();
+ 
+-    static const char sJSEnabledPrefName[];
+-    static const char sFileOriginPolicyPrefName[];
+-
+     nsObjectHashtable* mOriginToPolicyMap;
+     DomainPolicy* mDefaultPolicy;
+     nsObjectHashtable* mCapabilities;
+ 
+-    nsCOMPtr<nsIPrefBranch> mPrefBranch;
+     nsCOMPtr<nsIPrincipal> mSystemPrincipal;
+     nsCOMPtr<nsIPrincipal> mSystemCertificate;
+     ContextPrincipal *mContextPrincipals;
+     nsInterfaceHashtable<PrincipalKey, nsIPrincipal> mPrincipals;
++    PRPackedBool mPrefInitialized;
+     PRPackedBool mIsJavaScriptEnabled;
+     PRPackedBool mIsWritingPrefs;
+     PRPackedBool mPolicyPrefsChanged;
+ #ifdef XPC_IDISPATCH_SUPPORT    
+     PRPackedBool mXPCDefaultGrantAll;
+-    static const char sXPCDefaultGrantAllName[];
+ #endif
+ 
+     static PRBool sStrictFileOriginPolicy;
+ 
+     static nsIIOService    *sIOService;
+     static nsIXPConnect    *sXPConnect;
+     static nsIThreadJSContextStack* sJSContextStack;
+     static nsIStringBundle *sStrBundle;
+diff --git a/caps/src/nsPrincipal.cpp b/caps/src/nsPrincipal.cpp
+--- a/caps/src/nsPrincipal.cpp
++++ b/caps/src/nsPrincipal.cpp
+@@ -48,87 +48,28 @@
+ #include "nsIFileURL.h"
+ #include "nsIProtocolHandler.h"
+ #include "nsNetUtil.h"
+ #include "nsJSPrincipals.h"
+ #include "nsVoidArray.h"
+ #include "nsHashtable.h"
+ #include "nsIObjectInputStream.h"
+ #include "nsIObjectOutputStream.h"
+-#include "nsIPrefBranch2.h"
+-#include "nsIPrefService.h"
+ #include "nsIClassInfoImpl.h"
+ #include "nsDOMError.h"
+ #include "nsIContentSecurityPolicy.h"
+ 
+ #include "nsPrincipal.h"
+ 
+-class nsCodeBasePrefObserver : nsIObserver
+-{
+-public:
+-  nsCodeBasePrefObserver()
+-  {
+-    NS_ASSERTION(!sObserverInstalled, "Shouldn't recreate observer\n");
+-  }
+-  ~nsCodeBasePrefObserver()
+-  {
+-    sObserverInstalled = PR_FALSE;
+-  }
++#include "mozilla/Preferences.h"
+ 
+-  void Init()
+-  {
+-    nsCOMPtr<nsIPrefBranch2> prefBranch =
+-      do_GetService(NS_PREFSERVICE_CONTRACTID);
+-    if (prefBranch) {
+-      if (NS_FAILED(prefBranch->GetBoolPref(PrefName(), &sPrefValue))) {
+-        sPrefValue = PR_FALSE;
+-      }
+-      if (NS_SUCCEEDED(prefBranch->AddObserver(PrefName(), this, PR_FALSE))) {
+-        sObserverInstalled = PR_TRUE;
+-      }
+-    }
+-  }
++using namespace mozilla;
+ 
+-  NS_DECL_ISUPPORTS
+-
+-  NS_IMETHOD Observe(nsISupports* aSubject,
+-                     const char* aTopic,
+-                     const PRUnichar* aData)
+-  {
+-    NS_ASSERTION(!strcmp(aTopic,  NS_PREFBRANCH_PREFCHANGE_TOPIC_ID),
+-                 "Wrong topic!");
+-    NS_ASSERTION(!strcmp(NS_ConvertUTF16toUTF8(aData).get(), PrefName()),
+-                 "Wrong pref!");
+-
+-    nsCOMPtr<nsIPrefBranch> prefBranch(do_QueryInterface(aSubject));
+-    if (!prefBranch ||
+-        NS_FAILED(prefBranch->GetBoolPref(PrefName(), &sPrefValue))) {
+-      sPrefValue = PR_FALSE;
+-    }
+-    return NS_OK;
+-  }
+-
+-  const char* PrefName()
+-  {
+-    static const char pref[] = "signed.applets.codebase_principal_support";
+-    return pref;
+-  }
+-
+-  static PRBool PrefValue() { return sPrefValue; }
+-  static PRBool Installed() { return sObserverInstalled; }
+-
+-
+-protected:
+-  static PRBool sPrefValue;
+-  static PRBool sObserverInstalled;
+-};
+-
+-PRBool nsCodeBasePrefObserver::sPrefValue = PR_FALSE;
+-PRBool nsCodeBasePrefObserver::sObserverInstalled = PR_FALSE;
+-NS_IMPL_ISUPPORTS1(nsCodeBasePrefObserver, nsIObserver)
++static PRBool gCodeBasePrincipalSupport = PR_FALSE;
++static PRBool gIsObservingCodeBasePrincipalSupport = PR_FALSE;
+ 
+ static PRBool URIIsImmutable(nsIURI* aURI)
+ {
+   nsCOMPtr<nsIMutable> mutableObj(do_QueryInterface(aURI));
+   PRBool isMutable;
+   return
+     mutableObj &&
+     NS_SUCCEEDED(mutableObj->GetMutable(&isMutable)) &&
+@@ -175,22 +116,24 @@ nsPrincipal::Release()
+ nsPrincipal::nsPrincipal()
+   : mCapabilities(nsnull),
+     mSecurityPolicy(nsnull),
+     mTrusted(PR_FALSE),
+     mInitialized(PR_FALSE),
+     mCodebaseImmutable(PR_FALSE),
+     mDomainImmutable(PR_FALSE)
+ {
+-  if (!nsCodeBasePrefObserver::Installed()) {
+-    nsRefPtr<nsCodeBasePrefObserver> obs = new nsCodeBasePrefObserver();
+-    if (obs)
+-      obs->Init();
+-    NS_WARN_IF_FALSE(nsCodeBasePrefObserver::Installed(),
+-                     "Installing nsCodeBasePrefObserver failed!");
++  if (!gIsObservingCodeBasePrincipalSupport) {
++    nsresult rv =
++      Preferences::AddBoolVarCache(&gCodeBasePrincipalSupport,
++                                   "signed.applets.codebase_principal_support",
++                                   PR_FALSE);
++    gIsObservingCodeBasePrincipalSupport = NS_SUCCEEDED(rv);
++    NS_WARN_IF_FALSE(gIsObservingCodeBasePrincipalSupport,
++                     "Installing gCodeBasePrincipalSupport failed!");
+   }
+ }
+ 
+ nsresult
+ nsPrincipal::Init(const nsACString& aCertFingerprint,
+                   const nsACString& aSubjectName,
+                   const nsACString& aPrettyName,
+                   nsISupports* aCert,
+@@ -533,17 +476,17 @@ nsPrincipal::CanEnableCapability(const c
+                                "uninitialized principal");
+ 
+     // If we are a non-trusted codebase principal, capabilities can not
+     // be enabled if the user has not set the pref allowing scripts to
+     // request enhanced capabilities; however, the file: and resource:
+     // schemes are special and may be able to get extra capabilities
+     // even with the pref disabled.
+ 
+-    if (!nsCodeBasePrefObserver::PrefValue()) {
++    if (!gCodeBasePrincipalSupport) {
+       PRBool mightEnable = PR_FALSE;
+       nsresult rv = mCodebase->SchemeIs("file", &mightEnable);
+       if (NS_FAILED(rv) || !mightEnable) {
+         rv = mCodebase->SchemeIs("resource", &mightEnable);
+         if (NS_FAILED(rv) || !mightEnable) {
+           *result = nsIPrincipal::ENABLE_DENIED;
+ 
+           return NS_OK;
+diff --git a/caps/src/nsScriptSecurityManager.cpp b/caps/src/nsScriptSecurityManager.cpp
+--- a/caps/src/nsScriptSecurityManager.cpp
++++ b/caps/src/nsScriptSecurityManager.cpp
+@@ -76,30 +76,32 @@
+ #include "nsIScriptGlobalObject.h"
+ #include "nsPIDOMWindow.h"
+ #include "nsIDocShell.h"
+ #include "nsIDocShellTreeItem.h"
+ #include "nsIPrompt.h"
+ #include "nsIWindowWatcher.h"
+ #include "nsIConsoleService.h"
+ #include "nsISecurityCheckedComponent.h"
+-#include "nsIPrefBranch2.h"
+ #include "nsIJSRuntimeService.h"
+ #include "nsIObserverService.h"
+ #include "nsIContent.h"
+ #include "nsAutoPtr.h"
+ #include "nsDOMJSUtils.h"
+ #include "nsAboutProtocolUtils.h"
+ #include "nsIClassInfo.h"
+ #include "nsIURIFixup.h"
+ #include "nsCDefaultURIFixup.h"
+ #include "nsIChromeRegistry.h"
+ #include "nsPrintfCString.h"
+ #include "nsIContentSecurityPolicy.h"
+ #include "nsIAsyncVerifyRedirectCallback.h"
++#include "mozilla/Preferences.h"
++
++using namespace mozilla;
+ 
+ static NS_DEFINE_CID(kZipReaderCID, NS_ZIPREADER_CID);
+ 
+ nsIIOService    *nsScriptSecurityManager::sIOService = nsnull;
+ nsIXPConnect    *nsScriptSecurityManager::sXPConnect = nsnull;
+ nsIThreadJSContextStack *nsScriptSecurityManager::sJSContextStack = nsnull;
+ nsIStringBundle *nsScriptSecurityManager::sStrBundle = nsnull;
+ JSRuntime       *nsScriptSecurityManager::sRuntime   = 0;
+@@ -1116,17 +1118,17 @@ nsScriptSecurityManager::LookupPolicy(ns
+ {
+     nsresult rv;
+     result->level = SCRIPT_SECURITY_UNDEFINED_ACCESS;
+ 
+     DomainPolicy* dpolicy = nsnull;
+     //-- Initialize policies if necessary
+     if (mPolicyPrefsChanged)
+     {
+-        if (!mPrefBranch) {
++        if (!mPrefInitialized) {
+             rv = InitPrefs();
+             NS_ENSURE_SUCCESS(rv, rv);
+         }
+         rv = InitPolicies();
+         if (NS_FAILED(rv))
+             return rv;
+     }
+     else
+@@ -2532,40 +2534,40 @@ nsScriptSecurityManager::SavePrincipal(n
+     nsCAutoString subjectNamePrefName;
+     rv = GetPrincipalPrefNames( idPrefName,
+                                 grantedPrefName,
+                                 deniedPrefName,
+                                 subjectNamePrefName );
+     if (NS_FAILED(rv)) return NS_ERROR_FAILURE;
+ 
+     mIsWritingPrefs = PR_TRUE;
+-    if (grantedList)
+-        mPrefBranch->SetCharPref(grantedPrefName.get(), grantedList);
+-    else
+-        mPrefBranch->ClearUserPref(grantedPrefName.get());
+-
+-    if (deniedList)
+-        mPrefBranch->SetCharPref(deniedPrefName.get(), deniedList);
+-    else
+-        mPrefBranch->ClearUserPref(deniedPrefName.get());
++    if (grantedList) {
++        Preferences::SetCString(grantedPrefName.get(), grantedList);
++    } else {
++        Preferences::ClearUser(grantedPrefName.get());
++    }
++
++    if (deniedList) {
++        Preferences::SetCString(deniedPrefName.get(), deniedList);
++    } else {
++        Preferences::ClearUser(deniedPrefName.get());
++    }
+ 
+     if (grantedList || deniedList) {
+-        mPrefBranch->SetCharPref(idPrefName, id);
+-        mPrefBranch->SetCharPref(subjectNamePrefName.get(),
+-                                           subjectName);
++        Preferences::SetCString(idPrefName, id);
++        Preferences::SetCString(subjectNamePrefName.get(), subjectName);
++    } else {
++        Preferences::ClearUser(idPrefName);
++        Preferences::ClearUser(subjectNamePrefName.get());
+     }
+-    else {
+-        mPrefBranch->ClearUserPref(idPrefName);
+-        mPrefBranch->ClearUserPref(subjectNamePrefName.get());
+-    }
+ 
+     mIsWritingPrefs = PR_FALSE;
+ 
+-    nsCOMPtr<nsIPrefService> prefService(do_GetService(NS_PREFSERVICE_CONTRACTID, &rv));
+-    NS_ENSURE_SUCCESS(rv, rv);
++    nsIPrefService* prefService = Preferences::GetService();
++    NS_ENSURE_TRUE(prefService, NS_ERROR_FAILURE);
+     return prefService->SavePrefFile(nsnull);
+ }
+ 
+ ///////////////// Capabilities API /////////////////////
+ NS_IMETHODIMP
+ nsScriptSecurityManager::IsCapabilityEnabled(const char *capability,
+                                              PRBool *result)
+ {
+@@ -3327,19 +3329,37 @@ nsScriptSecurityManager::AsyncOnChannelR
+     cb->OnRedirectVerifyCallback(NS_OK);
+     return NS_OK;
+ }
+ 
+ 
+ /////////////////////////////////////
+ // Method implementing nsIObserver //
+ /////////////////////////////////////
++const char sJSEnabledPrefName[] = "javascript.enabled";
++const char sFileOriginPolicyPrefName[] =
++    "security.fileuri.strict_origin_policy";
++#ifdef XPC_IDISPATCH_SUPPORT
++const char sXPCDefaultGrantAllName[] = "security.classID.allowByDefault";
++#endif
+ static const char sPrincipalPrefix[] = "capability.principal";
+ static const char sPolicyPrefix[] = "capability.policy.";
+ 
++static const char* kObservedPrefs[] = {
++  sJSEnabledPrefName,
++  sFileOriginPolicyPrefName,
++#ifdef XPC_IDISPATCH_SUPPORT
++  sXPCDefaultGrantAllName,
++#endif
++  sPolicyPrefix,
++  sPrincipalPrefix,
++  nsnull
++};
++
++
+ NS_IMETHODIMP
+ nsScriptSecurityManager::Observe(nsISupports* aObject, const char* aTopic,
+                                  const PRUnichar* aMessage)
+ {
+     nsresult rv = NS_OK;
+     NS_ConvertUTF16toUTF8 messageStr(aMessage);
+     const char *message = messageStr.get();
+ 
+@@ -3374,16 +3394,17 @@ nsScriptSecurityManager::Observe(nsISupp
+ /////////////////////////////////////////////
+ // Constructor, Destructor, Initialization //
+ /////////////////////////////////////////////
+ nsScriptSecurityManager::nsScriptSecurityManager(void)
+     : mOriginToPolicyMap(nsnull),
+       mDefaultPolicy(nsnull),
+       mCapabilities(nsnull),
+       mContextPrincipals(nsnull),
++      mPrefInitialized(PR_FALSE),
+       mIsJavaScriptEnabled(PR_FALSE),
+       mIsWritingPrefs(PR_FALSE),
+       mPolicyPrefsChanged(PR_TRUE)
+ #ifdef XPC_IDISPATCH_SUPPORT
+       , mXPCDefaultGrantAll(PR_FALSE)
+ #endif
+ {
+     NS_ASSERTION(sizeof(PRWord) == sizeof(void*),
+@@ -3458,16 +3479,17 @@ nsresult nsScriptSecurityManager::Init()
+ }
+ 
+ static nsScriptSecurityManager *gScriptSecMan = nsnull;
+ 
+ jsid nsScriptSecurityManager::sEnabledID   = JSID_VOID;
+ 
+ nsScriptSecurityManager::~nsScriptSecurityManager(void)
+ {
++    Preferences::RemoveObservers(this, kObservedPrefs);
+     NS_ASSERTION(!mContextPrincipals, "Leaking mContextPrincipals");
+     delete mOriginToPolicyMap;
+     if(mDefaultPolicy)
+         mDefaultPolicy->Drop();
+     delete mCapabilities;
+     gScriptSecMan = nsnull;
+ }
+ 
+@@ -3583,23 +3605,21 @@ nsScriptSecurityManager::InitPolicies()
+ 
+     // Get a JS context - we need it to create internalized strings later.
+     JSContext* cx = GetSafeJSContext();
+     NS_ASSERTION(cx, "failed to get JS context");
+     AutoCxPusher autoPusher(sJSContextStack, cx);
+     rv = InitDomainPolicy(cx, "default", mDefaultPolicy);
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+-    nsXPIDLCString policyNames;
+-    rv = mPrefBranch->GetCharPref("capability.policy.policynames",
+-                                            getter_Copies(policyNames));
+-
+-    nsXPIDLCString defaultPolicyNames;
+-    rv = mPrefBranch->GetCharPref("capability.policy.default_policynames",
+-                                            getter_Copies(defaultPolicyNames));
++    nsAdoptingCString policyNames =
++        Preferences::GetCString("capability.policy.policynames");
++
++    nsAdoptingCString defaultPolicyNames =
++        Preferences::GetCString("capability.policy.default_policynames");
+     policyNames += NS_LITERAL_CSTRING(" ") + defaultPolicyNames;
+ 
+     //-- Initialize domain policies
+     char* policyCurrent = policyNames.BeginWriting();
+     PRBool morePolicies = PR_TRUE;
+     while (morePolicies)
+     {
+         while(*policyCurrent == ' ' || *policyCurrent == ',')
+@@ -3614,21 +3634,21 @@ nsScriptSecurityManager::InitPolicies()
+         morePolicies = (*policyCurrent != '\0');
+         *policyCurrent = '\0';
+         policyCurrent++;
+ 
+         nsCAutoString sitesPrefName(
+             NS_LITERAL_CSTRING(sPolicyPrefix) +
+             nsDependentCString(nameBegin) +
+             NS_LITERAL_CSTRING(".sites"));
+-        nsXPIDLCString domainList;
+-        rv = mPrefBranch->GetCharPref(sitesPrefName.get(),
+-                                                getter_Copies(domainList));
+-        if (NS_FAILED(rv))
++        nsAdoptingCString domainList =
++            Preferences::GetCString(sitesPrefName.get());
++        if (!domainList) {
+             continue;
++        }
+ 
+         DomainPolicy* domainPolicy = new DomainPolicy();
+         if (!domainPolicy)
+             return NS_ERROR_OUT_OF_MEMORY;
+ 
+         if (!domainPolicy->Init())
+         {
+             delete domainPolicy;
+@@ -3719,18 +3739,19 @@ nsScriptSecurityManager::InitDomainPolic
+     nsresult rv;
+     nsCAutoString policyPrefix(NS_LITERAL_CSTRING(sPolicyPrefix) +
+                                nsDependentCString(aPolicyName) +
+                                NS_LITERAL_CSTRING("."));
+     PRUint32 prefixLength = policyPrefix.Length() - 1; // subtract the '.'
+ 
+     PRUint32 prefCount;
+     char** prefNames;
+-    rv = mPrefBranch->GetChildList(policyPrefix.get(),
+-                                   &prefCount, &prefNames);
++    nsIPrefBranch* branch = Preferences::GetRootBranch();
++    NS_ASSERTION(branch, "failed to get the root pref branch");
++    rv = branch->GetChildList(policyPrefix.get(), &prefCount, &prefNames);
+     if (NS_FAILED(rv)) return rv;
+     if (prefCount == 0)
+         return NS_OK;
+ 
+     //-- Populate the policy
+     PRUint32 currentPref = 0;
+     for (; currentPref < prefCount; currentPref++)
+     {
+@@ -3742,21 +3763,21 @@ nsScriptSecurityManager::InitDomainPolic
+         static const char sitesStr[] = "sites";
+ 
+         // We dealt with "sites" in InitPolicies(), so no need to do
+         // that again...
+         if (PL_strncmp(start, sitesStr, sizeof(sitesStr)-1) == 0)
+             continue;
+ 
+         // Get the pref value
+-        nsXPIDLCString prefValue;
+-        rv = mPrefBranch->GetCharPref(prefNames[currentPref],
+-                                                getter_Copies(prefValue));
+-        if (NS_FAILED(rv) || !prefValue)
++        nsAdoptingCString prefValue =
++            Preferences::GetCString(prefNames[currentPref]);
++        if (!prefValue) {
+             continue;
++        }
+ 
+         SecurityLevel secLevel;
+         if (PL_strcasecmp(prefValue, "noAccess") == 0)
+             secLevel.level = SCRIPT_SECURITY_NO_ACCESS;
+         else if (PL_strcasecmp(prefValue, "allAccess") == 0)
+             secLevel.level = SCRIPT_SECURITY_ALL_ACCESS;
+         else if (PL_strcasecmp(prefValue, "sameOrigin") == 0)
+             secLevel.level = SCRIPT_SECURITY_SAME_ORIGIN_ACCESS;
+@@ -3899,49 +3920,47 @@ nsScriptSecurityManager::InitPrincipals(
+     static const char idSuffix[] = ".id";
+     for (PRUint32 c = 0; c < aPrefCount; c++)
+     {
+         PRInt32 prefNameLen = PL_strlen(aPrefNames[c]) - 
+             (NS_ARRAY_LENGTH(idSuffix) - 1);
+         if (PL_strcasecmp(aPrefNames[c] + prefNameLen, idSuffix) != 0)
+             continue;
+ 
+-        nsXPIDLCString id;
+-        if (NS_FAILED(mPrefBranch->GetCharPref(aPrefNames[c], getter_Copies(id))))
++        nsAdoptingCString id = Preferences::GetCString(aPrefNames[c]);
++        if (!id) {
+             return NS_ERROR_FAILURE;
++        }
+ 
+         nsCAutoString grantedPrefName;
+         nsCAutoString deniedPrefName;
+         nsCAutoString subjectNamePrefName;
+         nsresult rv = GetPrincipalPrefNames(aPrefNames[c],
+                                             grantedPrefName,
+                                             deniedPrefName,
+                                             subjectNamePrefName);
+         if (rv == NS_ERROR_OUT_OF_MEMORY)
+             return rv;
+         if (NS_FAILED(rv))
+             continue;
+ 
+-        nsXPIDLCString grantedList;
+-        mPrefBranch->GetCharPref(grantedPrefName.get(),
+-                                           getter_Copies(grantedList));
+-        nsXPIDLCString deniedList;
+-        mPrefBranch->GetCharPref(deniedPrefName.get(),
+-                                           getter_Copies(deniedList));
+-        nsXPIDLCString subjectName;
+-        mPrefBranch->GetCharPref(subjectNamePrefName.get(),
+-                                           getter_Copies(subjectName));
++        nsAdoptingCString grantedList =
++            Preferences::GetCString(grantedPrefName.get());
++        nsAdoptingCString deniedList =
++            Preferences::GetCString(deniedPrefName.get());
++        nsAdoptingCString subjectName =
++            Preferences::GetCString(subjectNamePrefName.get());
+ 
+         //-- Delete prefs if their value is the empty string
+         if (id.IsEmpty() || (grantedList.IsEmpty() && deniedList.IsEmpty()))
+         {
+-            mPrefBranch->ClearUserPref(aPrefNames[c]);
+-            mPrefBranch->ClearUserPref(grantedPrefName.get());
+-            mPrefBranch->ClearUserPref(deniedPrefName.get());
+-            mPrefBranch->ClearUserPref(subjectNamePrefName.get());
++            Preferences::ClearUser(aPrefNames[c]);
++            Preferences::ClearUser(grantedPrefName.get());
++            Preferences::ClearUser(deniedPrefName.get());
++            Preferences::ClearUser(subjectNamePrefName.get());
+             continue;
+         }
+ 
+         //-- Create a principal based on the prefs
+         static const char certificateName[] = "capability.principal.certificate";
+         static const char codebaseName[] = "capability.principal.codebase";
+         static const char codebaseTrustedName[] = "capability.principal.codebaseTrusted";
+ 
+@@ -3973,96 +3992,73 @@ nsScriptSecurityManager::InitPrincipals(
+                                               grantedList, deniedList, nsnull, 
+                                               isCert, isTrusted);
+         if (NS_SUCCEEDED(rv))
+             mPrincipals.Put(newPrincipal, newPrincipal);
+     }
+     return NS_OK;
+ }
+ 
+-const char nsScriptSecurityManager::sJSEnabledPrefName[] =
+-    "javascript.enabled";
+-const char nsScriptSecurityManager::sFileOriginPolicyPrefName[] =
+-    "security.fileuri.strict_origin_policy";
+-#ifdef XPC_IDISPATCH_SUPPORT
+-const char nsScriptSecurityManager::sXPCDefaultGrantAllName[] =
+-    "security.classID.allowByDefault";
+-#endif
+-
+ inline void
+ nsScriptSecurityManager::ScriptSecurityPrefChanged()
+ {
+     // JavaScript defaults to enabled in failure cases.
+     mIsJavaScriptEnabled = PR_TRUE;
+ 
+     sStrictFileOriginPolicy = PR_TRUE;
+ 
+ #ifdef XPC_IDISPATCH_SUPPORT
+     // Granting XPC Priveleges defaults to disabled in failure cases.
+     mXPCDefaultGrantAll = PR_FALSE;
+ #endif
+ 
+     nsresult rv;
+-    if (!mPrefBranch) {
++    if (!mPrefInitialized) {
+         rv = InitPrefs();
+         if (NS_FAILED(rv))
+             return;
+     }
+ 
+-    PRBool temp;
+-    rv = mPrefBranch->GetBoolPref(sJSEnabledPrefName, &temp);
+-    if (NS_SUCCEEDED(rv))
+-        mIsJavaScriptEnabled = temp;
+-
+-    rv = mPrefBranch->GetBoolPref(sFileOriginPolicyPrefName, &temp);
+-    if (NS_SUCCEEDED(rv))
+-        sStrictFileOriginPolicy = NS_SUCCEEDED(rv) && temp;
++    mIsJavaScriptEnabled =
++        Preferences::GetBool(sJSEnabledPrefName, mIsJavaScriptEnabled);
++
++    sStrictFileOriginPolicy =
++        Preferences::GetBool(sFileOriginPolicyPrefName, PR_FALSE);
+ 
+ #ifdef XPC_IDISPATCH_SUPPORT
+-    rv = mPrefBranch->GetBoolPref(sXPCDefaultGrantAllName, &temp);
+-    if (NS_SUCCEEDED(rv))
+-        mXPCDefaultGrantAll = temp;
++    mXPCDefaultGrantAll =
++        Preferences::GetBoolPref(sXPCDefaultGrantAllName, mXPCDefaultGrantAll);
+ #endif
+ }
+ 
+ nsresult
+ nsScriptSecurityManager::InitPrefs()
+ {
+     nsresult rv;
+-    nsCOMPtr<nsIPrefService> prefService(do_GetService(NS_PREFSERVICE_CONTRACTID, &rv));
+-    NS_ENSURE_SUCCESS(rv, rv);
+-    rv = prefService->GetBranch(nsnull, getter_AddRefs(mPrefBranch));
+-    NS_ENSURE_SUCCESS(rv, rv);
+-    nsCOMPtr<nsIPrefBranch2> prefBranchInternal(do_QueryInterface(mPrefBranch, &rv));
+-    NS_ENSURE_SUCCESS(rv, rv);
++    nsIPrefBranch* branch = Preferences::GetRootBranch();
++    NS_ENSURE_TRUE(branch, NS_ERROR_FAILURE);
++
++    mPrefInitialized = PR_TRUE;
+ 
+     // Set the initial value of the "javascript.enabled" prefs
+     ScriptSecurityPrefChanged();
++
+     // set observer callbacks in case the value of the prefs change
+-    prefBranchInternal->AddObserver(sJSEnabledPrefName, this, PR_FALSE);
+-    prefBranchInternal->AddObserver(sFileOriginPolicyPrefName, this, PR_FALSE);
+-#ifdef XPC_IDISPATCH_SUPPORT
+-    prefBranchInternal->AddObserver(sXPCDefaultGrantAllName, this, PR_FALSE);
+-#endif
++    Preferences::AddStrongObservers(this, kObservedPrefs);
++
+     PRUint32 prefCount;
+     char** prefNames;
+-
+-    // Set a callback for policy pref changes
+-    prefBranchInternal->AddObserver(sPolicyPrefix, this, PR_FALSE);
+-
+     //-- Initialize the principals database from prefs
+-    rv = mPrefBranch->GetChildList(sPrincipalPrefix, &prefCount, &prefNames);
++    rv = branch->GetChildList(sPrincipalPrefix, &prefCount, &prefNames);
+     if (NS_SUCCEEDED(rv) && prefCount > 0)
+     {
+         rv = InitPrincipals(prefCount, (const char**)prefNames);
+         NS_FREE_XPCOM_ALLOCATED_POINTER_ARRAY(prefCount, prefNames);
+         NS_ENSURE_SUCCESS(rv, rv);
+     }
+-    //-- Set a callback for principal changes
+-    prefBranchInternal->AddObserver(sPrincipalPrefix, this, PR_FALSE);
+ 
+     return NS_OK;
+ }
+ 
+ ///////////////////////////////////////////////////////////////////////////////
+ // The following code prints the contents of the policy DB to the console.
+ #ifdef DEBUG_CAPS_HACKER
+ 

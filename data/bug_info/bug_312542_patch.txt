@@ -1,0 +1,22 @@
+Index: mail/base/content/messageWindow.xul
+===================================================================
+RCS file: /cvsroot/mozilla/mail/base/content/messageWindow.xul,v
+retrieving revision 1.24
+diff -u -p -6 -r1.24 messageWindow.xul
+--- mail/base/content/messageWindow.xul	27 Jun 2005 21:20:59 -0000	1.24
++++ mail/base/content/messageWindow.xul	25 Oct 2005 08:41:15 -0000
+@@ -160,13 +160,13 @@
+     <hbox id="msgHeaderView"/>
+ 
+     <!-- message view -->
+     <browser id="messagepane" context="messagePaneContext" 
+              style="height: 0px; min-height: 1px" flex="1" name="messagepane" 
+              disablesecurity="true" disablehistory="true" type="content-primary" 
+-             src="about:blank" onclick="contentAreaClick(event);" autofind="false"/>
++             src="about:blank" onclick="return contentAreaClick(event);" autofind="false"/>
+     <hbox id="attachmentView"/>
+   </vbox>  
+ 
+   <statusbar class="chromeclass-status" id="status-bar"/>
+ 
+ </window>

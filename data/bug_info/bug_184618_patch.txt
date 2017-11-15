@@ -1,0 +1,81 @@
+Index: nsGlobalWindow.cpp
+===================================================================
+RCS file: /m/pub/mozilla/dom/src/base/nsGlobalWindow.cpp,v
+retrieving revision 1.593
+diff -u -p -7 -r1.593 nsGlobalWindow.cpp
+--- nsGlobalWindow.cpp	29 May 2003 00:48:34 -0000	1.593
++++ nsGlobalWindow.cpp	3 Jun 2003 21:58:53 -0000
+@@ -214,14 +214,15 @@ GlobalWindowImpl::GlobalWindowImpl()
+     mTimeoutPublicIdCounter(1),
+     mTimeoutFiringDepth(0),
+     mFirstDocumentLoad(PR_TRUE),
+     mIsScopeClear(PR_TRUE),
+     mIsDocumentLoaded(PR_FALSE),
+     mFullScreen(PR_FALSE),
+     mIsClosed(PR_FALSE),
++    mOpenerWasCleared(PR_FALSE),
+     mLastMouseButtonAction(LL_ZERO),
+     mGlobalObjectOwner(nsnull),
+     mDocShell(nsnull),
+     mMutationBits(0),
+     mChromeEventHandler(nsnull),
+     mFrameElement(nsnull)
+ {
+@@ -1412,14 +1413,17 @@ NS_IMETHODIMP
+ GlobalWindowImpl::SetOpener(nsIDOMWindowInternal* aOpener)
+ {
+   // check if we were called from a privileged chrome script.
+   // If not, opener is settable only to null.
+   if (aOpener && !IsCallerChrome()) {
+     return NS_OK;
+   }
++  if (mOpener && !aOpener)
++    mOpenerWasCleared = PR_TRUE;
++
+   mOpener = aOpener;
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ GlobalWindowImpl::GetStatus(nsAString& aStatus)
+@@ -3249,15 +3253,15 @@ GlobalWindowImpl::Close()
+ 
+     return NS_OK;
+   }
+ 
+   // Don't allow scripts from content to close windows
+   // that were not opened by script
+   nsresult rv;
+-  if (!mOpener) {
++  if (!mOpener && !mOpenerWasCleared) {
+     nsCOMPtr<nsIScriptSecurityManager> secMan(
+       do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID, &rv));
+     if (NS_SUCCEEDED(rv)) {
+       PRBool inChrome = PR_TRUE;
+       rv = secMan->SubjectPrincipalIsSystem(&inChrome);
+       if (NS_SUCCEEDED(rv) && !inChrome) {
+         PRBool allowClose = PR_TRUE;
+Index: nsGlobalWindow.h
+===================================================================
+RCS file: /m/pub/mozilla/dom/src/base/nsGlobalWindow.h,v
+retrieving revision 1.207
+diff -u -p -7 -r1.207 nsGlobalWindow.h
+--- nsGlobalWindow.h	29 May 2003 00:48:35 -0000	1.207
++++ nsGlobalWindow.h	3 Jun 2003 21:58:54 -0000
+@@ -297,14 +297,15 @@ protected:
+   PRUint32                      mTimeoutPublicIdCounter;
+   PRUint32                      mTimeoutFiringDepth;
+   PRPackedBool                  mFirstDocumentLoad;
+   PRPackedBool                  mIsScopeClear;
+   PRPackedBool                  mIsDocumentLoaded; // true between onload and onunload events
+   PRPackedBool                  mFullScreen;
+   PRPackedBool                  mIsClosed;
++  PRPackedBool                  mOpenerWasCleared;
+   PRTime                        mLastMouseButtonAction;
+   nsString                      mStatus;
+   nsString                      mDefaultStatus;
+ 
+   nsIScriptGlobalObjectOwner*   mGlobalObjectOwner; // Weak Reference
+   nsIDocShell*                  mDocShell;  // Weak Reference
+   PRUint32                      mMutationBits;

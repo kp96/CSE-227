@@ -1,0 +1,49 @@
+Index: mozilla/security/manager/ssl/src/nsNSSCallbacks.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSCallbacks.cpp,v
+retrieving revision 1.53
+diff -u -1 -0 -p -r1.53 nsNSSCallbacks.cpp
+--- mozilla/security/manager/ssl/src/nsNSSCallbacks.cpp	3 Oct 2007 11:49:55 -0000	1.53
++++ mozilla/security/manager/ssl/src/nsNSSCallbacks.cpp	12 Oct 2007 21:10:44 -0000
+@@ -830,31 +830,31 @@ SECStatus PR_CALLBACK AuthCertificateCal
+         if (node->cert->isperm) {
+           // We don't need to remember certs already stored in perm db.
+           continue;
+         }
+         
+         if (node->cert == serverCert) {
+           // We don't want to remember the server cert, 
+           // the code that cares for displaying page info does this already.
+           continue;
+         }
+-        
+-        // We have found a signer cert that we want to remember.
+ 
+-        if (!nssComponent) {
+-          // delay getting the service until we really need it
+-          nsresult rv;
+-          nssComponent = do_GetService(kNSSComponentCID, &rv);
+-        }
+-        
+-        if (nssComponent) {
+-          nssComponent->RememberCert(node->cert);
++        // We have found a signer cert that we want to remember.
++        nsCAutoString nickname;
++        nickname = nsNSSCertificate::defaultServerNickname(node->cert);
++        if (!nickname.IsEmpty()) {
++          PK11SlotInfo *slot = PK11_GetInternalKeySlot();
++          if (slot) {
++            PK11_ImportCert(slot, node->cert, CK_INVALID_HANDLE, 
++                            const_cast<char*>(nickname.get()), PR_FALSE);
++            PK11_FreeSlot(slot);
++          }
+         }
+       }
+ 
+       CERT_DestroyCertList(certList);
+     }
+     else {
+       // The connection will be terminated, let's provide a minimal SSLStatus
+       // to the caller that contains at least the cert and its status.
+       nsNSSSocketInfo* infoObject = (nsNSSSocketInfo*) fd->higher->secret;
+ 

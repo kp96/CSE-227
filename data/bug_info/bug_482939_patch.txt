@@ -1,0 +1,111 @@
+diff --git a/security/manager/boot/src/nsSecureBrowserUIImpl.cpp b/security/manager/boot/src/nsSecureBrowserUIImpl.cpp
+--- a/security/manager/boot/src/nsSecureBrowserUIImpl.cpp
++++ b/security/manager/boot/src/nsSecureBrowserUIImpl.cpp
+@@ -157,17 +157,17 @@ class nsAutoAtomic {
+ };
+ 
+ 
+ nsSecureBrowserUIImpl::nsSecureBrowserUIImpl()
+   : mNotifiedSecurityState(lis_no_security),
+     mNotifiedToplevelIsEV(PR_FALSE),
+     mIsViewSource(PR_FALSE)
+ {
+-  mMonitor = PR_NewMonitor();
++  mMonitor = nsAutoMonitor::NewMonitor("security.secureBrowserUIImplMonitor");
+   mOnStateLocationChangeReentranceDetection = 0;
+   mTransferringRequests.ops = nsnull;
+   mNewToplevelSecurityState = STATE_IS_INSECURE;
+   mNewToplevelIsEV = PR_FALSE;
+   mNewToplevelSecurityStateKnown = PR_TRUE;
+   ResetStateTracking();
+   mSubRequestsHighSecurity = 0;
+   mSubRequestsLowSecurity = 0;
+@@ -182,17 +182,17 @@ nsSecureBrowserUIImpl::nsSecureBrowserUI
+ 
+ nsSecureBrowserUIImpl::~nsSecureBrowserUIImpl()
+ {
+   if (mTransferringRequests.ops) {
+     PL_DHashTableFinish(&mTransferringRequests);
+     mTransferringRequests.ops = nsnull;
+   }
+   if (mMonitor)
+-    PR_DestroyMonitor(mMonitor);
++    nsAutoMonitor::DestroyMonitor(mMonitor);
+ }
+ 
+ NS_IMPL_THREADSAFE_ISUPPORTS6(nsSecureBrowserUIImpl,
+                               nsISecureBrowserUI,
+                               nsIWebProgressListener,
+                               nsIFormSubmitObserver,
+                               nsIObserver,
+                               nsISupportsWeakReference,
+diff --git a/security/manager/ssl/src/nsCertOverrideService.cpp b/security/manager/ssl/src/nsCertOverrideService.cpp
+--- a/security/manager/ssl/src/nsCertOverrideService.cpp
++++ b/security/manager/ssl/src/nsCertOverrideService.cpp
+@@ -115,23 +115,23 @@ nsCertOverride::convertStringToBits(cons
+ 
+ NS_IMPL_THREADSAFE_ISUPPORTS3(nsCertOverrideService, 
+                               nsICertOverrideService,
+                               nsIObserver,
+                               nsISupportsWeakReference)
+ 
+ nsCertOverrideService::nsCertOverrideService()
+ {
+-  monitor = PR_NewMonitor();
++  monitor = nsAutoMonitor::NewMonitor("security.certOverrideServiceMonitor");
+ }
+ 
+ nsCertOverrideService::~nsCertOverrideService()
+ {
+   if (monitor)
+-    PR_DestroyMonitor(monitor);
++    nsAutoMonitor::DestroyMonitor(monitor);
+ }
+ 
+ nsresult
+ nsCertOverrideService::Init()
+ {
+   if (!mSettingsTable.Init())
+     return NS_ERROR_OUT_OF_MEMORY;
+ 
+@@ -904,9 +904,9 @@ nsCertOverrideService::GetHostWithPort(c
+ {
+   nsCAutoString hostPort(aHostName);
+   if (aPort == -1)
+     aPort = 443;
+   hostPort.AppendLiteral(":");
+   hostPort.AppendInt(aPort);
+   
+   _retval.Assign(hostPort);
+-}
+\ No newline at end of file
++}
+diff --git a/security/manager/ssl/src/nsRecentBadCerts.cpp b/security/manager/ssl/src/nsRecentBadCerts.cpp
+--- a/security/manager/ssl/src/nsRecentBadCerts.cpp
++++ b/security/manager/ssl/src/nsRecentBadCerts.cpp
+@@ -57,23 +57,23 @@
+ NSSCleanupAutoPtrClass(CERTCertificate, CERT_DestroyCertificate)
+ 
+ NS_IMPL_THREADSAFE_ISUPPORTS1(nsRecentBadCertsService, 
+                               nsIRecentBadCertsService)
+ 
+ nsRecentBadCertsService::nsRecentBadCertsService()
+ :mNextStorePosition(0)
+ {
+-  monitor = PR_NewMonitor();
++  monitor = nsAutoMonitor::NewMonitor("security.recentBadCertsMonitor");
+ }
+ 
+ nsRecentBadCertsService::~nsRecentBadCertsService()
+ {
+   if (monitor)
+-    PR_DestroyMonitor(monitor);
++    nsAutoMonitor::DestroyMonitor(monitor);
+ }
+ 
+ nsresult
+ nsRecentBadCertsService::Init()
+ {
+   return NS_OK;
+ }
+ 

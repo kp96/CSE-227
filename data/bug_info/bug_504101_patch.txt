@@ -1,0 +1,17 @@
+From: timeless@mozdev.org
+
+Bug 504101 mRememberClientAuthCertificate is unintialized
+r=kaie
+
+
+diff --git a/security/manager/ssl/src/nsNSSIOLayer.cpp b/security/manager/ssl/src/nsNSSIOLayer.cpp
+--- a/security/manager/ssl/src/nsNSSIOLayer.cpp
++++ b/security/manager/ssl/src/nsNSSIOLayer.cpp
+@@ -220,6 +220,7 @@ nsNSSSocketInfo::nsNSSSocketInfo()
+     mHasCleartextPhase(PR_FALSE),
+     mHandshakeInProgress(PR_FALSE),
+     mAllowTLSIntoleranceTimeout(PR_TRUE),
++    mRememberClientAuthCertificate(PR_FALSE),
+     mHandshakeStartTime(0),
+     mPort(0)
+ {

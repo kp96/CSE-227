@@ -1,0 +1,38 @@
+Index: nsExternalHelperAppService.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/uriloader/exthandler/nsExternalHelperAppService.cpp,v
+retrieving revision 1.315
+diff -p -u -8 -r1.315 nsExternalHelperAppService.cpp
+--- nsExternalHelperAppService.cpp	17 Jul 2007 22:59:58 -0000	1.315
++++ nsExternalHelperAppService.cpp	22 Jul 2007 04:47:31 -0000
+@@ -1209,17 +1209,29 @@ class nsExternalLoadRequest : public nsR
+ 
+   private:
+     nsCOMPtr<nsIURI>    mURI;
+     nsCOMPtr<nsIPrompt> mPrompt;
+ };
+ 
+ NS_IMETHODIMP nsExternalHelperAppService::LoadURI(nsIURI * aURL, nsIPrompt * aPrompt)
+ {
+-  nsCOMPtr<nsIRunnable> event = new nsExternalLoadRequest(aURL, aPrompt);
++  nsCAutoString spec;
++  aURL->GetSpec(spec);
++
++  spec.ReplaceSubstring("\"", "%22");
++  spec.ReplaceSubstring("'", "%27");
++  spec.ReplaceSubstring("`", "%60");
++
++  nsCOMPtr<nsIIOService> ios(do_GetIOService());
++  nsCOMPtr<nsIURI> uri;
++  nsresult rv = ios->NewURI(spec, nsnull, nsnull, getter_AddRefs(uri));
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  nsCOMPtr<nsIRunnable> event = new nsExternalLoadRequest(uri, aPrompt);
+   return NS_DispatchToCurrentThread(event);
+ }
+ 
+ // helper routines used by LoadURI to check whether we're allowed
+ // to load external schemes and whether or not to warn the user
+ 
+ static const char kExternalProtocolPrefPrefix[]  = "network.protocol-handler.external.";
+ static const char kExternalProtocolDefaultPref[] = "network.protocol-handler.external-default";

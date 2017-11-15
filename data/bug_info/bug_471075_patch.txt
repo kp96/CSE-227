@@ -1,0 +1,90 @@
+diff --git a/suite/common/certError.xhtml b/suite/common/certError.xhtml
+--- a/suite/common/certError.xhtml
++++ b/suite/common/certError.xhtml
+@@ -103,18 +103,20 @@
+       {
+         var intro = document.getElementById('introContentP1');
+         var node = document.evaluate('//text()[string()="#1"]', intro, null,
+                                      XPathResult.ANY_UNORDERED_NODE_TYPE,
+                                      null).singleNodeValue;
+         if (node)
+           node.textContent = location.host;
+ 
+-        if (getCSSClass() == "expertBadCert")
++        if (getCSSClass() == "expertBadCert") {
++          toggle('technicalContent');
+           toggle('expertContent');
++        }
+ 
+         // Rather than textContent, we need to treat description as HTML
+         var sd = document.getElementById("technicalContentText");
+         if (!sd)
+           return;
+ 
+         var desc = getDescription();
+ 
+@@ -171,17 +173,17 @@
+          *
+          * The certificate is only valid for garage.maemo.org
+          */
+         if (endsWith(thisHost, "." + okHost))
+           link.href = proto + "//" + okHost;
+ 
+         // If we set a link, meaning there's something helpful for
+         // the user here, expand the section by default
+-        if (link.href)
++        if (link.href && getCSSClass() != "expertBadCert")
+           toggle("technicalContent");
+       }
+ 
+       function endsWith(haystack, needle) {
+         return haystack.slice(-needle.length) == needle;
+       }
+ 
+       function toggle(id) {
+@@ -214,23 +216,23 @@
+         <div id="whatShouldIDoContent">
+           <h2>&certerror.whatShouldIDo.heading;</h2>
+           <div id="whatShouldIDoContentText">
+             <p>&certerror.whatShouldIDo.content;</p>
+             <xul:button xmlns:xul='http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul' id='getMeOutOfHereButton' label='&certerror.getMeOutOfHere.label;'/>
+           </div>
+         </div>
+ 
++        <!-- The following sections can be unhidden by default by setting the
++             "browser.xul.error_pages.expert_bad_cert" pref to true -->
+         <div id="technicalContent" collapsed="true">
+           <h2 onclick="toggle('technicalContent');" id="technicalContentHeading">&certerror.technical.heading;</h2>
+           <p id="technicalContentText"/>
+         </div>
+ 
+-        <!-- This section can be unhidden by default by setting the
+-        "browser.xul.error_pages.expert_bad_cert" pref to true -->
+         <div id="expertContent" collapsed="true">
+           <h2 onclick="toggle('expertContent');" id="expertContentHeading">&certerror.expert.heading;</h2>
+           <div>
+             <p>&certerror.expert.content;</p>
+             <p>&certerror.expert.contentPara2;</p>
+             <xul:button xmlns:xul='http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul' id='exceptionDialogButton' label='&certerror.addException.label;'/>
+           </div>
+         </div>
+diff --git a/suite/common/tests/browser/browser_bug463504.js b/suite/common/tests/browser/browser_bug463504.js
+--- a/suite/common/tests/browser/browser_bug463504.js
++++ b/suite/common/tests/browser/browser_bug463504.js
+@@ -30,14 +30,16 @@ function testBrokenCert() {
+ 
+   newBrowser.reload();
+   window.setTimeout(testExpertPref, 2000);
+ }
+ 
+ function testExpertPref() {
+ 
+   var expertDiv = gBrowser.contentWindow.document.getElementById("expertContent");
++  var technicalDiv = gBrowser.contentWindow.document.getElementById("technicalContent");
+   ok(!expertDiv.hasAttribute("collapsed"), "Expert content should not be collapsed with the expert mode pref set");
++  ok(!technicalDiv.hasAttribute("collapsed"), "Technical content should not be collapsed with the expert mode pref set");
+ 
+   // Clean up
+   gBrowser.removeCurrentTab();
+   finish();
+ }

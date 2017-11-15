@@ -1,0 +1,279 @@
+diff -r b8f1ba61d9bc security/manager/ssl/src/nsCertOverrideService.cpp
+--- a/security/manager/ssl/src/nsCertOverrideService.cpp	Fri Apr 10 16:42:29 2009 -0400
++++ b/security/manager/ssl/src/nsCertOverrideService.cpp	Sat Apr 11 17:37:47 2009 +0100
+@@ -423,17 +423,19 @@ GetCertFingerprintByOidTag(CERTCertifica
+ 
+   PK11_HashBuf(aOidTag, (unsigned char*)fingerprint->Data(), 
+                nsscert->derCert.data, nsscert->derCert.len);
+ 
+   SECItem fpItem;
+   fpItem.data = (unsigned char*)fingerprint->Data();
+   fpItem.len = hash_len;
+ 
+-  fp.Adopt(CERT_Hexify(&fpItem, 1));
++  char *tmpstr = CERT_Hexify(&fpItem, 1);
++  fp.Assign(tmpstr);
++  PORT_Free(tmpstr);
+   fingerprint->Release();
+   return NS_OK;
+ }
+ 
+ static nsresult
+ GetCertFingerprintByOidTag(nsIX509Cert *aCert,
+                            SECOidTag aOidTag, 
+                            nsCString &fp)
+diff -r b8f1ba61d9bc security/manager/ssl/src/nsNSSCallbacks.cpp
+--- a/security/manager/ssl/src/nsNSSCallbacks.cpp	Fri Apr 10 16:42:29 2009 -0400
++++ b/security/manager/ssl/src/nsNSSCallbacks.cpp	Sat Apr 11 17:37:47 2009 +0100
+@@ -939,19 +939,20 @@ void PR_CALLBACK HandshakeCallback(PRFil
+           status->mServerCert = nssc;
+         }
+       }
+     }
+ 
+     status->mHaveKeyLengthAndCipher = PR_TRUE;
+     status->mKeyLength = keyLength;
+     status->mSecretKeyLength = encryptBits;
+-    status->mCipherName.Adopt(cipherName);
++    status->mCipherName.Assign(cipherName);
+   }
+ 
++  PORT_Free(cipherName);
+   PR_FREEIF(certOrgName);
+   PR_Free(signer);
+ }
+ 
+ SECStatus PR_CALLBACK AuthCertificateCallback(void* client_data, PRFileDesc* fd,
+                                               PRBool checksig, PRBool isServer) {
+   nsNSSShutDownPreventionLock locker;
+ 
+diff -r b8f1ba61d9bc security/manager/ssl/src/nsNSSCertificate.cpp
+--- a/security/manager/ssl/src/nsNSSCertificate.cpp	Fri Apr 10 16:42:29 2009 -0400
++++ b/security/manager/ssl/src/nsNSSCertificate.cpp	Sat Apr 11 17:37:47 2009 +0100
+@@ -979,19 +979,20 @@ nsNSSCertificate::GetIssuerName(nsAStrin
+ NS_IMETHODIMP
+ nsNSSCertificate::GetSerialNumber(nsAString &_serialNumber)
+ {
+   nsNSSShutDownPreventionLock locker;
+   if (isAlreadyShutDown())
+     return NS_ERROR_NOT_AVAILABLE;
+ 
+   _serialNumber.Truncate();
+-  nsXPIDLCString tmpstr; tmpstr.Adopt(CERT_Hexify(&mCert->serialNumber, 1));
+-  if (tmpstr.get()) {
++  char *tmpstr = CERT_Hexify(&mCert->serialNumber, 1);
++  if (tmpstr) {
+     _serialNumber = NS_ConvertASCIItoUTF16(tmpstr);
++    PORT_Free(tmpstr);
+     return NS_OK;
+   }
+   return NS_ERROR_FAILURE;
+ }
+ 
+ NS_IMETHODIMP
+ nsNSSCertificate::GetSha1Fingerprint(nsAString &_sha1Fingerprint)
+ {
+@@ -1002,19 +1003,20 @@ nsNSSCertificate::GetSha1Fingerprint(nsA
+   _sha1Fingerprint.Truncate();
+   unsigned char fingerprint[20];
+   SECItem fpItem;
+   memset(fingerprint, 0, sizeof fingerprint);
+   PK11_HashBuf(SEC_OID_SHA1, fingerprint, 
+                mCert->derCert.data, mCert->derCert.len);
+   fpItem.data = fingerprint;
+   fpItem.len = SHA1_LENGTH;
+-  nsXPIDLCString fpStr; fpStr.Adopt(CERT_Hexify(&fpItem, 1));
+-  if (fpStr.get()) {
++  char *fpStr = CERT_Hexify(&fpItem, 1);
++  if (fpStr) {
+     _sha1Fingerprint = NS_ConvertASCIItoUTF16(fpStr);
++    PORT_Free(fpStr);
+     return NS_OK;
+   }
+   return NS_ERROR_FAILURE;
+ }
+ 
+ NS_IMETHODIMP
+ nsNSSCertificate::GetMd5Fingerprint(nsAString &_md5Fingerprint)
+ {
+@@ -1025,19 +1027,20 @@ nsNSSCertificate::GetMd5Fingerprint(nsAS
+   _md5Fingerprint.Truncate();
+   unsigned char fingerprint[20];
+   SECItem fpItem;
+   memset(fingerprint, 0, sizeof fingerprint);
+   PK11_HashBuf(SEC_OID_MD5, fingerprint, 
+                mCert->derCert.data, mCert->derCert.len);
+   fpItem.data = fingerprint;
+   fpItem.len = MD5_LENGTH;
+-  nsXPIDLCString fpStr; fpStr.Adopt(CERT_Hexify(&fpItem, 1));
+-  if (fpStr.get()) {
++  char *fpStr = CERT_Hexify(&fpItem, 1);
++  if (fpStr) {
+     _md5Fingerprint = NS_ConvertASCIItoUTF16(fpStr);
++    PORT_Free(fpStr);
+     return NS_OK;
+   }
+   return NS_ERROR_FAILURE;
+ }
+ 
+ NS_IMETHODIMP
+ nsNSSCertificate::GetTokenName(nsAString &aTokenName)
+ {
+diff -r b8f1ba61d9bc security/manager/ssl/src/nsNSSIOLayer.cpp
+--- a/security/manager/ssl/src/nsNSSIOLayer.cpp	Fri Apr 10 16:42:29 2009 -0400
++++ b/security/manager/ssl/src/nsNSSIOLayer.cpp	Sat Apr 11 17:37:47 2009 +0100
+@@ -103,17 +103,18 @@
+ //#define DUMP_BUFFER  //Enable this define along with
+                        //DEBUG_SSL_VERBOSE to dump SSL
+                        //read/write buffer to a log.
+                        //Uses PR_LOG except on Mac where
+                        //we always write out to our own
+                        //file.
+ 
+ NSSCleanupAutoPtrClass(CERTCertificate, CERT_DestroyCertificate)
+-NSSCleanupAutoPtrClass(char, PR_FREEIF)
++NSSCleanupAutoPtrClass(char, PL_strfree)
++NSSCleanupAutoPtrClass(void, PR_FREEIF)
+ NSSCleanupAutoPtrClass_WithParam(PRArenaPool, PORT_FreeArena, FalseParam, PR_FALSE)
+ 
+ /* SSM_UserCertChoice: enum for cert choice info */
+ typedef enum {ASK, AUTO} SSM_UserCertChoice;
+ 
+ 
+ static SECStatus PR_CALLBACK
+ nsNSS_SSLGetClientAuthData(void *arg, PRFileDesc *socket,
+@@ -260,24 +261,24 @@ nsNSSSocketInfo::SetHandshakePending(PRB
+ {
+   mHandshakePending = aHandshakePending;
+   return NS_OK;
+ }
+ 
+ nsresult
+ nsNSSSocketInfo::SetHostName(const char* host)
+ {
+-  mHostName.Adopt(host ? nsCRT::strdup(host) : 0);
++  mHostName.Adopt(host ? NS_strdup(host) : 0);
+   return NS_OK;
+ }
+ 
+ nsresult
+ nsNSSSocketInfo::GetHostName(char **host)
+ {
+-  *host = (mHostName) ? nsCRT::strdup(mHostName) : nsnull;
++  *host = (mHostName) ? NS_strdup(mHostName) : nsnull;
+   return NS_OK;
+ }
+ 
+ nsresult
+ nsNSSSocketInfo::SetPort(PRInt32 aPort)
+ {
+   mPort = aPort;
+   return NS_OK;
+@@ -2707,17 +2708,18 @@ SECStatus nsNSS_SSLGetClientAuthData(voi
+     serverCert = SSL_PeerCertificate(socket);
+     if (serverCert == NULL) {
+       /* couldn't get the server cert: what do I do? */
+       goto loser;
+     }
+ 
+     /* Get CN and O of the subject and O of the issuer */
+     char *ccn = CERT_GetCommonName(&serverCert->subject);
+-    charCleaner ccnCleaner(ccn);
++    void *v = ccn;
++    voidCleaner ccnCleaner(v);
+     NS_ConvertUTF8toUTF16 cn(ccn);
+ 
+     PRInt32 port;
+     info->GetPort(&port);
+     char *hostname = SSL_RevealURL(socket);
+     charCleaner hostnameCleaner(hostname);
+ 
+     nsString cn_host_port;
+diff -r b8f1ba61d9bc security/manager/ssl/src/nsSDR.cpp
+--- a/security/manager/ssl/src/nsSDR.cpp	Fri Apr 10 16:42:29 2009 -0400
++++ b/security/manager/ssl/src/nsSDR.cpp	Sat Apr 11 17:37:47 2009 +0100
+@@ -236,17 +236,17 @@ EncryptString(const char *text, char **_
+   }
+ 
+   rv = Encrypt((unsigned char *)text, PL_strlen(text), &encrypted, &eLen);
+   if (rv != NS_OK) { goto loser; }
+ 
+   rv = encode(encrypted, eLen, _retval);
+ 
+ loser:
+-  if (encrypted) nsMemory::Free(encrypted);
++  if (encrypted) PORT_Free(encrypted);
+ 
+   return rv;
+ }
+ 
+ /* string decryptString (in string crypt); */
+ NS_IMETHODIMP nsSecretDecoderRing::
+ DecryptString(const char *crypt, char **_retval)
+ {
+@@ -275,18 +275,18 @@ DecryptString(const char *crypt, char **
+ 
+   memcpy(r, decrypted, decryptedLen);
+   r[decryptedLen] = 0;
+ 
+   *_retval = r;
+   r = 0;
+ 
+ loser:
+-  if (decrypted) nsMemory::Free(decrypted);
+-  if (decoded) nsMemory::Free(decoded);
++  if (decrypted) PORT_Free(decrypted);
++  if (decoded) PR_DELETE(decoded);
+ 
+   return rv;
+ }
+ 
+ /* void changePassword(); */
+ NS_IMETHODIMP nsSecretDecoderRing::
+ ChangePassword()
+ {
+@@ -373,17 +373,21 @@ SetWindow(nsISupports *w)
+ 
+ // Support routines
+ 
+ nsresult nsSecretDecoderRing::
+ encode(const unsigned char *data, PRInt32 dataLen, char **_retval)
+ {
+   nsresult rv = NS_OK;
+ 
+-  *_retval = PL_Base64Encode((const char *)data, dataLen, NULL);
++  char *result = PL_Base64Encode((const char *)data, dataLen, NULL);
++  if (!result) { rv = NS_ERROR_OUT_OF_MEMORY; goto loser; }
++
++  *_retval = NS_strdup(result);
++  PR_DELETE(result);
+   if (!*_retval) { rv = NS_ERROR_OUT_OF_MEMORY; goto loser; }
+ 
+ loser:
+   return rv;
+ }
+ 
+ nsresult nsSecretDecoderRing::
+ decode(const char *data, unsigned char **result, PRInt32 * _retval)
+diff -r b8f1ba61d9bc security/manager/ssl/src/nsSSLStatus.cpp
+--- a/security/manager/ssl/src/nsSSLStatus.cpp	Fri Apr 10 16:42:29 2009 -0400
++++ b/security/manager/ssl/src/nsSSLStatus.cpp	Sat Apr 11 17:37:47 2009 +0100
+@@ -81,17 +81,17 @@ nsSSLStatus::GetSecretKeyLength(PRUint32
+ 
+ NS_IMETHODIMP
+ nsSSLStatus::GetCipherName(char** _result)
+ {
+   NS_ASSERTION(_result, "non-NULL destination required");
+   if (!mHaveKeyLengthAndCipher)
+     return NS_ERROR_NOT_AVAILABLE;
+ 
+-  *_result = PL_strdup(mCipherName.get());
++  *_result = ToNewCString(mCipherName);
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsSSLStatus::GetIsDomainMismatch(PRBool* _result)
+ {
+   NS_ASSERTION(_result, "non-NULL destination required");

@@ -1,0 +1,265 @@
+Index: security/manager/pki/resources/content/certManager.xul
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/certManager.xul,v
+retrieving revision 1.27
+diff -u -d -u -r1.27 certManager.xul
+--- security/manager/pki/resources/content/certManager.xul	12 Jul 2003 03:31:16 -0000	1.27
++++ security/manager/pki/resources/content/certManager.xul	25 Sep 2003 00:58:50 -0000
+@@ -38,7 +38,9 @@
+         title="&certmgr.title;"
+         onload="LoadCerts();"
+         buttons="accept,help"
+-        ondialoghelp="return doHelpButton();">
++        ondialoghelp="return doHelpButton();"
++        style="width: 48em; height: 32em;"
++        persist="screenX screenY width height">
+ 
+   <script type="application/x-javascript" src="chrome://help/content/contextHelp.js"/>
+   <script type="application/x-javascript" src="chrome://global/content/strres.js"/>
+Index: security/manager/pki/resources/content/pref-security.js
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/pref-security.js,v
+retrieving revision 1.8
+diff -u -d -u -r1.8 pref-security.js
+--- security/manager/pki/resources/content/pref-security.js	12 Jul 2003 00:36:01 -0000	1.8
++++ security/manager/pki/resources/content/pref-security.js	25 Sep 2003 00:58:50 -0000
+@@ -44,7 +44,7 @@
+       lastCertManager.focus();
+     else {
+       window.open('chrome://pippki/content/certManager.xul',  "",
+-                  'chrome,height=400,centerscreen,resizable=yes,dialog=no');
++                  'chrome,centerscreen,resizable,dialog');
+     }
+ }
+ 
+@@ -59,6 +59,6 @@
+       lastCertManager.focus();
+     else {
+       window.open('chrome://pippki/content/device_manager.xul',  "devmgr",
+-                  'chrome,height=400,centerscreen,resizable=yes,dialog=no');
++                  'chrome,centerscreen,resizable,dialog');
+     }
+ }
+Index: security/manager/pki/resources/content/device_manager.xul
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/device_manager.xul,v
+retrieving revision 1.15
+diff -u -d -u -r1.15 device_manager.xul
+--- security/manager/pki/resources/content/device_manager.xul	12 Jul 2003 03:31:16 -0000	1.15
++++ security/manager/pki/resources/content/device_manager.xul	25 Sep 2003 00:58:50 -0000
+@@ -35,6 +35,7 @@
+ 	windowtype="mozilla:devicemanager"
+         xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul" 
+         title="&devmgr.title;"
++        style="width: 52em; height: 32em;"
+         persist="screenX screenY width height"
+         onload="LoadModules();"
+         buttons="accept,help"
+Index: security/manager/pki/resources/content/crlManager.xul
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/crlManager.xul,v
+retrieving revision 1.15
+diff -u -d -u -r1.15 crlManager.xul
+--- security/manager/pki/resources/content/crlManager.xul	12 Jul 2003 03:31:16 -0000	1.15
++++ security/manager/pki/resources/content/crlManager.xul	25 Sep 2003 00:58:50 -0000
+@@ -39,7 +39,8 @@
+         title="&validation.crlmanager.label;"
+         xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+         style="width: 30em;"
+-        onload="onLoad();">
++        onload="onLoad();"
++        persist="screenX screenY width height">
+ 
+   <script type="application/x-javascript" src="chrome://global/content/strres.js"/>
+   <script type="application/x-javascript" src="chrome://pippki/content/crlManager.js"/>
+Index: security/manager/pki/resources/content/crlManager.js
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/crlManager.js,v
+retrieving revision 1.9
+diff -u -d -u -r1.9 crlManager.js
+--- security/manager/pki/resources/content/crlManager.js	14 Nov 2002 00:49:45 -0000	1.9
++++ security/manager/pki/resources/content/crlManager.js	25 Sep 2003 00:58:50 -0000
+@@ -207,7 +207,7 @@
+   var params = Components.classes[nsPKIParamBlock].createInstance(nsIPKIParamBlock);
+   params.setISupportAtIndex(1, crlEntry);
+   window.openDialog("chrome://pippki/content/pref-crlupdate.xul","",
+-                                   "chrome,resizable=1,modal=1,dialog=1",params);
++                    "chrome,centerscreen,modal", params);
+ }
+ 
+ function UpdateCRL()
+Index: security/manager/pki/resources/content/editcerts.js
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/editcerts.js,v
+retrieving revision 1.13
+diff -u -d -u -r1.13 editcerts.js
+--- security/manager/pki/resources/content/editcerts.js	14 Nov 2002 00:49:45 -0000	1.13
++++ security/manager/pki/resources/content/editcerts.js	25 Sep 2003 00:58:50 -0000
+@@ -221,7 +221,7 @@
+    if(cacert != null)
+    {
+       window.openDialog('chrome://pippki/content/editcacert.xul', cacert.dbKey,
+-                               'chrome,resizable=1,modal');
++                        'chrome,centerscreen,modal');
+    }
+    else
+    {
+Index: security/manager/pki/resources/content/pref-masterpass.js
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/pref-masterpass.js,v
+retrieving revision 1.15
+diff -u -d -u -r1.15 pref-masterpass.js
+--- security/manager/pki/resources/content/pref-masterpass.js	28 Jun 2002 18:08:19 -0000	1.15
++++ security/manager/pki/resources/content/pref-masterpass.js	25 Sep 2003 00:58:50 -0000
+@@ -105,12 +105,12 @@
+   var params = Components.classes[nsDialogParamBlock].createInstance(nsIDialogParamBlock);
+   params.SetString(1,"");
+   window.openDialog("chrome://pippki/content/changepassword.xul","",
+-              "chrome,resizable=1,modal=1,dialog=1",params);
++                    "chrome,centerscreen,modal",params);
+ }
+ 
+ function ResetPW()
+ {
+   window.open("chrome://pippki/content/resetpassword.xul",
+               internal_token.tokenName,
+-              "centerscreen,chrome,resizable=1,modal=1,dialog=1");
++              "chrome,centerscreen,modal");
+ }
+Index: security/manager/pki/resources/content/pref-ssl.xul
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/pref-ssl.xul,v
+retrieving revision 1.24
+diff -u -d -u -r1.24 pref-ssl.xul
+--- security/manager/pki/resources/content/pref-ssl.xul	24 Feb 2003 07:59:03 -0000	1.24
++++ security/manager/pki/resources/content/pref-ssl.xul	25 Sep 2003 00:58:50 -0000
+@@ -62,7 +62,7 @@
+       <button label="&edit.sslciphers;"
+               accesskey="&edit.sslciphers.accesskey;"
+               oncommand="window.openDialog('chrome://pippki/content/pref-ciphers.xul', '',
+-                             'modal=yes,resizable,chrome');"
++                                           'chrome,centerscreen,modal');"
+               id="editSSLCiphersButton"
+               prefstring="security.disable_button.editSSLCiphers"/>
+     </vbox>
+Index: security/manager/pki/resources/content/crlImportDialog.js
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/crlImportDialog.js,v
+retrieving revision 1.7
+diff -u -d -u -r1.7 crlImportDialog.js
+--- security/manager/pki/resources/content/crlImportDialog.js	14 Nov 2002 00:49:44 -0000	1.7
++++ security/manager/pki/resources/content/crlImportDialog.js	25 Sep 2003 00:58:50 -0000
+@@ -97,7 +97,7 @@
+   params.setISupportAtIndex(1, crl);
+   
+   window.openDialog("chrome://pippki/content/pref-crlupdate.xul","",
+-                                   "chrome,resizable=1,modal=1,dialog=1",params);
++                    "chrome,centerscreen,modal",params);
+   return true;
+ }
+ 
+Index: security/manager/pki/resources/content/pref-validation.js
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/pref-validation.js,v
+retrieving revision 1.4
+diff -u -d -u -r1.4 pref-validation.js
+--- security/manager/pki/resources/content/pref-validation.js	14 Oct 2002 14:48:42 -0000	1.4
++++ security/manager/pki/resources/content/pref-validation.js	25 Sep 2003 00:58:50 -0000
+@@ -90,6 +90,6 @@
+ function openCrlManager()
+ {
+     window.open('chrome://pippki/content/crlManager.xul',  "",
+-                'chrome,width=500,height=400,resizable=1');
++                'chrome,centerscreen,dialog,resizable');
+ }
+ 
+Index: security/manager/pki/resources/content/serverCrlExpired.js
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/serverCrlExpired.js,v
+retrieving revision 1.1
+diff -u -d -u -r1.1 serverCrlExpired.js
+--- security/manager/pki/resources/content/serverCrlExpired.js	9 Aug 2001 22:29:23 -0000	1.1
++++ security/manager/pki/resources/content/serverCrlExpired.js	25 Sep 2003 00:58:51 -0000
+@@ -62,7 +62,7 @@
+ function managerCrls()
+ {
+   window.open('chrome://pippki/content/crlManager.xul',  "",
+-                'chrome,width=500,height=400,resizable=1');
++              'chrome,centerscreen,dialog,resizable');
+ }
+ 
+ function addAttributeFromCert(nodeName, value)
+Index: security/manager/pki/resources/content/certManager.js
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/certManager.js,v
+retrieving revision 1.41
+diff -u -d -u -r1.41 certManager.js
+--- security/manager/pki/resources/content/certManager.js	8 Jul 2003 14:46:19 -0000	1.41
++++ security/manager/pki/resources/content/certManager.js	25 Sep 2003 00:58:51 -0000
+@@ -284,13 +284,13 @@
+     var others_tab = document.getElementById("others_tab");
+     if (ca_tab.selected) {
+       window.openDialog('chrome://pippki/content/editcacert.xul', certkey,
+-                  'chrome,width=100,resizable=1,modal');
++                        'chrome,centerscreen,modal');
+     } else if (others_tab.selected) {
+       window.openDialog('chrome://pippki/content/editemailcert.xul', certkey,
+-                  'chrome,width=100,resizable=1,modal');
++                        'chrome,centerscreen,modal');
+     } else {
+       window.openDialog('chrome://pippki/content/editsslcert.xul', certkey,
+-                  'chrome,width=100,resizable=1,modal');
++                        'chrome,centerscreen,modal');
+     }
+   }
+ }
+@@ -367,7 +367,7 @@
+   // Certs which could not get deleted, will have their corrensponding
+   // param string erased.
+   window.openDialog('chrome://pippki/content/deletecert.xul', "",
+-                'chrome,resizable=1,modal',params);
++                    'chrome,centerscreen,modal', params);
+  
+   if (params.GetInt(1) == 1) {
+     // user closed dialog with OK
+Index: security/manager/pki/resources/content/device_manager.js
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/device_manager.js,v
+retrieving revision 1.16
+diff -u -d -u -r1.16 device_manager.js
+--- security/manager/pki/resources/content/device_manager.js	18 Jan 2003 14:02:43 -0000	1.16
++++ security/manager/pki/resources/content/device_manager.js	25 Sep 2003 00:58:51 -0000
+@@ -337,7 +337,7 @@
+ function doLoad()
+ {
+   window.open("load_device.xul", "loaddevice", 
+-              "chrome,resizable=1,dialog=1,modal=1");
++              "chrome,centerscreen,modal");
+   var device_list = document.getElementById("device_list");
+   while (device_list.firstChild)
+     device_list.removeChild(device_list.firstChild);
+@@ -363,7 +363,7 @@
+   params.SetString(1,selected_slot.tokenName);
+   window.openDialog("changepassword.xul",
+               "", 
+-              "chrome,resizable=1,modal=1,dialog=1",params);
++              "chrome,centerscreen,modal", params);
+   showSlotInfo();
+   enableButtons();
+ }
+Index: security/manager/pki/resources/content/pref-ciphers.js
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/pref-ciphers.js,v
+retrieving revision 1.1
+diff -u -d -u -r1.1 pref-ciphers.js
+--- security/manager/pki/resources/content/pref-ciphers.js	7 Jan 2003 00:58:09 -0000	1.1
++++ security/manager/pki/resources/content/pref-ciphers.js	25 Sep 2003 00:58:51 -0000
+@@ -67,7 +67,7 @@
+ 
+ function showInfo(cipher_name) {
+   window.openDialog('chrome://pippki/content/cipherinfo.xul', cipher_name,
+-                    'modal=yes,resizable,chrome');
++                    'chrome,centerscreen,modal');
+ }
+ 
+ function doOK() {

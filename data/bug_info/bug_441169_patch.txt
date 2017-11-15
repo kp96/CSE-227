@@ -1,0 +1,82 @@
+diff --git a/docshell/resources/content/netError.xhtml b/docshell/resources/content/netError.xhtml
+--- a/docshell/resources/content/netError.xhtml
++++ b/docshell/resources/content/netError.xhtml
+@@ -214,8 +214,34 @@
+       function addDomainErrorLink() {
+         // Rather than textContent, we need to treat description as HTML
+         var sd = document.getElementById("errorShortDescText");
+-        if (sd)
+-          sd.innerHTML = getDescription();
++        if (sd) {
++          var desc = getDescription();
++          
++          // sanitize description text - see bug 441169
++          
++          // First, find the index of the <a> tag we care about, being careful not to
++          // use an over-greedy regex
++          var re = /<a id="cert_domain_link" title="([^"]+)">/;
++          var result = re.exec(desc);
++          if(!result)
++            return;
++          
++          // Remove sd's existing children
++          sd.textContent = "";
++
++          // Everything up to the link should be text content
++          sd.appendChild(document.createTextNode(desc.slice(0, result.index)));
++          
++          // Now create the link itself
++          var anchorEl = document.createElement("a");
++          anchorEl.setAttribute("id", "cert_domain_link");
++          anchorEl.setAttribute("title", result[1]);
++          anchorEl.appendChild(document.createTextNode(result[1]));
++          sd.appendChild(anchorEl);
++          
++          // Finally, append text for anything after the closing </a>
++          sd.appendChild(document.createTextNode(desc.slice(desc.indexOf("</a>") + "</a>".length)));
++        }
+ 
+         var link = document.getElementById('cert_domain_link');
+         if (!link)
+diff --git a/docshell/test/browser/Makefile.in b/docshell/test/browser/Makefile.in
+--- a/docshell/test/browser/Makefile.in
++++ b/docshell/test/browser/Makefile.in
+@@ -47,6 +47,7 @@
+ 		browser_bug349769.js \
+ 		browser_bug388121-1.js \
+ 		browser_bug388121-2.js \
++		browser_bug441169.js \
+ 		$(NULL)
+ 
+ # the tests below use FUEL, which is a Firefox-specific feature
+diff --git a/docshell/test/browser/browser_bug441169.js b/docshell/test/browser/browser_bug441169.js
+new file mode 100644
+--- /dev/null
++++ b/docshell/test/browser/browser_bug441169.js
+@@ -0,0 +1,26 @@
++/* Make sure that netError won't allow HTML injection through badcert parameters.  See bug 441169. */
++var newBrowser
++
++// An edited version of the standard neterror url which attempts to
++// insert a <span id="test_span"> tag into the text.  We will navigate to this page
++// and ensure that the span tag is not parsed as HTML.
++var chromeURL = "about:neterror?e=nssBadCert&u=https%3A//test.kuix.de/&c=UTF-8&d=This%20sentence%20should%20not%20be%20parsed%20to%20include%20a%20%3Cspan%20id=%22test_span%22%3Enamed%3C/span%3E%20span%20tag.%0A%0AThe%20certificate%20is%20only%20valid%20for%20%3Ca%20id=%22cert_domain_link%22%20title=%22kuix.de%22%3Ekuix.de%3C/a%3E%0A%0A(Error%20code%3A%20ssl_error_bad_cert_domain)";
++
++function test() {
++  waitForExplicitFinish();
++  
++  var newTab = gBrowser.addTab();
++  gBrowser.selectedTab = newTab;
++  newBrowser = gBrowser.getBrowserForTab(newTab);
++  
++  window.addEventListener("DOMContentLoaded", checkPage, false);
++  newBrowser.contentWindow.location = chromeURL;
++}
++
++function checkPage() {
++  
++  is(newBrowser.contentDocument.getElementById("test_span"), null, "Error message should not be parsed as HTML, and hence shouldn't include the 'test_span' element.");
++  
++  gBrowser.removeCurrentTab();
++  finish();
++}

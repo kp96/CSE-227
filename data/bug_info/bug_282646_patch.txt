@@ -1,0 +1,22 @@
+? diffs.txt
+Index: msgReadSMIMEOverlay.xul
+===================================================================
+RCS file: /cvsroot/mozilla/mail/extensions/smime/content/msgReadSMIMEOverlay.xul,v
+retrieving revision 1.2
+diff -u -r1.2 msgReadSMIMEOverlay.xul
+--- msgReadSMIMEOverlay.xul	4 Jun 2003 05:38:23 -0000	1.2
++++ msgReadSMIMEOverlay.xul	17 Feb 2005 23:43:49 -0000
+@@ -42,7 +42,12 @@
+ 
+ <overlay xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul">
+ 
+-  <script language="JavaScript" src="chrome://messenger-smime/content/msgReadSMIMEOverlay.js"/>
++  <script type="application/x-javascript" src="chrome://messenger-smime/content/msgReadSMIMEOverlay.js"/>
++
++  <stringbundleset id="stringbundleset">
++    <stringbundle id="bundle_read_smime" src="chrome://messenger-smime/locale/msgReadSMIMEOverlay.properties"/>
++    <stringbundle id="bundle_brand" src="chrome://global/locale/brand.properties"/>
++  </stringbundleset>
+ 
+   <commandset id="mailViewMenuItems">
+     <command id="cmd_viewSecurityStatus" oncommand="showMessageReadSecurityInfo();" disabled="true"/>

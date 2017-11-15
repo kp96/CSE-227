@@ -1,0 +1,144 @@
+# HG changeset patch
+# Parent 043ff4072e0343938d2d2b66bfa541a0b60d3a32
+# User Blake Kaplan <mrbkap@gmail.com>
+diff --git a/js/src/xpconnect/src/xpcmaps.h b/js/src/xpconnect/src/xpcmaps.h
+--- a/js/src/xpconnect/src/xpcmaps.h
++++ b/js/src/xpconnect/src/xpcmaps.h
+@@ -131,30 +131,34 @@ public:
+             return nsnull;
+         return entry->value;
+     }
+ 
+     inline XPCWrappedNative* Add(XPCWrappedNative* wrapper)
+     {
+         NS_PRECONDITION(wrapper,"bad param");
+         nsISupports* obj = wrapper->GetIdentityObject();
++        printf("Added to map %p wrapper %p (for %p)\n",
++               (void *)this, (void *)wrapper, (void *)obj);
+         Entry* entry = (Entry*)
+             JS_DHashTableOperate(mTable, obj, JS_DHASH_ADD);
+         if(!entry)
+             return nsnull;
+         if(entry->key)
+             return entry->value;
+         entry->key = obj;
+         entry->value = wrapper;
+         return wrapper;
+     }
+ 
+     inline void Remove(XPCWrappedNative* wrapper)
+     {
+         NS_PRECONDITION(wrapper,"bad param");
++        printf("Removed from map %p wrapper %p (for %p)\n",
++               (void *)this, (void *)wrapper, (void *)wrapper->Native());
+ #ifdef DEBUG
+         XPCWrappedNative* wrapperInMap = Find(wrapper->GetIdentityObject());
+         NS_ASSERTION(!wrapperInMap || wrapperInMap == wrapper,
+                      "About to remove a different wrapper with the same "
+                      "nsISupports identity! This will most likely cause serious "
+                      "problems!");
+ #endif
+         JS_DHashTableOperate(mTable, wrapper->GetIdentityObject(), JS_DHASH_REMOVE);
+diff --git a/js/src/xpconnect/src/xpcprivate.h b/js/src/xpconnect/src/xpcprivate.h
+--- a/js/src/xpconnect/src/xpcprivate.h
++++ b/js/src/xpconnect/src/xpcprivate.h
+@@ -2367,16 +2367,18 @@ public:
+     GetProto() const
+         {return HasProto() ?
+          (XPCWrappedNativeProto*)
+          (XPC_SCOPE_WORD(mMaybeProto) & ~XPC_SCOPE_MASK) : nsnull;}
+ 
+     void
+     SetProto(XPCWrappedNativeProto* p)
+         {NS_ASSERTION(!IsWrapperExpired(), "bad ptr!");
++         printf("SetProto called on wrapper %p (for %p) scope %p\n",
++                (void *)this, (void *)Native(), (void *)GetScope());
+          mMaybeProto = p;}
+ 
+     XPCWrappedNativeScope*
+     GetScope() const
+         {return GetProto() ? GetProto()->GetScope() :
+          (XPCWrappedNativeScope*)
+          (XPC_SCOPE_WORD(mMaybeScope) & ~XPC_SCOPE_MASK);}
+ 
+diff --git a/js/src/xpconnect/src/xpcwrappednative.cpp b/js/src/xpconnect/src/xpcwrappednative.cpp
+--- a/js/src/xpconnect/src/xpcwrappednative.cpp
++++ b/js/src/xpconnect/src/xpcwrappednative.cpp
+@@ -593,16 +593,19 @@ XPCWrappedNative::GetNewOrUsed(XPCCallCo
+ static nsresult
+ FinishCreate(XPCCallContext& ccx,
+              XPCWrappedNativeScope* Scope,
+              XPCNativeInterface* Interface,
+              nsWrapperCache *cache,
+              XPCWrappedNative* wrapper,
+              XPCWrappedNative** resultWrapper)
+ {
++    printf("Wrapper %p (for %p) scope %p\n",
++           (void *)wrapper, (void *)wrapper->Native(), (void *)wrapper->GetScope());
++
+ #if DEBUG_xpc_leaks
+     {
+         char* s = wrapper->ToString(ccx);
+         NS_ASSERTION(wrapper->GetFlatJSObject(), "eh?");
+         printf("Created wrapped native %s, flat JSObject is %p\n",
+                s, (void*)wrapper->GetFlatJSObject());
+         if(s)
+             JS_smprintf_free(s);
+@@ -706,16 +709,17 @@ XPCWrappedNative::Morph(XPCCallContext& 
+                         XPCWrappedNative** resultWrapper)
+ {
+     NS_ASSERTION(IS_SLIM_WRAPPER(existingJSObject),
+                  "Trying to morph a JSObject that's not a slim wrapper?");
+ 
+     nsISupports *identity =
+         static_cast<nsISupports*>(xpc_GetJSPrivate(existingJSObject));
+     XPCWrappedNativeProto *proto = GetSlimWrapperProto(existingJSObject);
++    printf("Morphing wrapper for %p\n", (void *)identity);
+ 
+     // We use an AutoMarkingPtr here because it is possible for JS gc to happen
+     // after we have Init'd the wrapper but *before* we add it to the hashtable.
+     // This would cause the mSet to get collected and we'd later crash. I've
+     // *seen* this happen.
+     AutoMarkingWrappedNativePtr wrapper(ccx);
+ 
+ #if DEBUG
+@@ -1461,17 +1465,18 @@ XPCWrappedNative::ReparentWrapperIfFound
+     JSObject *flat;
+     nsWrapperCache* cache = nsnull;
+     CallQueryInterface(aCOMObj, &cache);
+     if(cache)
+     {
+         flat = cache->GetWrapper();
+         if(flat && !IS_SLIM_WRAPPER(flat))
+             wrapper = static_cast<XPCWrappedNative*>(xpc_GetJSPrivate(flat));
+-        
++        //aOldScope = wrapper->GetScope();
++        JS_ASSERT(!wrapper || aOldScope == wrapper->GetScope());
+     }
+     else
+     {
+         rv = XPCWrappedNative::GetUsedOnly(ccx, aCOMObj, aOldScope, iface,
+                                            getter_AddRefs(wrapper));
+         if(NS_FAILED(rv))
+             return rv;
+ 
+@@ -3041,16 +3046,19 @@ NS_IMETHODIMP XPCWrappedNative::RefreshP
+     // If nothing needs to change then we're done.
+ 
+     if(newProto.get() == oldProto.get())
+         return NS_OK;
+ 
+     if(!JS_SetPrototype(ccx, GetFlatJSObject(), newProto->GetJSProtoObject()))
+         return UnexpectedFailure(NS_ERROR_FAILURE);
+ 
++    printf("RefreshPrototype called on wrapper %p (for %p)\n",
++           (void *)this, (void *)Native());
++
+     SetProto(newProto);
+ 
+     if(mScriptableInfo == oldProto->GetScriptableInfo())
+         mScriptableInfo = newProto->GetScriptableInfo();
+ 
+     return NS_OK;
+ }
+ 

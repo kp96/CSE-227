@@ -1,0 +1,227 @@
+Index: include/nsScriptSecurityManager.h
+===================================================================
+RCS file: /cvsroot/mozilla/caps/include/nsScriptSecurityManager.h,v
+retrieving revision 1.61
+diff -b -u -8 -r1.61 nsScriptSecurityManager.h
+--- include/nsScriptSecurityManager.h	14 Jun 2002 23:54:00 -0000	1.61
++++ include/nsScriptSecurityManager.h	21 Dec 2002 02:45:24 -0000
+@@ -258,19 +258,16 @@
+ #define NS_SCRIPTSECURITYMANAGER_CID \
+ { 0x7ee2a4c0, 0x4b93, 0x17d3, \
+ { 0xba, 0x18, 0x00, 0x60, 0xb0, 0xf1, 0x99, 0xa2 }}
+ 
+ class nsScriptSecurityManager : public nsIScriptSecurityManager,
+                                 public nsIObserver
+ {
+ public:
+-    nsScriptSecurityManager();
+-    virtual ~nsScriptSecurityManager();
+-
+     static void Shutdown();
+     
+     NS_DEFINE_STATIC_CID_ACCESSOR(NS_SCRIPTSECURITYMANAGER_CID)
+         
+     NS_DECL_ISUPPORTS
+     NS_DECL_NSISCRIPTSECURITYMANAGER
+     NS_DECL_NSIXPCSECURITYMANAGER
+     NS_DECL_NSIOBSERVER
+@@ -287,16 +284,20 @@
+ 
+     static nsresult
+     SecurityCompareURIs(nsIURI* aSourceURI,
+                         nsIURI* aTargetURI,
+                         PRBool* result);
+ 
+ private:
+ 
++    // GetScriptSecurityManager is the only call that can make one
++    nsScriptSecurityManager();
++    virtual ~nsScriptSecurityManager();
++
+     static JSBool JS_DLL_CALLBACK
+     CheckJSFunctionCallerAccess(JSContext *cx, JSObject *obj,
+                                 jsval id, JSAccessMode mode,
+                                 jsval *vp);
+ 
+     static nsresult
+     doGetObjectPrincipal(JSContext *cx, JSObject *obj, nsIPrincipal **result);
+ 
+@@ -364,16 +365,19 @@
+ 
+     nsresult
+     SavePrincipal(nsIPrincipal* aToSave);
+ 
+     nsresult
+     CheckXPCPermissions(nsISupports* aObj,
+                         const char* aObjectSecurityLevel);
+ 
++    nsresult
++    Init();
++    
+     nsresult
+     InitPrefs();
+ 
+     static nsresult 
+     PrincipalPrefNames(const char* pref, char** grantedPref, char** deniedPref);
+ 
+     nsresult
+     InitPolicies();
+Index: src/nsScriptSecurityManager.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/caps/src/nsScriptSecurityManager.cpp,v
+retrieving revision 1.191
+diff -b -u -8 -r1.191 nsScriptSecurityManager.cpp
+--- src/nsScriptSecurityManager.cpp	30 Oct 2002 03:15:57 -0000	1.191
++++ src/nsScriptSecurityManager.cpp	21 Dec 2002 02:45:34 -0000
+@@ -2525,107 +2525,127 @@
+       mIsMailJavaScriptEnabled(PR_FALSE),
+       mIsWritingPrefs(PR_FALSE),
+       mNameSetRegistered(PR_FALSE),
+       mPolicyPrefsChanged(PR_TRUE)
+ 
+ {
+     NS_ASSERTION(sizeof(long) == sizeof(void*), "long and void* have different lengths on this platform. This may cause a security failure.");
+     NS_INIT_ISUPPORTS();
++}
++
+ 
++nsresult nsScriptSecurityManager::Init()
++{
+     JSContext* cx = GetSafeJSContext();
++    if (!cx) return NS_ERROR_FAILURE;   // this can happen of xpt loading fails
++    
+     if (sCallerID == JSVAL_VOID)
+         sCallerID = STRING_TO_JSVAL(::JS_InternString(cx, "caller"));
+     if (sEnabledID == JSVAL_VOID)
+         sEnabledID = STRING_TO_JSVAL(::JS_InternString(cx, "enabled"));
+ 
+-    InitPrefs();
++    nsresult rv = InitPrefs();
++    NS_ENSURE_SUCCESS(rv, rv);
+ 
+     //-- Register security check callback in the JS engine
+     //   Currently this is used to control access to function.caller
+-    nsresult rv;
+     nsCOMPtr<nsIJSRuntimeService> runtimeService =
+         do_GetService("@mozilla.org/js/xpc/RuntimeService;1", &rv);
+-    NS_ASSERTION(NS_SUCCEEDED(rv), "Failed to get runtime service");
++    NS_ENSURE_SUCCESS(rv, rv);
+ 
+     JSRuntime *rt;
+     rv = runtimeService->GetRuntime(&rt);
+-    NS_ASSERTION(NS_SUCCEEDED(rv), "Failed to get current JS runtime");
++    NS_ENSURE_SUCCESS(rv, rv);
+ 
+ #ifdef DEBUG
+     JSCheckAccessOp oldCallback =
+ #endif
+         JS_SetCheckObjectAccessCallback(rt, CheckJSFunctionCallerAccess);
+ 
+     // For now, assert that no callback was set previously
+     NS_ASSERTION(!oldCallback, "Someone already set a JS CheckObjectAccess callback");
++    return NS_OK;
+ }
+ 
++static nsScriptSecurityManager *gScriptSecMan = NULL;
++
+ jsval nsScriptSecurityManager::sCallerID   = JSVAL_VOID;
+ jsval nsScriptSecurityManager::sEnabledID   = JSVAL_VOID;
+ 
+ nsScriptSecurityManager::~nsScriptSecurityManager(void)
+ {
+     delete mOriginToPolicyMap;
+     delete mDefaultPolicy;
+     NS_IF_RELEASE(mSystemPrincipal);
+     delete mPrincipals;
+     delete mCapabilities;
++    gScriptSecMan = NULL;
+ }
+ 
+ void
+ nsScriptSecurityManager::Shutdown()
+ {
+     sCallerID = JSVAL_VOID;
+     sEnabledID = JSVAL_VOID;
+ }
+ 
+-static nsScriptSecurityManager *ssecMan = NULL;
+-
+ nsScriptSecurityManager *
+ nsScriptSecurityManager::GetScriptSecurityManager()
+ {
+-    if (!ssecMan)
++    if (!gScriptSecMan)
+     {
+-        ssecMan = new nsScriptSecurityManager();
+-        if (!ssecMan)
++        nsScriptSecurityManager* ssManager = new nsScriptSecurityManager();
++        if (!ssManager)
+             return NULL;
+         nsresult rv;
++        rv = ssManager->Init();
++        NS_ASSERTION(NS_SUCCEEDED(rv), "Failed to initialize nsScriptSecurityManager");
++        if (NS_FAILED(rv)) {
++            delete ssManager;
++            return NULL;
++        }
+ 
+         rv = nsJSPrincipals::Startup();
++        if (NS_FAILED(rv)) {
++            NS_WARNING("can't initialize JS engine security protocol glue!");
++            delete ssManager;
++            return NULL;
++        }
+ 
+-        NS_WARN_IF_FALSE(NS_SUCCEEDED(rv),
+-                         "can't initialize JS engine security protocol glue!");
++        nsCOMPtr<nsIXPConnect> xpc = do_GetService(nsIXPConnect::GetCID(), &rv);
++        if (NS_FAILED(rv) || !xpc) {
++            NS_WARNING("Failed to get the XPConnect service");
++            delete ssManager;
++            return NULL;
++        }
+ 
+-        nsCOMPtr<nsIXPConnect> xpc =
+-            do_GetService(nsIXPConnect::GetCID(), &rv);
+-        if (NS_SUCCEEDED(rv) && xpc)
+-        {
+             rv = xpc->SetDefaultSecurityManager(
+-                            NS_STATIC_CAST(nsIXPCSecurityManager*, ssecMan),
++                        NS_STATIC_CAST(nsIXPCSecurityManager*, ssManager),
+                             nsIXPCSecurityManager::HOOK_ALL);
+-
+-            NS_WARN_IF_FALSE(NS_SUCCEEDED(rv),
+-                             "failed to install xpconnect security manager!");
++        if (NS_FAILED(rv)) {
++            NS_WARNING("Failed to install xpconnect security manager!");
++            delete ssManager;
++            return NULL;
+         }
+-        else
+-            NS_WARNING("can't get xpconnect to install security manager!");
++
++        gScriptSecMan = ssManager;
+     }
+-    return ssecMan;
++    return gScriptSecMan;
+ }
+ 
+ // Currently this nsGenericFactory constructor is used only from FastLoad
+ // (XPCOM object deserialization) code, when "creating" the system principal
+ // singleton.
+ nsSystemPrincipal *
+ nsScriptSecurityManager::SystemPrincipalSingletonConstructor()
+ {
+     nsIPrincipal *sysprin = nsnull;
+-    if (ssecMan)
+-        ssecMan->GetSystemPrincipal(&sysprin);
++    if (gScriptSecMan)
++        gScriptSecMan->GetSystemPrincipal(&sysprin);
+     return NS_STATIC_CAST(nsSystemPrincipal*, sysprin);
+ }
+ 
+ nsresult
+ nsScriptSecurityManager::InitPolicies()
+ {
+     nsresult rv;
+ 

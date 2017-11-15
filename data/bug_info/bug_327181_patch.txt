@@ -1,0 +1,120 @@
+Index: mozilla/security/manager/pki/resources/content/certManager.js
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/certManager.js,v
+retrieving revision 1.48
+diff -u -r1.48 certManager.js
+--- mozilla/security/manager/pki/resources/content/certManager.js	30 May 2007 23:13:28 -0000	1.48
++++ mozilla/security/manager/pki/resources/content/certManager.js	13 Aug 2007 20:58:15 -0000
+@@ -41,6 +41,8 @@
+ const nsIX509CertDB = Components.interfaces.nsIX509CertDB;
+ const nsX509CertDB = "@mozilla.org/security/x509certdb;1";
+ const nsIX509Cert = Components.interfaces.nsIX509Cert;
++const nsIBadCertListener2 = Components.interfaces.nsIBadCertListener2;
++const nsISSLStatus = Components.interfaces.nsISSLStatus;
+ const nsICertTree = Components.interfaces.nsICertTree;
+ const nsCertTree = "@mozilla.org/security/nsCertTree;1";
+ const nsIDialogParamBlock = Components.interfaces.nsIDialogParamBlock;
+@@ -516,3 +518,86 @@
+     caTreeView.selection.clearSelection();
+   }
+ }
++
++function badCertListener() {}
++badCertListener.prototype = {
++  mStatus : null,
++  getInterface: function (aIID) {
++    return this.QueryInterface(aIID);
++  },
++  handle_test_result: function () {
++    if (mStatus) {
++      alert("have listener status");
++      var cert = mStatus.QueryInterface(Components.interfaces.nsISSLStatus).serverCert;
++      if (cert) {
++        alert("have a cert in listener status");
++      }
++      if (mStatus.isDomainMismatch) {
++        alert("domain mismatch");
++      }
++      if (mStatus.isNotValidAtThisTime) {
++        alert("not valid at this time (either expired or not yet valid)");
++      }
++      if (mStatus.isUntrusted) {
++        var selfSigned = false;
++        if (cert) {
++          if (cert.subjectName == cert.issuerName) {
++            alert("cert untrusted, self signed");
++          }
++          else {
++            alert("cert issuer unknown or not trusted");
++          }
++        }
++      }
++    }
++  },
++  notifyCertProblem: function MSR_notifyCertProblem(socketInfo, sslStatus, targetHost) {
++    alert("got a SSL status from notifyCertProblem" + sslStatus);
++    mStatus = sslStatus;
++    this.handle_test_result();
++    return true; // means: suppress error UI
++  },
++  QueryInterface: function(aIID) {
++    if (aIID.equals(nsIBadCertListener2) ||
++        aIID.equals(Components.interfaces.nsIInterfaceRequestor) ||
++        aIID.equals(Components.interfaces.nsISupports))
++      return this;
++
++    throw Components.results.NS_ERROR_NO_INTERFACE;
++  }
++}
++
++
++function dotest(uri)
++{
++  var listener = new badCertListener();
++
++  var req = new XMLHttpRequest();
++  try {
++    req.open('GET', uri, true);
++    req.channel.notificationCallbacks = listener;
++    req.send(null);
++  } catch (e) {
++    // We *expect* exceptions if there are problems with the certificate
++    // presented by the site.  Log it, just in case, but we can proceed here,
++    // with appropriate sanity checks
++    Components.utils.reportError(e);
++  }
++
++  if(req.channel) {
++    if (req.channel.securityInfo) {
++      var SSLStatus = req.channel.securityInfo
++                       .QueryInterface(Components.interfaces.nsISSLStatusProvider).SSLStatus;
++      if (SSLStatus) {
++        alert("got a SSL status from req.channel.securityInfo" + SSLStatus);
++        if (!listener.mStatus) {
++          listener.mStatus = SSLStatus;
++        }
++        else {
++          alert("oops, got a SSL status BOTH from req.channel.securityInfo and listener???");
++        }
++        listener.handle_test_result(listener.mStatus);
++      }
++    }
++  }
++}
+Index: mozilla/security/manager/pki/resources/content/certManager.xul
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/certManager.xul,v
+retrieving revision 1.36
+diff -u -r1.36 certManager.xul
+--- mozilla/security/manager/pki/resources/content/certManager.xul	27 Jun 2007 22:20:46 -0000	1.36
++++ mozilla/security/manager/pki/resources/content/certManager.xul	13 Aug 2007 20:58:15 -0000
+@@ -81,4 +81,9 @@
+ 
+   </vbox>
+ 
++  <button label="dotest www.mozilla.org" oncommand="dotest('https://www.mozilla.org/');"/>
++  <button label="dotest mozilla.org" oncommand="dotest('https://mozilla.org/');"/>
++  <button label="dotest www.cacert.org" oncommand="dotest('https://www.cacert.org');"/>
++  <button label="dotest kuix.de:9443" oncommand="dotest('https://kuix.de:9443');"/>
++  
+ </dialog>

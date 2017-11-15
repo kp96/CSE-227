@@ -1,0 +1,36 @@
+Index: security/manager/boot/src/nsSecureBrowserUIImpl.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/security/manager/boot/src/nsSecureBrowserUIImpl.cpp,v
+retrieving revision 1.48
+diff -u -p -d -8 -r1.48 nsSecureBrowserUIImpl.cpp
+--- security/manager/boot/src/nsSecureBrowserUIImpl.cpp	12 Aug 2005 04:11:00 -0000	1.48
++++ security/manager/boot/src/nsSecureBrowserUIImpl.cpp	16 Aug 2005 16:59:44 -0000
+@@ -605,21 +605,23 @@ nsSecureBrowserUIImpl::OnStateChange(nsI
+   if (!aRequest)
+   {
+     PR_LOG(gSecureDocLog, PR_LOG_DEBUG,
+            ("SecureUI:%p: OnStateChange with null request\n", this));
+     return NS_ERROR_NULL_POINTER;
+   }
+ 
+ #ifdef PR_LOGGING
+-  nsXPIDLCString reqname;
+-  aRequest->GetName(reqname);
+-  PR_LOG(gSecureDocLog, PR_LOG_DEBUG,
+-         ("SecureUI:%p: %p %p OnStateChange %x %s\n", this, aWebProgress, aRequest,
+-            aProgressStateFlags, reqname.get()));
++  if (PR_LOG_TEST(gSecureDocLog, PR_LOG_DEBUG)) {
++    nsXPIDLCString reqname;
++    aRequest->GetName(reqname);
++    PR_LOG(gSecureDocLog, PR_LOG_DEBUG,
++           ("SecureUI:%p: %p %p OnStateChange %x %s\n", this, aWebProgress,
++            aRequest, aProgressStateFlags, reqname.get()));
++  }
+ #endif
+ 
+   nsCOMPtr<nsIChannel> channel(do_QueryInterface(aRequest));
+ 
+   if (channel)
+   {
+     nsCOMPtr<nsIURI> uri;
+     channel->GetURI(getter_AddRefs(uri));

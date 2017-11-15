@@ -1,0 +1,49 @@
+? 69070.diff
+Index: nsImageFrame.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/layout/html/base/src/nsImageFrame.cpp,v
+retrieving revision 1.167
+diff -u -r1.167 nsImageFrame.cpp
+--- nsImageFrame.cpp	2001/04/25 19:52:15	1.167
++++ nsImageFrame.cpp	2001/05/03 09:34:16
+@@ -1567,7 +1567,9 @@
+         nsCOMPtr<imgILoader> il(do_GetService("@mozilla.org/image/loader;1"));
+         NS_ASSERTION(il, "no image loader!");
+ 
+-        il->LoadImage(uri, loadGroup, mListener, aPresContext, getter_AddRefs(mImageRequest));
++        if (CanLoadImage(uri)) {
++          il->LoadImage(uri, loadGroup, mListener, aPresContext, getter_AddRefs(mImageRequest));
++        }
+ 
+         loadStatus = imgIRequest::STATUS_ERROR;
+         if (mImageRequest)
+@@ -1598,8 +1600,10 @@
+ 
+         nsCOMPtr<imgILoader> il(do_GetService("@mozilla.org/image/loader;1"));
+         NS_ASSERTION(il, "no image loader!");
+-
+-        il->LoadImage(uri, loadGroup, mListener, aPresContext, getter_AddRefs(mImageRequest));
++        
++        if (CanLoadImage(uri)) {
++          il->LoadImage(uri, loadGroup, mListener, aPresContext, getter_AddRefs(mImageRequest));
++        }
+ #else
+         mImageLoader.StopLoadImage(aPresContext);
+ 
+@@ -1785,6 +1789,16 @@
+ nsImageFrame::CanLoadImage(nsIURI *aURI)
+ {
+   PRBool shouldLoad = PR_TRUE; // default permit
++
++  nsCOMPtr<nsIScriptSecurityManager> securityManager(do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID));
++
++  if (securityManager) {
++    nsCOMPtr<nsIURI> baseURI;
++    GetBaseURI(getter_AddRefs(baseURI));
++    shouldLoad = securityManager->CheckLoadURI(baseURI, aURI, nsIScriptSecurityManager::STANDARD);
++    if (!shouldLoad)
++      return PR_FALSE;
++  }
+ 
+   // XXX leave this if 0'd until there is a good way to test it.
+ #if 0

@@ -1,0 +1,30 @@
+Index: resources/application/all-camino.js.in
+===================================================================
+RCS file: /cvsroot/mozilla/camino/resources/application/all-camino.js.in,v
+retrieving revision 1.18
+diff -u -8 -r1.18 all-camino.js.in
+--- resources/application/all-camino.js.in	29 Jan 2009 04:05:43 -0000	1.18
++++ resources/application/all-camino.js.in	20 Feb 2009 00:01:13 -0000
+@@ -206,20 +206,20 @@
+ 
+ // obey OS font size threshold for disabling text smoothing
+ pref("gfx.use_text_smoothing_setting", true);
+ 
+ // force <select>s to display as Aqua rather than honor author styles
+ pref("camino.use_aqua_selects", true);
+ 
+ // Prevent loading of suspected phishing sites
+-pref("browser.safebrowsing.enabled", true);
++pref("browser.safebrowsing.enabled", false);
+ 
+ // Prevent loading of suspected malware sites
+-pref("browser.safebrowsing.malware.enabled", true);
++pref("browser.safebrowsing.malware.enabled", false);
+ 
+ // The active safe browsing data provider
+ pref("browser.safebrowsing.dataProvider", 0);
+ 
+ // Properties for the safe browsing data providers
+ pref("browser.safebrowsing.provider.0.name", "Google");
+ pref("browser.safebrowsing.provider.0.updateURL", "http://safebrowsing.clients.google.com/safebrowsing/downloads?client={moz:client}&appver={moz:version}&pver=2.2");
+ pref("browser.safebrowsing.provider.0.gethashURL", "http://safebrowsing.clients.google.com/safebrowsing/gethash?client={moz:client}&appver={moz:version}&pver=2.2");

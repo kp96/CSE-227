@@ -1,0 +1,98 @@
+# HG changeset patch
+# User Julian Hector <julian.r.hector@gmail.com>
+# Date 1466073547 -7200
+# Node ID 06d9c38b94c10740b11b84b7b7e2e86b581832a7
+# Parent  14c5bf11d37b9e92d27f7089d9392de2ac339bb3
+Bug 742434 - Part 1: Introduce pref to control content sandbox r=jld
+
+diff --git a/browser/app/profile/firefox.js b/browser/app/profile/firefox.js
+--- a/browser/app/profile/firefox.js
++++ b/browser/app/profile/firefox.js
+@@ -966,16 +966,36 @@ pref("security.sandbox.windows.log.stack
+ // 1 -> "an imperfect sandbox designed to allow firefox to run reasonably well"
+ // 2 -> "an ideal sandbox which may break many things"
+ // This setting is read when the content process is started. On Mac the content
+ // process is killed when all windows are closed, so a change will take effect
+ // when the 1st window is opened.
+ pref("security.sandbox.content.level", 1);
+ #endif
+ 
++#if defined(XP_LINUX) && defined(MOZ_SANDBOX) && defined(MOZ_CONTENT_SANDBOX)
++// This pref is introduced as part of bug 742434, the naming is inspired from
++// its Windows/Mac counterpart, but on Linux it's an integer which means:
++// 0 -> "no sandbox"
++// 1 -> "content sandbox using seccomp-bpf when available"
++// 2 -> "seccomp-bpf + file broker"
++// Content sandboxing on Linux is currently in the stage of
++// 'just getting it enabled', which includes a very permissive whitelist. We
++// enable seccomp-bpf on nightly to see if everything is running, or if we need
++// to whitelist more system calls.
++//
++// So the purpose of this setting is to allow nightly users to disable the
++// sandbox while we fix their problems. This way, they won't have to wait for
++// another nightly release which disables seccomp-bpf again.
++//
++// This setting may not be required anymore once we decide to permanently
++// enable the content sandbox.
++pref("security.sandbox.content.level", 1);
++#endif
++
+ #if defined(XP_MACOSX) || defined(XP_WIN)
+ #if defined(MOZ_SANDBOX) && defined(MOZ_CONTENT_SANDBOX)
+ // ID (a UUID when set by gecko) that is used to form the name of a
+ // sandbox-writable temporary directory to be used by content processes
+ // when a temporary writable file is required in a level 1 sandbox.
+ pref("security.sandbox.content.tempDirSuffix", "");
+ #endif
+ #endif
+diff --git a/dom/ipc/ContentParent.cpp b/dom/ipc/ContentParent.cpp
+--- a/dom/ipc/ContentParent.cpp
++++ b/dom/ipc/ContentParent.cpp
+@@ -2588,16 +2588,24 @@ ContentParent::InitInternal(ProcessPrior
+   bool shouldSandbox = true;
+ #ifdef MOZ_NUWA_PROCESS
+   if (IsNuwaProcess()) {
+     shouldSandbox = false;
+   }
+ #endif
+   MaybeFileDesc brokerFd = void_t();
+ #ifdef XP_LINUX
++  // XXX: Checking the pref here makes it possible to enable/disable sandboxing
++  // during an active session. Currently the pref is only used for testing
++  // purpose. If the decision is made to permanently rely on the pref, this
++  // should be changed so that it is required to restart firefox for the change
++  // of value to take effect.
++  shouldSandbox = (Preferences::GetInt("security.sandbox.content.level") > 0) &&
++    !PR_GetEnv("MOZ_DISABLE_CONTENT_SANDBOX");
++
+   if (shouldSandbox) {
+     MOZ_ASSERT(!mSandboxBroker);
+     UniquePtr<SandboxBroker::Policy> policy =
+       sSandboxBrokerPolicyFactory->GetContentPolicy(Pid());
+     if (policy) {
+       brokerFd = FileDescriptor();
+       mSandboxBroker = SandboxBroker::Create(Move(policy), Pid(), brokerFd);
+       if (!mSandboxBroker) {
+diff --git a/security/sandbox/linux/broker/SandboxBrokerPolicyFactory.cpp b/security/sandbox/linux/broker/SandboxBrokerPolicyFactory.cpp
+--- a/security/sandbox/linux/broker/SandboxBrokerPolicyFactory.cpp
++++ b/security/sandbox/linux/broker/SandboxBrokerPolicyFactory.cpp
+@@ -115,17 +115,17 @@ SandboxBrokerPolicyFactory::SandboxBroke
+ }
+ 
+ #ifdef MOZ_CONTENT_SANDBOX
+ UniquePtr<SandboxBroker::Policy>
+ SandboxBrokerPolicyFactory::GetContentPolicy(int aPid)
+ {
+   // Allow overriding "unsupported"ness with a pref, for testing.
+   if (!IsSystemSupported() &&
+-      Preferences::GetInt("security.sandbox.content.level") <= 0) {
++      Preferences::GetInt("security.sandbox.content.level") <= 1) {
+     return nullptr;
+   }
+ 
+   // Policy entries that vary per-process (currently the only reason
+   // that can happen is because they contain the pid) are added here.
+ #if defined(MOZ_WIDGET_GONK)
+   MOZ_ASSERT(NS_IsMainThread());
+   MOZ_ASSERT(mCommonContentPolicy);
+

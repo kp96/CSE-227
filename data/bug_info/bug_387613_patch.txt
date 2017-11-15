@@ -1,0 +1,16 @@
+Index: mozilla/security/manager/ssl/src/nsNSSCertificateDB.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSCertificateDB.cpp,v
+retrieving revision 1.27
+diff -u -p -r1.27 nsNSSCertificateDB.cpp
+--- mozilla/security/manager/ssl/src/nsNSSCertificateDB.cpp	9 May 2007 23:43:01 -0000	1.27
++++ mozilla/security/manager/ssl/src/nsNSSCertificateDB.cpp	12 Jul 2007 00:42:38 -0000
+@@ -999,6 +999,8 @@ nsNSSCertificateDB::SetCertTrust(nsIX509
+   SECStatus srv;
+   nsNSSCertTrust trust;
+   nsCOMPtr<nsIX509Cert2> pipCert = do_QueryInterface(cert);
++  if (!pipCert)
++    return NS_ERROR_FAILURE;
+   CERTCertificate *nsscert = pipCert->GetCert();
+   CERTCertificateCleaner certCleaner(nsscert);
+   if (type == nsIX509Cert::CA_CERT) {

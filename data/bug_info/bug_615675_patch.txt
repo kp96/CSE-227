@@ -1,0 +1,594 @@
+diff --git a/mail/test/mozmill/content-policy/html/plugin.html b/mail/test/mozmill/content-policy/html/plugin.html
+new file mode 100644
+--- /dev/null
++++ b/mail/test/mozmill/content-policy/html/plugin.html
+@@ -0,0 +1,10 @@
++<html>
++  <head>
++    <title>Plugin Test</title>
++  </head>
++  <body bgcolor="#FFFFFF">
++    <embed id="testelement" type="application/x-test"
++            style="width:400px; height:400px; margin-top:20px;" border="1">
++    </embed>
++  </body>
++</html>
+diff --git a/mail/test/mozmill/content-policy/test-plugins-policy.js b/mail/test/mozmill/content-policy/test-plugins-policy.js
+new file mode 100644
+--- /dev/null
++++ b/mail/test/mozmill/content-policy/test-plugins-policy.js
+@@ -0,0 +1,247 @@
++/**
++ * Checks if plugins are enabled in messages correctly or not.
++ */
++
++//
++/* ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is mozilla.org code.
++ *
++ * The Initial Developer of the Original Code is
++ * Mozilla Foundation.
++ * Portions created by the Initial Developer are Copyright (C) 2001
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *   Dan Mosedale <dmose@mozilla.org>
++ *   Joey Minta <jminta@gmail.com>
++ *   Mark Banner <bugzilla@standard8.plus.com>
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either the GNU General Public License Version 2 or later (the "GPL"), or
++ * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++var MODULE_NAME = 'test-plugins-policy';
++
++var RELATIVE_ROOT = '../shared-modules';
++var MODULE_REQUIRES = ['folder-display-helpers', 'window-helpers', 'compose-helpers'];
++var jumlib = {};
++Components.utils.import("resource://mozmill/modules/jum.js", jumlib);
++var elib = {};
++Components.utils.import('resource://mozmill/modules/elementslib.js', elib);
++
++Components.utils.import("resource://gre/modules/Services.jsm");
++
++var folder = null;
++var composeHelper = null;
++var gMsgNo = 0;
++
++// RELATIVE_ROOT messes with the collector, so we have to bring the path back
++// so we get the right path for the resources.
++var url = collector.addHttpResource('../content-policy/html', 'content');
++
++// These two constants are used to build the message body.
++const msgBody = '<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN">\n' +
++'<html>\n' +
++'<head>\n' +
++'\n' +
++'<meta http-equiv="content-type" content="text/html; charset=ISO-8859-1">\n' +
++'</head>\n' +
++'<body bgcolor="#ffffff" text="#000000">\n' +
++'<embed id="testelement" type="application/x-test" width="400" height="400" border="1"></embed>\n' +
++'</body>\n</html>\n';
++
++var setupModule = function (module) {
++  let fdh = collector.getModule('folder-display-helpers');
++  fdh.installInto(module);
++  let wh = collector.getModule('window-helpers');
++  wh.installInto(module);
++  composeHelper = collector.getModule('compose-helpers');
++  composeHelper.installInto(module);
++
++  folder = create_folder("pluginPolicy");
++};
++
++function addToFolder(aSubject, aBody, aFolder) {
++  let msgId = Components.classes["@mozilla.org/uuid-generator;1"]
++                          .getService(Components.interfaces.nsIUUIDGenerator)
++                          .generateUUID() +"@mozillamessaging.invalid";
++
++  let source = "From - Sat Nov  1 12:39:54 2008\n" +
++
++  "X-Mozilla-Status: 0001\n" +
++               "X-Mozilla-Status2: 00000000\n" +
++               "Message-ID: <" + msgId + ">\n" +
++               "Date: Wed, 11 Jun 2008 20:32:02 -0400\n" +
++               "From: Tester <tests@mozillamessaging.invalid>\n" +
++               "User-Agent: Thunderbird 3.0a2pre (Macintosh/2008052122)\n" +
++               "MIME-Version: 1.0\n" +
++               "To: recipient@mozillamessaging.invalid\n" +
++               "Subject: " + aSubject + "\n" +
++               "Content-Type: text/html; charset=ISO-8859-1\n" +
++               "Content-Transfer-Encoding: 7bit\n" +
++               "\n" + aBody + "\n";
++
++  aFolder.QueryInterface(Components.interfaces.nsIMsgLocalMailFolder);
++  aFolder.gettingNewMessages = true;
++
++  aFolder.addMessage(source);
++  aFolder.gettingNewMessages = false;
++
++  return aFolder.msgDatabase.getMsgHdrForMessageID(msgId);
++}
++
++function isPluginLoaded(contentDocument) {
++  let element = contentDocument.getElementById("testelement").wrappedJSObject;
++
++  try {
++    // if setColor throws, then the plugin isn't running
++    element.setColor("FFFF0000");
++    return true;
++  }
++  catch (ex) {
++    // Any errors and we'll just return false below - they may be expected.
++  }
++  return false;
++}
++
++function addMsgToFolderAndCheckContent(loadAllowed) {
++  let msgDbHdr = addToFolder("Plugin test message " + gMsgNo, msgBody, folder);
++
++  // select the newly created message
++  let msgHdr = select_click_row(gMsgNo);
++
++  if (msgDbHdr != msgHdr)
++    throw new Error("Selected Message Header is not the same as generated header");
++
++  assert_selected_and_displayed(gMsgNo);
++
++  ++gMsgNo;
++
++  // XXX It appears the assert_selected_and_displayed doesn't actually wait
++  // long enough for plugin load. However, I also can't find a way to wait for
++  // long enough in all situations, so this will have to do for now.
++  mc.sleep(500);
++
++  // Now check that the content hasn't been loaded
++  if (isPluginLoaded(mozmill.getMail3PaneController().window
++                            .content.document) != loadAllowed)
++    throw new Error(loadAllowed ?
++                    "Plugin has been unexpectedly blocked in message content" :
++                    "Plugin has not been blocked in message as expected");
++}
++
++function checkStandaloneMessageWindow(loadAllowed) {
++  plan_for_new_window("mail:messageWindow");
++  // Open it
++  set_open_message_behavior("NEW_WINDOW");
++
++  open_selected_message();
++  let msgc = wait_for_new_window("mail:messageWindow");
++  wait_for_message_display_completion(msgc, true);
++
++  // XXX It appears the wait_for_message_display_completion doesn't actually
++  // wait long enough for plugin load. However, I also can't find a way to wait
++  // for long enough in all situations, so this will have to do for now.
++  mc.sleep(500);
++
++  if (isPluginLoaded(msgc.window.content.document) != loadAllowed)
++    throw new Error(loadAllowed ?
++                    "Plugin has been unexpectedly blocked in standalone window" :
++                    "Plugin has not been blocked in standalone window as expected");
++
++  // Clean up, close the window
++  close_message_window(msgc);
++}
++
++function test_3paneWindowDenied() {
++  be_in_folder(folder);
++
++  assert_nothing_selected();
++
++  addMsgToFolderAndCheckContent(false);
++}
++
++function test_checkPluginsInNonMessageContent() {
++  // Deselect everything so we can load our content
++  select_none();
++
++  // load something non-message-like in the message pane
++  mozmill.getMail3PaneController().window.GetMessagePaneFrame().location.href =
++    url + "plugin.html";
++
++  wait_for_message_display_completion();
++
++  if (!isPluginLoaded(mozmill.getMail3PaneController().window.content.document))
++    throw new Error("Plugin is not turned on in content in message pane - it should be.");
++}
++
++function test_3paneWindowDeniedAgain() {
++  select_click_row(0);
++
++  assert_selected_and_displayed(0);
++
++  // Now check that the content hasn't been loaded
++  if (isPluginLoaded(mozmill.getMail3PaneController().window
++                            .content.document) != false)
++    throw new Error(loadAllowed ?
++                    "Plugin has been unexpectedly blocked in message content" :
++                    "Plugin has not been blocked in message as expected");
++
++}
++
++function test_checkStandaloneMessageWindowDenied() {
++  checkStandaloneMessageWindow(false);
++}
++
++function test_checkContentTab() {
++  // To open a tab we're going to have to cheat and use tabmail so we can load
++  // in the data of what we want.
++  let preCount = mc.tabmail.tabContainer.childNodes.length;
++
++  let newTab = mc.tabmail.openTab("contentTab", { contentPage: url + "plugin.html" });
++
++  mc.waitForEval("subject.busy == false", 5000, 100, newTab);
++
++  if (mc.tabmail.tabContainer.childNodes.length != preCount + 1)
++    throw new Error("The content tab didn't open");
++
++  if (!isPluginLoaded(mc.tabmail.getBrowserForSelectedTab().contentDocument))
++    throw new Error("Plugin has been unexpectedly blocked in content tab");
++
++  mc.tabmail.closeTab(newTab);
++
++  if (mc.tabmail.tabContainer.childNodes.length != preCount)
++    throw new Error("The content tab didn't close");
++}
++
++function test_3paneWindowAllowed() {
++  Services.prefs.setBoolPref("mailnews.message_display.allow_plugins", true);
++
++  addMsgToFolderAndCheckContent(true);
++}
++
++function test_checkStandaloneMessageWindowAllowed() {
++  checkStandaloneMessageWindow(true);
++}
+diff --git a/mailnews/base/src/nsMessenger.cpp b/mailnews/base/src/nsMessenger.cpp
+--- a/mailnews/base/src/nsMessenger.cpp
++++ b/mailnews/base/src/nsMessenger.cpp
+@@ -143,10 +143,7 @@ static NS_DEFINE_CID(kMsgSendLaterCID, N
+ 
+ #define FOUR_K 4096
+ #define MESSENGER_SAVE_DIR_PREF_NAME "messenger.save.dir"
+-#define MAILNEWS_ALLOW_PLUGINS_PREF_NAME "mailnews.message_display.allow.plugins"
+-
+ #define MIMETYPE_DELETED    "text/x-moz-deleted"
+-
+ #define ATTACHMENT_PERMISSION 00664
+ 
+ //
+@@ -306,20 +303,15 @@ nsMessenger::nsMessenger()
+ 
+ nsMessenger::~nsMessenger()
+ {
+-  // Release search context.
+-  mSearchContext = nsnull;
+ }
+ 
+ 
+-NS_IMPL_ISUPPORTS4(nsMessenger, nsIMessenger, nsIObserver, nsISupportsWeakReference, nsIFolderListener)
++NS_IMPL_ISUPPORTS3(nsMessenger, nsIMessenger, nsISupportsWeakReference, nsIFolderListener)
+ 
+ NS_IMETHODIMP nsMessenger::SetWindow(nsIDOMWindowInternal *aWin, nsIMsgWindow *aMsgWindow)
+ {
+   nsresult rv;
+ 
+-  nsCOMPtr<nsIPrefBranch2> pbi = do_GetService(NS_PREFSERVICE_CONTRACTID, &rv);
+-  NS_ENSURE_SUCCESS(rv, rv);
+-
+   nsCOMPtr<nsIMsgMailSession> mailSession =
+     do_GetService(NS_MSGMAILSESSION_CONTRACTID, &rv);
+   NS_ENSURE_SUCCESS(rv, rv);
+@@ -354,12 +346,7 @@ NS_IMETHODIMP nsMessenger::SetWindow(nsI
+         mCurrentDisplayCharset = ""; // Important! Clear out mCurrentDisplayCharset so we reset a default charset on mDocshell the next time we try to load something into it.
+ 
+         if (aMsgWindow)
+-        {
+           aMsgWindow->GetTransactionManager(getter_AddRefs(mTxnMgr));
+-          // Add pref observer
+-          pbi->AddObserver(MAILNEWS_ALLOW_PLUGINS_PREF_NAME, this, PR_TRUE);
+-          SetDisplayProperties();
+-        }
+       }
+     }
+ 
+@@ -371,11 +358,6 @@ NS_IMETHODIMP nsMessenger::SetWindow(nsI
+   } // if aWin
+   else
+   {
+-    // it isn't an error to pass in null for aWin, in fact it means we are shutting
+-    // down and we should start cleaning things up...
+-    // Remove pref observer
+-    pbi->RemoveObserver(MAILNEWS_ALLOW_PLUGINS_PREF_NAME, this);
+-
+     // Remove the folder listener if we added it, i.e. if mWindow is non-null
+     if (mWindow)
+     {
+@@ -413,38 +395,6 @@ NS_IMETHODIMP nsMessenger::SetDisplayCha
+ }
+ 
+ nsresult
+-nsMessenger::SetDisplayProperties()
+-{
+-  // For now, the only property we will set is allowPlugins but we might do more in the future...
+-
+-  nsresult rv;
+-
+-  if (!mDocShell)
+-    return NS_ERROR_FAILURE;
+-
+-  PRBool allowPlugins = PR_FALSE;
+-
+-  nsCOMPtr<nsIPrefBranch> prefBranch = do_GetService(NS_PREFSERVICE_CONTRACTID, &rv);
+-  if (NS_SUCCEEDED(rv))
+-    prefBranch->GetBoolPref(MAILNEWS_ALLOW_PLUGINS_PREF_NAME, &allowPlugins);
+-
+-  return mDocShell->SetAllowPlugins(allowPlugins);
+-}
+-
+-NS_IMETHODIMP
+-nsMessenger::Observe(nsISupports *aSubject, const char *aTopic, const PRUnichar *aData)
+-{
+-  if (!strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID))
+-  {
+-    nsDependentString prefName(aData);
+-    if (prefName.EqualsLiteral(MAILNEWS_ALLOW_PLUGINS_PREF_NAME))
+-      SetDisplayProperties();
+-  }
+-
+-  return NS_OK;
+-}
+-
+-nsresult
+ nsMessenger::PromptIfFileExists(nsILocalFile *file)
+ {
+   nsresult rv = NS_ERROR_FAILURE;
+diff --git a/mailnews/base/src/nsMessenger.h b/mailnews/base/src/nsMessenger.h
+--- a/mailnews/base/src/nsMessenger.h
++++ b/mailnews/base/src/nsMessenger.h
+@@ -46,12 +46,11 @@
+ #include "nsIDocShell.h"
+ #include "nsIStringBundle.h"
+ #include "nsILocalFile.h"
+-#include "nsIObserver.h"
+ #include "nsWeakReference.h"
+ #include "nsIDOMWindow.h"
+ #include "nsVoidArray.h"
+ 
+-class nsMessenger : public nsIMessenger, public nsIObserver, public nsSupportsWeakReference, public nsIFolderListener
++class nsMessenger : public nsIMessenger, public nsSupportsWeakReference, public nsIFolderListener
+ {
+ 
+ public:
+@@ -60,7 +59,6 @@ public:
+ 
+   NS_DECL_ISUPPORTS  
+   NS_DECL_NSIMESSENGER
+-  NS_DECL_NSIOBSERVER
+   NS_DECL_NSIFOLDERLISTENER
+ 
+   nsresult Alert(const char * stringName);
+@@ -105,8 +103,6 @@ private:
+ 
+   nsresult GetSaveToDir(nsILocalFile **aSaveToDir);
+ 
+-  nsresult SetDisplayProperties();
+-
+   nsString mId;
+   nsCOMPtr<nsITransactionManager> mTxnMgr;
+ 
+diff --git a/mailnews/base/src/nsMsgContentPolicy.cpp b/mailnews/base/src/nsMsgContentPolicy.cpp
+--- a/mailnews/base/src/nsMsgContentPolicy.cpp
++++ b/mailnews/base/src/nsMsgContentPolicy.cpp
+@@ -38,41 +38,28 @@
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "nsMsgContentPolicy.h"
+-#include "nsIServiceManager.h"
+-#include "nsIDocShellTreeItem.h"
+ #include "nsIPrefService.h"
+ #include "nsIPrefBranch2.h"
+-#include "nsIURI.h"
+-#include "nsIInterfaceRequestorUtils.h"
+ #include "nsIMsgHeaderParser.h"
+ #include "nsIAbManager.h"
+ #include "nsIAbDirectory.h"
+ #include "nsIAbCard.h"
+ #include "nsIMsgWindow.h"
+ #include "nsIMimeMiscStatus.h"
+-#include "nsIMsgMessageService.h"
+ #include "nsIMsgHdr.h"
+ #include "nsNetUtil.h"
+-
+ #include "nsIMsgComposeService.h"
+ #include "nsMsgCompCID.h"
+-
+-// needed by the content load policy manager
+-#include "nsIExternalProtocolService.h"
+-#include "nsCExternalHandlerService.h"
+-
+-// needed for mailnews content load policy manager
+-#include "nsIDocShell.h"
++#include "nsIDocShellTreeItem.h"
+ #include "nsIWebNavigation.h"
+ #include "nsContentPolicyUtils.h"
+ #include "nsIDOMHTMLImageElement.h"
+-#include "nsILoadContext.h"
+ #include "nsIFrameLoader.h"
+ #include "nsIWebProgress.h"
+ #include "nsMsgUtils.h"
+ 
+ static const char kBlockRemoteImages[] = "mailnews.message_display.disable_remote_image";
+-static const char kAllowPlugins[] = "mailnews.message_display.allow.plugins";
++static const char kAllowPlugins[] = "mailnews.message_display.allow_plugins";
+ static const char kTrustedDomains[] =  "mail.trusteddomains";
+ 
+ // Per message headder flags to keep track of whether the user is allowing remote
+@@ -251,13 +238,7 @@ nsMsgContentPolicy::ShouldLoad(PRUint32 
+ #endif
+ 
+   switch(aContentType) {
+-
+-  case nsIContentPolicy::TYPE_OBJECT:
+-    // only allow the plugin to load if the allow plugins pref has been set
+-    if (!mAllowPlugins)
+-      *aDecision = nsIContentPolicy::REJECT_TYPE;
+-    return NS_OK;
+-
++    // Plugins (nsIContentPolicy::TYPE_OBJECT) are blocked on document load.
+   case nsIContentPolicy::TYPE_DOCUMENT:
+     // At this point, we have no intention of supporting a different JS
+     // setting on a subdocument, so we don't worry about TYPE_SUBDOCUMENT here.
+@@ -270,10 +251,11 @@ nsMsgContentPolicy::ShouldLoad(PRUint32 
+     // sorry, because OnLocationChange isn't guaranteed to necessarily be called
+     // soon enough to disable it in time (though bz says it _should_ be called 
+     // soon enough "in all sane cases").
+-    rv = DisableJSOnMailNewsUrlDocshells(aContentLocation, aRequestingContext);
+-
++    rv = SetDisableItemsOnMailNewsUrlDocshells(aContentLocation,
++                                               aRequestingContext);
+     // if something went wrong during the tweaking, reject this content
+     if (NS_FAILED(rv)) {
++      NS_WARNING("Failed to set disable items on docShells");
+       *aDecision = nsIContentPolicy::REJECT_TYPE;
+       return NS_OK;
+     }
+@@ -652,7 +634,7 @@ already_AddRefed<nsIMsgCompose> nsMsgCon
+   return msgCompose;
+ }
+ 
+-nsresult nsMsgContentPolicy::DisableJSOnMailNewsUrlDocshells(
++nsresult nsMsgContentPolicy::SetDisableItemsOnMailNewsUrlDocshells(
+   nsIURI *aContentLocation, nsISupports *aRequestingContext)
+ {
+   // XXX if this class changes so that this method can be called from
+@@ -686,11 +668,11 @@ nsresult nsMsgContentPolicy::DisableJSOn
+   NS_ENSURE_SUCCESS(rv, rv);
+   NS_ENSURE_TRUE(frameLoader, NS_ERROR_INVALID_POINTER);
+   
+-  nsCOMPtr<nsIDocShell> shell;
+-  rv = frameLoader->GetDocShell(getter_AddRefs(shell));
++  nsCOMPtr<nsIDocShell> docShell;
++  rv = frameLoader->GetDocShell(getter_AddRefs(docShell));
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+-  nsCOMPtr<nsIDocShellTreeItem> docshellTreeItem(do_QueryInterface(shell, &rv));
++  nsCOMPtr<nsIDocShellTreeItem> docshellTreeItem(do_QueryInterface(docShell, &rv));
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   // what sort of docshell is this?
+@@ -703,7 +685,15 @@ nsresult nsMsgContentPolicy::DisableJSOn
+     return NS_OK;
+   }
+ 
+-  return shell->SetAllowJavascript(PR_FALSE);
++  // For messages, we must always disable javascript...
++  rv = docShell->SetAllowJavascript(PR_FALSE);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  // ...and we allow plugins according to the mail specific preference.
++  rv = docShell->SetAllowPlugins(mAllowPlugins);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  return NS_OK;
+ }
+ 
+ /**
+@@ -787,6 +777,8 @@ NS_IMETHODIMP nsMsgContentPolicy::Observ
+ 
+     if (pref.Equals(kBlockRemoteImages))
+       prefBranchInt->GetBoolPref(kBlockRemoteImages, &mBlockRemoteImages);
++    if (pref.Equals(kAllowPlugins))
++      prefBranchInt->GetBoolPref(kAllowPlugins, &mAllowPlugins);
+   }
+ 
+   return NS_OK;
+@@ -842,9 +834,29 @@ nsMsgContentPolicy::OnLocationChange(nsI
+   }
+ #endif
+   
+-  // If this is a mailnews url, turn off JavaScript, otherwise turn it on
+   nsCOMPtr<nsIMsgMessageUrl> messageUrl = do_QueryInterface(aLocation, &rv);
+-  return docShell->SetAllowJavascript(NS_FAILED(rv));
++
++  if (NS_SUCCEEDED(rv)) {
++    // Disable javascript on message URLs.
++    rv = docShell->SetAllowJavascript(PR_FALSE);
++    NS_ASSERTION(NS_SUCCEEDED(rv),
++                 "Failed to set javascript disabled on docShell");
++    // Also disable plugins if the preference requires it.
++    rv = docShell->SetAllowPlugins(mAllowPlugins);
++    NS_ASSERTION(NS_SUCCEEDED(rv),
++                 "Failed to set plugins disabled on docShell");
++  }
++  else {
++    // Disable javascript and plugins are allowed on non-message URLs.
++    rv = docShell->SetAllowJavascript(PR_TRUE);
++    NS_ASSERTION(NS_SUCCEEDED(rv),
++                 "Failed to set javascript allowed on docShell");
++    rv = docShell->SetAllowPlugins(PR_TRUE);
++    NS_ASSERTION(NS_SUCCEEDED(rv),
++                 "Failed to set plugins allowed on docShell");
++  }
++
++  return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+diff --git a/mailnews/base/src/nsMsgContentPolicy.h b/mailnews/base/src/nsMsgContentPolicy.h
+--- a/mailnews/base/src/nsMsgContentPolicy.h
++++ b/mailnews/base/src/nsMsgContentPolicy.h
+@@ -54,6 +54,7 @@
+ #include "nsIMsgMailNewsUrl.h"
+ #include "nsIWebProgressListener.h"
+ #include "nsIMsgCompose.h"
++#include "nsIDocShell.h"
+ 
+ /* DBFCFDF0-4489-4faa-8122-190FD1EFA16C */
+ #define NS_MSGCONTENTPOLICY_CID \
+@@ -107,8 +108,8 @@ protected:
+                                      nsIDocShell **aDocShell);
+   nsresult GetOriginatingURIForContext(nsISupports *aRequestingContext,
+                                        nsIURI **aURI);
+-  nsresult DisableJSOnMailNewsUrlDocshells(nsIURI *aContentLocation,
+-                                           nsISupports *aRequestingContext);
++  nsresult SetDisableItemsOnMailNewsUrlDocshells(nsIURI *aContentLocation,
++                                                 nsISupports *aRequestingContext);
+ };
+ 
+ #endif // _nsMsgContentPolicy_H_
+diff --git a/mailnews/mailnews.js b/mailnews/mailnews.js
+--- a/mailnews/mailnews.js
++++ b/mailnews/mailnews.js
+@@ -582,7 +582,8 @@ pref("mailnews.global_html_domains.versi
+ /////////////////////////////////////////////////////////////////
+ // Privacy Controls for Handling Remote Content
+ /////////////////////////////////////////////////////////////////
+-pref("mailnews.message_display.allow.plugins", false); // disable plugins by default
++// Specific plugins pref just for message content. RSS is not covered by this.
++pref("mailnews.message_display.allow_plugins", false);
+ pref("mailnews.message_display.disable_remote_image", true);
+ 
+ /////////////////////////////////////////////////////////////////

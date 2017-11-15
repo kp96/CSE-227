@@ -1,0 +1,202 @@
+Index: xpfe/communicator/resources/content/contentAreaClick.js
+===================================================================
+RCS file: /cvsroot/mozilla/xpfe/communicator/resources/content/contentAreaClick.js,v
+retrieving revision 1.36
+diff -p -u -d -8 -r1.36 contentAreaClick.js
+--- xpfe/communicator/resources/content/contentAreaClick.js	17 Apr 2003 00:55:33 -0000	1.36
++++ xpfe/communicator/resources/content/contentAreaClick.js	23 Sep 2003 21:33:30 -0000
+@@ -213,18 +213,17 @@
+     }
+ 
+     // let someone else deal with it
+     return false;
+   }
+ 
+   function handleLinkClick(event, href, linkNode)
+   {
+-    // Make sure we are allowed to open this URL
+-    urlSecurityCheck(href, document);
++    // We ensure we can load |href| within the openNew* functions
+ 
+     switch (event.button) {                                   
+       case 0:                                                         // if left button clicked
+         if (event.metaKey || event.ctrlKey) {                         // and meta or ctrl are down
+           if (openNewTabOrWindow(event, href, true))
+             return true;
+         } 
+         var saveModifier = true;
+Index: xpfe/communicator/resources/content/contentAreaUtils.js
+===================================================================
+RCS file: /cvsroot/mozilla/xpfe/communicator/resources/content/contentAreaUtils.js,v
+retrieving revision 1.87
+diff -p -u -d -8 -r1.87 contentAreaUtils.js
+--- xpfe/communicator/resources/content/contentAreaUtils.js	18 Aug 2003 12:09:39 -0000	1.87
++++ xpfe/communicator/resources/content/contentAreaUtils.js	23 Sep 2003 21:33:32 -0000
+@@ -132,20 +132,21 @@ function openNewTabWith(url, sendReferre
+     // find a browser window first
+     //
+     var windowMediator =
+       Components.classes["@mozilla.org/appshell/window-mediator;1"]
+       .getService(Components.interfaces.nsIWindowMediator);
+ 
+     var browserWin = windowMediator.getMostRecentWindow("navigator:browser");
+ 
+-    // if there's no existing browser window, open this url in one, and
+-    // return
++    // if there's no existing browser window, then, as long as
++    // we are allowed to, open this url in one and return
+     //
+     if (!browserWin) {
++      urlSecurityCheck(url, document);
+       window.openDialog(getBrowserURL(), "_blank", "chrome,all,dialog=no", 
+                         url, null, referrer);
+       return;
+     }
+ 
+     // otherwise, get the existing browser object
+     //
+     browser = browserWin.getBrowser();
+Index: mailnews/base/resources/content/mail3PaneWindowVertLayout.xul
+===================================================================
+RCS file: /cvsroot/mozilla/mailnews/base/resources/content/mail3PaneWindowVertLayout.xul,v
+retrieving revision 1.94
+diff -p -u -d -8 -r1.94 mail3PaneWindowVertLayout.xul
+--- mailnews/base/resources/content/mail3PaneWindowVertLayout.xul	25 Mar 2003 20:22:04 -0000	1.94
++++ mailnews/base/resources/content/mail3PaneWindowVertLayout.xul	23 Sep 2003 21:33:33 -0000
+@@ -178,17 +178,17 @@ Rights Reserved.
+         <hbox id="junkBar"/>
+ 
+         <hbox id="msgHeaderView"/>
+ 
+         <!-- message view -->
+         <browser id="messagepane" context="messagePaneContext" autofind="false"
+                  style="height: 0px; min-height: 1px" flex="1" name="messagepane" 
+                  disablehistory="true" type="content-primary" src="about:blank"
+-                 disablesecurity="true" onclick="contentAreaClick(event);"/>
++                 disablesecurity="true" onclick="messagePaneOnClick(event);"/>
+       </vbox>  
+ 
+     </vbox>
+ 
+   </hbox>
+ 
+ 	<statusbar id="status-bar" class="mailwindow-statusbar">
+ 		<statusbarpanel id="unreadMessageCount" style="min-width: 5px"/>
+Index: mailnews/base/resources/content/messageWindow.xul
+===================================================================
+RCS file: /cvsroot/mozilla/mailnews/base/resources/content/messageWindow.xul,v
+retrieving revision 1.70
+diff -p -u -d -8 -r1.70 messageWindow.xul
+--- mailnews/base/resources/content/messageWindow.xul	8 May 2003 03:08:12 -0000	1.70
++++ mailnews/base/resources/content/messageWindow.xul	23 Sep 2003 21:33:34 -0000
+@@ -136,15 +136,15 @@ Rights Reserved.
+     <hbox id="junkBar"/>
+ 
+     <hbox id="msgHeaderView"/>
+ 
+     <!-- message view -->
+     <browser id="messagepane" context="messagePaneContext" 
+       style="height: 0px; min-height: 1px" flex="1" name="messagepane" 
+       disablesecurity="true" disablehistory="true" type="content-primary" 
+-      src="about:blank" onclick="contentAreaClick(event);" autofind="false"/>
++      src="about:blank" onclick="messagePaneOnClick(event);" autofind="false"/>
+   </vbox>  
+ </vbox>
+ 
+   <statusbar class="chromeclass-status" id="status-bar"/>
+ 
+ </window>
+Index: mailnews/base/resources/content/messenger.xul
+===================================================================
+RCS file: /cvsroot/mozilla/mailnews/base/resources/content/messenger.xul,v
+retrieving revision 1.245
+diff -p -u -d -8 -r1.245 messenger.xul
+--- mailnews/base/resources/content/messenger.xul	25 Mar 2003 20:22:06 -0000	1.245
++++ mailnews/base/resources/content/messenger.xul	23 Sep 2003 21:33:34 -0000
+@@ -163,26 +163,26 @@ Rights Reserved.
+ 
+       <!-- if you change this id, please change GetThreadAndMessagePaneSplitter() and MsgToggleMessagePane() -->
+       <splitter collapse="after" persist="state" 
+ 		onmouseup="OnMouseUpThreadAndMessagePaneSplitter()"
+                 id="threadpane-splitter">
+         <grippy onclick="OnClickThreadAndMessagePaneSplitterGrippy()"/>
+       </splitter>
+       
+-      <vbox id="messagepanebox" flex="3" persist="collapsed height" onclick="contentAreaClick(event);">
++      <vbox id="messagepanebox" flex="3" persist="collapsed height">
+ 
+         <hbox id="junkBar"/>
+ 
+         <hbox id="msgHeaderView"/>
+     
+         <browser id="messagepane" context="messagePaneContext"
+                  style="height: 0px; min-height: 1px" flex="1" name="messagepane" 
+                  disablehistory="true" type="content-primary" src="about:blank"
+-                 disablesecurity="true" autofind="false"/>
++                 disablesecurity="true" onclick="messagePaneOnClick(event);" autofind="false"/>
+        </vbox>  
+      </vbox>
+    </vbox>             
+   </hbox>
+ 
+   <statusbar id="status-bar" class="chromeclass-status mailwindow-statusbar">
+     <statusbarpanel id="unreadMessageCount" style="min-width: 5px"/>
+     <statusbarpanel id="totalMessageCount" style="min-width: 5px"/>
+Index: mailnews/base/resources/content/mailWindow.js
+===================================================================
+RCS file: /cvsroot/mozilla/mailnews/base/resources/content/mailWindow.js,v
+retrieving revision 1.78
+diff -p -u -d -8 -r1.78 mailWindow.js
+--- mailnews/base/resources/content/mailWindow.js	3 Jun 2003 14:49:52 -0000	1.78
++++ mailnews/base/resources/content/mailWindow.js	23 Sep 2003 21:33:36 -0000
+@@ -196,25 +196,27 @@ function InitMsgWindow()
+   msgWindow.messagePaneController = new nsMessagePaneController();
+   msgWindow.statusFeedback = statusFeedback;
+   msgWindow.msgHeaderSink = messageHeaderSink;
+   msgWindow.SetDOMWindow(window);
+   mailSession.AddMsgWindow(msgWindow);
+ 
+   var messagepane = document.getElementById("messagepane");
+   messagepane.docShell.allowAuth = false;
+-  messagepane.addEventListener("click",messagePaneOnClick,true);
+ }
+ 
+ function messagePaneOnClick(event)
+ {
+   // if this is stand alone mail (no browser)
+   // or this isn't a simple left click, do nothing, and let the normal code execute
+   if (event.button != 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
++  {
++    contentAreaClick(event);
+     return;
++  }
+ 
+   // try to determine the href for what you are clicking on.  
+   // for example, it might be "" if you aren't left clicking on a link
+   var href = hrefForClickEvent(event);
+   if (!href) 
+     return;
+ 
+   // we know that http://, https://, ftp://, file://, chrome://, 
+@@ -228,20 +230,20 @@ function messagePaneOnClick(event)
+   if (href.search(needABrowser) == -1) 
+     return;
+ 
+   // if you get here, the user did a simple left click on a link
+   // that we know should be in a browser window.
+   // since we are in the message pane, send it to the top most browser window 
+   // (or open one) right away, instead of waiting for us to get some data and
+   // determine the content type, and then open a browser window
+-  openTopBrowserWith(href);
+   // we want to preventDefault, so that in
+   // nsGenericHTMLElement::HandleDOMEventForAnchors(), we don't try to handle the click again
+   event.preventDefault();
++  openTopBrowserWith(href);
+ }
+ 
+ function AddDataSources()
+ {
+   accountManagerDataSource = accountManagerDataSource.QueryInterface(Components.interfaces.nsIRDFDataSource);
+   folderDataSource = folderDataSource.QueryInterface(Components.interfaces.nsIRDFDataSource);
+   //to move menu item
+   SetupMoveCopyMenus('moveMenu', accountManagerDataSource, folderDataSource);

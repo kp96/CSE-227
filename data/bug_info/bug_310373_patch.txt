@@ -1,0 +1,51 @@
+Index: browser/base/content/browser.js
+===================================================================
+RCS file: /cvsroot/mozilla/browser/base/content/browser.js,v
+retrieving revision 1.479.2.35
+diff -u -8 -r1.479.2.35 browser.js
+--- browser/base/content/browser.js	28 Sep 2005 22:07:17 -0000	1.479.2.35
++++ browser/base/content/browser.js	29 Sep 2005 00:04:55 -0000
+@@ -2602,18 +2602,20 @@
+       var statusTextFld = document.getElementById("statusbar-display");
+       statusTextFld.label = "";
+       aEvent.target.removeAttribute("dragover");
+     },
+   onDrop: function (aEvent, aXferData, aDragSession)
+     {
+       var xferData = aXferData.data.split("\n");
+       var url = xferData[0] ? xferData[0] : xferData[1];
+-      if (url)
++      if (url) {
++        getBrowser().dragDropSecurityCheck(aEvent, aDragSession, url);
+         openNewTabWith(url, null, null, aEvent);
++      }
+     },
+   getSupportedFlavours: function ()
+     {
+       var flavourSet = new FlavourSet();
+       flavourSet.appendFlavour("text/unicode");
+       flavourSet.appendFlavour("text/x-moz-url");
+       flavourSet.appendFlavour("application/x-moz-file", "nsIFile");
+       return flavourSet;
+@@ -2633,18 +2635,20 @@
+       var statusTextFld = document.getElementById("statusbar-display");
+       statusTextFld.label = "";
+       aEvent.target.removeAttribute("dragover");
+     },
+   onDrop: function (aEvent, aXferData, aDragSession)
+     {
+       var xferData = aXferData.data.split("\n");
+       var url = xferData[0] ? xferData[0] : xferData[1];
+-      if (url)
++      if (url) {
++        getBrowser().dragDropSecurityCheck(aEvent, aDragSession, url);
+         openNewWindowWith(url, null, null);
++      }
+     },
+   getSupportedFlavours: function ()
+     {
+       var flavourSet = new FlavourSet();
+       flavourSet.appendFlavour("text/unicode");
+       flavourSet.appendFlavour("text/x-moz-url");
+       flavourSet.appendFlavour("application/x-moz-file", "nsIFile");
+       return flavourSet;

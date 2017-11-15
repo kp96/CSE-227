@@ -1,0 +1,86 @@
+# HG changeset patch
+# User Cykesiopka <cykesiopka.bmo@gmail.com>
+# Parent  65c02bf0a79284e7074214484c1f0559c6906491
+Bug 495357 - Update some documentation concerning SaveIntermediateCerts(). r=kaie,me
+
+Original patch by Wan-Teh Chang.
+
+MozReview-Commit-ID: 3ElvC7DanYJ
+
+diff --git a/security/certverifier/NSSCertDBTrustDomain.cpp b/security/certverifier/NSSCertDBTrustDomain.cpp
+--- a/security/certverifier/NSSCertDBTrustDomain.cpp
++++ b/security/certverifier/NSSCertDBTrustDomain.cpp
+@@ -1189,17 +1189,18 @@ SaveIntermediateCerts(const UniqueCERTCe
+         node = CERT_LIST_NEXT(node)) {
+     if (isEndEntity) {
+       // Skip the end-entity; we only want to store intermediates
+       isEndEntity = false;
+       continue;
+     }
+ 
+     if (node->cert->slot) {
+-      // This cert was found on a token, no need to remember it in the temp db.
++      // This cert was found on a token; no need to remember it in the permanent
++      // database.
+       continue;
+     }
+ 
+     if (node->cert->isperm) {
+       // We don't need to remember certs already stored in perm db.
+       continue;
+     }
+ 
+@@ -1208,26 +1209,23 @@ SaveIntermediateCerts(const UniqueCERTCe
+     // root temporarily imported via the child mode or enterprise root features.
+     // We don't want to import these because they're intended to be temporary
+     // (and because importing them happens to reset their trust settings, which
+     // breaks these features).
+     if (node == CERT_LIST_TAIL(certList)) {
+       continue;
+     }
+ 
+-    // We have found a signer cert that we want to remember.
+     nsAutoCString nickname;
+     nsresult rv = DefaultServerNicknameForCert(node->cert, nickname);
+     if (NS_FAILED(rv)) {
+       continue;
+     }
+ 
+-    // Saving valid intermediate certs to the database is a compatibility hack
+-    // to work around unknown issuer errors for incorrectly configured servers
+-    // that fail to send the necessary intermediate certs. As such, we ignore
+-    // the return value of PK11_ImportCert(), since it doesn't really matter if
+-    // it fails.
++    // As mentioned in the documentation of this function, we're importing only
++    // to cope with misconfigured servers. As such, we ignore the return value
++    // below, since it doesn't really matter if the import fails.
+     Unused << PK11_ImportCert(slot.get(), node->cert, CK_INVALID_HANDLE,
+                               nickname.get(), false);
+   }
+ }
+ 
+ } } // namespace mozilla::psm
+diff --git a/security/manager/ssl/SSLServerCertVerification.cpp b/security/manager/ssl/SSLServerCertVerification.cpp
+--- a/security/manager/ssl/SSLServerCertVerification.cpp
++++ b/security/manager/ssl/SSLServerCertVerification.cpp
+@@ -1362,20 +1362,16 @@ AuthCertificate(CertVerifier& certVerifi
+                           pinningTelemetryInfo.rootBucket);
+   }
+ 
+   if (pinningTelemetryInfo.accumulateResult) {
+     Telemetry::Accumulate(pinningTelemetryInfo.certPinningResultHistogram,
+                           pinningTelemetryInfo.certPinningResultBucket);
+   }
+ 
+-  // We want to remember the CA certs in the temp db, so that the application can find the
+-  // complete chain at any time it might need it.
+-  // But we keep only those CA certs in the temp db, that we didn't already know.
+-
+   RefPtr<nsSSLStatus> status(infoObject->SSLStatus());
+   RefPtr<nsNSSCertificate> nsc;
+ 
+   if (!status || !status->HasServerCert()) {
+     if (rv == Success) {
+       nsc = nsNSSCertificate::Create(cert.get(), &evOidPolicy);
+     } else {
+       nsc = nsNSSCertificate::Create(cert.get());

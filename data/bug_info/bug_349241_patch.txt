@@ -1,0 +1,25 @@
+Index: security/manager/ssl/src/nsCrypto.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsCrypto.cpp,v
+retrieving revision 1.68
+diff -p -U8 -r1.68 nsCrypto.cpp
+--- security/manager/ssl/src/nsCrypto.cpp	30 Jun 2006 02:59:19 -0000	1.68
++++ security/manager/ssl/src/nsCrypto.cpp	18 Aug 2006 21:22:38 -0000
+@@ -2130,16 +2130,17 @@ nsCrypto::SignText(const nsAString& aStr
+     aResult.Append(internalError);
+ 
+     return NS_OK;
+   }
+ 
+   if (!aCaOption.EqualsLiteral("auto") &&
+       !aCaOption.EqualsLiteral("ask")) {
+     JS_ReportError(cx, "%s%s\n", JS_ERROR, "caOption argument must be ask or auto");
++    ncc->SetExceptionWasThrown(PR_TRUE);
+ 
+     aResult.Append(internalError);
+ 
+     return NS_OK;
+   }
+ 
+   // It was decided to always behave as if "ask" were specified.
+   // XXX Should we warn in the JS Console for auto?

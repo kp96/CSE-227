@@ -1,0 +1,32 @@
+# HG changeset patch
+# User Serge Gautherie <sgautherie.bz@free.fr>
+# Date 1218498097 -7200
+# Node ID 7e5e0f0842a07a8a19656475a1291976a71e2ed7
+# Parent  4593610d9715b7de0aa9cb716dcd3159393ccd5e
+Bug 450187 – "nsNTLMAuthModule.cpp(827) : warning C4390: ';' : empty controlled statement found; is this the intent?"
+(Av1) <nsNTLMAuthModule.cpp>
+
+diff --git a/security/manager/ssl/src/nsNTLMAuthModule.cpp b/security/manager/ssl/src/nsNTLMAuthModule.cpp
+--- a/security/manager/ssl/src/nsNTLMAuthModule.cpp
++++ b/security/manager/ssl/src/nsNTLMAuthModule.cpp
+@@ -816,18 +816,20 @@ nsNTLMAuthModule::GetNextToken(const voi
+     rv = GenerateType3Msg(mDomain, mUsername, mPassword, inToken,
+                           inTokenLen, outToken, outTokenLen);
+   }
+   else
+   {
+     rv = GenerateType1Msg(outToken, outTokenLen);
+   }
+ 
++#ifdef PR_LOGGING
+   if (NS_SUCCEEDED(rv))
+     LogToken("out-token", *outToken, *outTokenLen);
++#endif
+ 
+   return rv;
+ }
+ 
+ NS_IMETHODIMP
+ nsNTLMAuthModule::Unwrap(const void *inToken,
+                         PRUint32    inTokenLen,
+                         void      **outToken,

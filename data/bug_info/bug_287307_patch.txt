@@ -1,0 +1,14 @@
+Index: mail/app/profile/all-thunderbird.js
+===================================================================
+RCS file: /cvsroot/mozilla/mail/app/profile/all-thunderbird.js,v
+retrieving revision 1.1.2.11.2.1
+diff -u -r1.1.2.11.2.1 all-thunderbird.js
+--- mail/app/profile/all-thunderbird.js	4 Feb 2005 03:03:07 -0000	1.1.2.11.2.1
++++ mail/app/profile/all-thunderbird.js	24 Mar 2005 01:22:34 -0000
+@@ -398,3 +398,6 @@
+ pref("browser.urlbar.clickSelectsAll", false);
+ #endif
+ #endif
++
++// prevent status-bar spoofing even if people are foolish enough to turn on JS
++pref("dom.disable_window_status_change",          true);

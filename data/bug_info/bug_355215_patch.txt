@@ -1,0 +1,62 @@
+Index: netwerk/base/src/nsProxyAutoConfig.js
+===================================================================
+RCS file: /cvsroot/mozilla/netwerk/base/src/nsProxyAutoConfig.js,v
+retrieving revision 1.44
+diff -p -U8 -r1.44 nsProxyAutoConfig.js
+--- netwerk/base/src/nsProxyAutoConfig.js	5 Feb 2007 18:19:48 -0000	1.44
++++ netwerk/base/src/nsProxyAutoConfig.js	6 Feb 2007 16:53:33 -0000
+@@ -63,16 +63,23 @@ function myToString(thisp) {
+ // This is like safeToString, except that it calls a given function with a
+ // given this and arguments.
+ var callFunction = null;
+ function myCall(fun, thisp) {
+     var args = Array.prototype.slice.call(arguments, 2);
+     return fun.apply(thisp, args);
+ }
+ 
++// Like the above, except that this gets a property off of an untrusted
++// object.
++var safeGetProperty = null;
++function myGet(thisp, id) {
++    return thisp[id];
++}
++
+ // implementor of nsIProxyAutoConfig
+ function nsProxyAutoConfig() {};
+ 
+ nsProxyAutoConfig.prototype = {
+     // sandbox in which we eval loaded autoconfig js file
+     _sandBox: null, 
+ 
+     // ptr to eval'ed FindProxyForURL function
+@@ -98,25 +105,29 @@ nsProxyAutoConfig.prototype = {
+         Components.utils.evalInSandbox(pacUtils, this._sandBox);
+ 
+         safeToString =
+             Components.utils.evalInSandbox("(" + myToString.toSource() + ")",
+                                            this._sandBox);
+         callFunction =
+             Components.utils.evalInSandbox("(" + myCall.toSource() + ")",
+                                            this._sandBox);
++        safeGetProperty =
++            Components.utils.evalInSandbox("(" + myGet.toSource() + ")",
++                                           this._sandBox);
+ 
+         // add predefined functions to pac
+         this._sandBox.importFunction(myIpAddress);
+         this._sandBox.importFunction(dnsResolve);
+         this._sandBox.importFunction(proxyAlert, "alert");
+ 
+         // evaluate loaded js file
+         Components.utils.evalInSandbox(pacText, this._sandBox);
+-        this._findProxyForURL = this._sandBox.FindProxyForURL;
++        this._findProxyForURL =
++            safeGetProperty(this._sandBox, "FindProxyForURL");
+     },
+ 
+     getProxyForURI: function(testURI, testHost) {
+         if (!this._findProxyForURL)
+             return null;
+ 
+         // Call the original function
+         return callFunction(this._findProxyForURL, this._sandBox,

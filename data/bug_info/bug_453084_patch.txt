@@ -1,0 +1,263 @@
+Index: resources/localized/English.lproj/CertificateDialogs.strings.in
+===================================================================
+RCS file: /cvsroot/mozilla/camino/resources/localized/English.lproj/CertificateDialogs.strings.in,v
+retrieving revision 1.3
+diff -u -8 -r1.3 CertificateDialogs.strings.in
+--- resources/localized/English.lproj/CertificateDialogs.strings.in	4 Sep 2008 23:16:23 -0000	1.3
++++ resources/localized/English.lproj/CertificateDialogs.strings.in	24 May 2009 15:44:45 -0000
+@@ -56,28 +56,33 @@
+ "InvalidStateExpired" = "The certificate has expired";
+ "InvalidStateNotYetValid" = "The certificate is not yet valid";
+ "InvalidStateCertNotTrusted" = "The certificate is not trusted";
+ "InvalidStateIssuerNotTrusted" = "The certificate’s issuer is not trusted";
+ "InvalidStateIsUntrustedRootCert" = "The certificate is not trusted";
+ "InvalidStateIssuerNotKnown" = "The certificate’s issuer is not known";
+ "InvalidStateInvalidIssuerCert" = "The issuer’s certificate has expired";
+ "InvalidStateInvalidUsage" = "The certificate is not valid for this usage";
++"InvalidStateMismatchedDomain" = "The certificate is not valid for this domain";
+ 
++/* Note: the "Short" keys are generated programatically from the keys for the
++longer versions, so they are used even though they won't show up if you search
++the code for the whole key. */
+ "ShortValidStateOK" = "Valid";
+ "ShortInvalidStateVerifyFailed" = "Unable to verify";
+ "ShortInvalidStateRevoked" = "Revoked"; /* explain revoked? */
+ "ShortInvalidStateExpired" = "Expired";
+ "ShortInvalidStateNotYetValid" = "Not yet valid";
+ "ShortInvalidStateCertNotTrusted" = "Not trusted";
+ "ShortInvalidStateIssuerNotTrusted" = "Issuer not trusted";
+ "ShortInvalidStateIsUntrustedRootCert" = "Not trusted";
+ "ShortInvalidStateIssuerNotKnown" = "Issuer unknown";
+ "ShortInvalidStateInvalidIssuerCert" = "Issuer’s certificate expired";
+ "ShortInvalidStateInvalidUsage" = "Not valid for usage";
++"ShortInvalidStateMismatchedDomain" = "Not valid for domain";
+ 
+ "VerifySSLClient" = "SSL Client Certificate";
+ "VerifySSLServer" = "SSL Server Certificate";
+ "VerifySSLStepUp" = "SSL Server with Step-up";
+ "VerifySSLCA" = "SSL Certificate Authority";
+ "VerifyEmailSigner" = "Email Signer Certificate";
+ "VerifyEmailRecip" = "Email Recipient Certificate";
+ "VerifyProtectObjSign" = "Protected Object Signer";
+Index: src/security/BrowserSecurityDialogs.mm
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/security/BrowserSecurityDialogs.mm,v
+retrieving revision 1.7
+diff -u -8 -r1.7 BrowserSecurityDialogs.mm
+--- src/security/BrowserSecurityDialogs.mm	14 May 2009 18:46:42 -0000	1.7
++++ src/security/BrowserSecurityDialogs.mm	24 May 2009 15:44:53 -0000
+@@ -265,16 +265,17 @@
+         mCertFailureFlags |= CHCertificateOverrideFlagDomainMismatch;
+       if (isInvalidTime)
+         mCertFailureFlags |= CHCertificateOverrideFlagInvalidTime;
+ 
+       nsCOMPtr<nsIX509Cert> cert;
+       certStatus->GetServerCert(getter_AddRefs(cert));
+       if (cert) {
+         CertificateItem* certItem = [CertificateItem certificateItemWithCert:cert];
++        [certItem setDomainIsMismatched:isDomainMismatch];
+         [self setCertificateItem:certItem];
+         return certItem;
+       }
+     }
+   }
+   return nil;
+ }
+ 
+Index: src/security/CertificateItem.h
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/security/CertificateItem.h,v
+retrieving revision 1.3
+diff -u -8 -r1.3 CertificateItem.h
+--- src/security/CertificateItem.h	22 Jan 2008 19:38:48 -0000	1.3
++++ src/security/CertificateItem.h	24 May 2009 15:44:54 -0000
+@@ -59,16 +59,17 @@
+ {
+   nsIX509Cert*    mCert;    // owned
+ 
+   NSDictionary*   mASN1InfoDict;    // owned. this is a nested set of dictionaries
+                                     // keyed by nsIASN1Object display names
+   
+   unsigned long   mVerification;    // we cache this because it's slow to obtain
+   BOOL            mGotVerification;
++  BOOL            mDomainIsMismatched;
+ }
+ 
+ + (CertificateItem*)certificateItemWithCert:(nsIX509Cert*)inCert;
+ - (id)initWithCert:(nsIX509Cert*)inCert;
+ 
+ - (nsIX509Cert*)cert;   // does not addref
+ - (BOOL)isSameCertAs:(nsIX509Cert*)inCert;
+ - (BOOL)isEqualTo:(id)object;
+@@ -134,16 +135,20 @@
+ - (BOOL)trustedForSSLAsType:(unsigned int)inType;
+ - (BOOL)trustedForEmailAsType:(unsigned int)inType;
+ - (BOOL)trustedForObjectSigningAsType:(unsigned int)inType;
+ 
+ // inUsageMask is flags in nsIX509CertDB
+ - (void)setTrustedFor:(unsigned int)inUsageMask asType:(unsigned int)inType;
+ - (void)setTrustedForSSL:(BOOL)inTrustSSL forEmail:(BOOL)inForEmail forObjSigning:(BOOL)inForObjSigning asType:(unsigned int)inType;
+ 
++// Indicates that we are using this certificate in the context of a domain it
++// isn't valid for, so it should not be considered valid.
++- (void)setDomainIsMismatched:(BOOL)isMismatched;
++
+ @end
+ 
+ 
+ class CertificateItemManagerObjects;
+ 
+ // an object that manages CertificateItems.
+ @interface CertificateItemManager : NSObject
+ {
+Index: src/security/CertificateItem.mm
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/security/CertificateItem.mm,v
+retrieving revision 1.12
+diff -u -8 -r1.12 CertificateItem.mm
+--- src/security/CertificateItem.mm	22 Jan 2008 19:38:48 -0000	1.12
++++ src/security/CertificateItem.mm	24 May 2009 15:44:54 -0000
+@@ -430,31 +430,32 @@
+ 
+ - (BOOL)isNotYetValid
+ {
+   return ([[self validFromDate] compare:[NSDate date]] == NSOrderedDescending);
+ }
+ 
+ - (BOOL)isValid
+ {
+-  return ([self generalValidity] == nsIX509Cert::VERIFIED_OK);
++  return ([self generalValidity] == nsIX509Cert::VERIFIED_OK) &&
++         !mDomainIsMismatched;
+ }
+ 
+ - (NSString*)validity
+ {
+   NSString* stateKey    = [self shortValidityKeyForVerifyState:[self generalValidity]];
+   return NSLocalizedStringFromTable(stateKey, @"CertificateDialogs", @"");
+ }
+ 
+ - (NSColor*)textColorForValidity
+ {
+   if ([self isUntrustedRootCACert])
+     return [NSColor orangeColor];
+ 
+-  if (![self isValid])
++  if (![self isValid] || mDomainIsMismatched)
+     return [NSColor redColor];
+ 
+   return [NSColor blackColor];
+ }
+ 
+ - (NSAttributedString*)attributedShortValidityString
+ {
+   NSString* stateKey    = [self shortValidityKeyForVerifyState:[self generalValidity]];
+@@ -545,51 +546,31 @@
+ 
+   mVerification = verified;
+   mGotVerification = YES;
+   return verified;
+ }
+ 
+ - (NSString*)shortValidityKeyForVerifyState:(PRUint32)inVerifyState
+ {
+-  NSString* stateKey = @"";
+-  switch (inVerifyState)
+-  {
+-    case nsIX509Cert::VERIFIED_OK:          stateKey = @"ShortValidStateOK";                   break;
+-    default:
+-    case nsIX509Cert::USAGE_NOT_ALLOWED:
+-    case nsIX509Cert::NOT_VERIFIED_UNKNOWN: stateKey = @"ShortInvalidStateVerifyFailed";       break;
+-    case nsIX509Cert::CERT_REVOKED:         stateKey = @"ShortInvalidStateRevoked";            break;
+-    case nsIX509Cert::CERT_NOT_TRUSTED:     stateKey = @"ShortInvalidStateCertNotTrusted";     break;
+-    case nsIX509Cert::ISSUER_NOT_TRUSTED:
+-      // if the issuer is us
+-      if ([self isRootCACert])
+-        stateKey = @"ShortInvalidStateIsUntrustedRootCert";
+-      else
+-        stateKey = @"ShortInvalidStateIssuerNotTrusted";
+-      break;
+-
+-    case nsIX509Cert::ISSUER_UNKNOWN:       stateKey = @"ShortInvalidStateIssuerNotKnown";     break;
+-    case nsIX509Cert::INVALID_CA:           stateKey = @"ShortInvalidStateInvalidIssuerCert";  break;
+-    case nsIX509Cert::CERT_EXPIRED:
+-      if ([self isNotYetValid])
+-        stateKey = @"ShortInvalidStateNotYetValid";
+-      else
+-        stateKey = @"ShortInvalidStateExpired";
+-      break;
+-  }
+-  return stateKey;
++  NSString* longStateKey = [self longValidityKeyForVerifyState:inVerifyState];
++  return [NSString stringWithFormat:@"Short%@", longStateKey];
+ }
+ 
+ - (NSString*)longValidityKeyForVerifyState:(PRUint32)inVerifyState
+ {
+   NSString* stateKey = @"";
+   switch (inVerifyState)
+   {
+-    case nsIX509Cert::VERIFIED_OK:          stateKey = @"ValidStateOK";                   break;
++    case nsIX509Cert::VERIFIED_OK:
++      if (mDomainIsMismatched)
++        stateKey = @"InvalidStateMismatchedDomain";
++      else
++        stateKey = @"ValidStateOK";
++      break;
+     default:
+     case nsIX509Cert::USAGE_NOT_ALLOWED:
+     case nsIX509Cert::NOT_VERIFIED_UNKNOWN: stateKey = @"InvalidStateVerifyFailed";       break;
+     case nsIX509Cert::CERT_REVOKED:         stateKey = @"InvalidStateRevoked";            break;
+     case nsIX509Cert::CERT_NOT_TRUSTED:     stateKey = @"InvalidStateCertNotTrusted";     break;
+     case nsIX509Cert::ISSUER_NOT_TRUSTED:
+       // if the issuer is us
+       if ([self isRootCACert])
+@@ -694,16 +675,21 @@
+     usageMask |= nsIX509CertDB::TRUSTED_EMAIL;
+ 
+   if (inForObjSigning)
+     usageMask |= nsIX509CertDB::TRUSTED_OBJSIGN;
+ 
+   [self setTrustedFor:usageMask asType:inType];
+ }
+ 
++- (void)setDomainIsMismatched:(BOOL)isMismatched
++{
++  mDomainIsMismatched = isMismatched;
++}
++
+ 
+ - (NSDictionary*)traverseSequence:(nsIASN1Sequence*)inSequence
+ {
+   if (!inSequence) return nil;
+ 
+   NSMutableDictionary* infoDict = [NSMutableDictionary dictionary];
+ 
+   nsCOMPtr<nsIMutableArray> objectsArray;
+Index: resources/localized/English.lproj/Localizable.strings.in
+===================================================================
+RCS file: /cvsroot/mozilla/camino/resources/localized/English.lproj/Localizable.strings.in,v
+retrieving revision 1.37
+diff -u -8 -r1.37 Localizable.strings.in
+--- resources/localized/English.lproj/Localizable.strings.in	25 Mar 2009 00:03:55 -0000	1.37
++++ resources/localized/English.lproj/Localizable.strings.in	24 May 2009 15:48:59 -0000
+@@ -283,19 +283,16 @@
+ 
+ /* Security dialogs */
+ "ContinueButton" = "Continue";
+ "StopButton" = "Don’t Connect";
+ "Accept Always" = "Always Accept";
+ "Accept Once" = "Accept Once";
+ "Security Warning" = "Security Warning";
+ "Post To Insecure" = "The information you have entered will be sent over an unencrypted connection and could easily be read by a third party.\n\nAre you sure you want to continue sending this information?";
+-"Security Mismatch" = "There is a problem with this site’s security certificate. It may be invalid, expired, or not registered with a trusted authority.\n\nAre you sure you want to connect to this site?";
+-"Expired Certification" = "This site is using an expired certificate.\n\nAre you sure you want to connect to this site?";
+-"Unknown Certification" = "This site has an identity that cannot be verified.";
+ 
+ /* cookie dialog */
+ "CookieText" = "%s wants to set a cookie. Do you want to allow it?";
+ "CookieCheckbox" = "Remember this decision?";
+ "CookieTitle" = "Allow Cookie?";
+ "Allow" = "Allow";
+ "Deny" = "Deny";
+ "Allow for Session" = "Allow for Session";

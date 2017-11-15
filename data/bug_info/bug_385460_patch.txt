@@ -1,0 +1,18 @@
+Index: mozilla/security/manager/locales/en-US/chrome/pippki/pref-masterpass.dtd
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/locales/en-US/chrome/pippki/pref-masterpass.dtd,v
+retrieving revision 1.3
+diff -u -7 -p -r1.3 pref-masterpass.dtd
+--- mozilla/security/manager/locales/en-US/chrome/pippki/pref-masterpass.dtd	9 Nov 2005 15:32:24 -0000	1.3
++++ mozilla/security/manager/locales/en-US/chrome/pippki/pref-masterpass.dtd	22 Jun 2007 16:33:53 -0000
+@@ -52,10 +52,7 @@
+ <!ENTITY  changepassword.button                  "Change Password...">
+ <!ENTITY  changepassword.accesskey               "C">
+ 
+ <!ENTITY  resetpassword.caption                  "Reset Master Password">
+ <!ENTITY  resetpassword.text                     "If you reset your master password, all of your stored web and e-mail passwords, form data, personal certificates, and private keys will be lost.">
+ <!ENTITY  resetpassword.button                   "Reset Password">
+ <!ENTITY  resetpassword.accesskey                "R">
+-<!ENTITY  encryptExpire.label                    "Expire master password after each use.">
+-<!ENTITY  encryptExpire.accesskey                "E">
+-

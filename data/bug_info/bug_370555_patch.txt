@@ -1,0 +1,68 @@
+? browser/base/content/.browser.js.swp
+Index: browser/base/content/browser.js
+===================================================================
+RCS file: /cvsroot/mozilla/browser/base/content/browser.js,v
+retrieving revision 1.479.2.218
+diff -u -p -6 -r1.479.2.218 browser.js
+--- browser/base/content/browser.js	25 Jan 2007 23:05:54 -0000	1.479.2.218
++++ browser/base/content/browser.js	17 Feb 2007 11:06:48 -0000
+@@ -2276,13 +2276,13 @@ function handleURLBarRevert()
+ 
+   var isScrolling = gURLBar.popupOpen;
+ 
+   // don't revert to last valid url unless page is NOT loading
+   // and user is NOT key-scrolling through autocomplete list
+   if ((!throbberElement || !throbberElement.hasAttribute("busy")) && !isScrolling) {
+-    if (url != "about:blank") {
++    if (url != "about:blank" || content.opener) {
+       gURLBar.value = url;
+       gURLBar.select();
+       SetPageProxyState("valid");
+     } else { //if about:blank, urlbar becomes ""
+       gURLBar.value = "";
+     }
+@@ -3848,13 +3848,14 @@ nsBrowserStatusHandler.prototype =
+     var browser = getBrowser().selectedBrowser;
+     var findField = document.getElementById("find-field");
+     if (aWebProgress.DOMWindow == content) {
+ 
+       var location = aLocation.spec;
+ 
+-      if (location == "about:blank" || location == "") {   //second condition is for new tabs, otherwise
++      if ((location == "about:blank" && !content.opener) 
++          || location == "") {   //second condition is for new tabs, otherwise
+         location = "";                                     //reload function is enabled until tab is refreshed
+         this.reloadCommand.setAttribute("disabled", "true");
+         this.reloadSkipCacheCommand.setAttribute("disabled", "true");
+       } else {
+         this.reloadCommand.removeAttribute("disabled");
+         this.reloadSkipCacheCommand.removeAttribute("disabled");
+Index: toolkit/content/widgets/tabbrowser.xml
+===================================================================
+RCS file: /cvsroot/mozilla/toolkit/content/widgets/tabbrowser.xml,v
+retrieving revision 1.103.2.95
+diff -u -p -6 -r1.103.2.95 tabbrowser.xml
+--- toolkit/content/widgets/tabbrowser.xml	23 Sep 2006 21:27:25 -0000	1.103.2.95
++++ toolkit/content/widgets/tabbrowser.xml	17 Feb 2007 11:06:51 -0000
+@@ -596,18 +596,19 @@
+             }
+             newTitle += modifier;
+ 
+             // If location bar is hidden and the URL type supports a host,
+             // add the scheme and host to the title to prevent spoofing.
+             // XXX https://bugzilla.mozilla.org/show_bug.cgi?id=22183#c239
+-            // (only for schemes that support a host)
+             try {
+               if (docElement.getAttribute("chromehidden").indexOf("location") != -1) {
+                 var uri = this.mURIFixup.createExposableURI(
+                             this.mCurrentBrowser.currentURI);
+-                if (uri.host)
++                if (uri.scheme == "about")
++                  newTitle = uri.spec + sep + newTitle;
++                else
+                   newTitle = uri.prePath + sep + newTitle;
+               }
+             } catch (e) {}
+ 
+             this.ownerDocument.title = newTitle;
+           ]]>

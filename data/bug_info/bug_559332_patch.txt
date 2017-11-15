@@ -1,0 +1,104 @@
+# HG changeset patch
+# Parent 4ef1484666deceedc46f13abe217a9f7136ef55f
+# User timeless@mozdev.org
+Bug 559332 don't build mOnStateLocationChangeReentranceDetection / nsAutoAtomic ifndef DEBUG
+r=kaie
+
+diff --git a/security/manager/boot/src/nsSecureBrowserUIImpl.cpp b/security/manager/boot/src/nsSecureBrowserUIImpl.cpp
+--- a/security/manager/boot/src/nsSecureBrowserUIImpl.cpp
++++ b/security/manager/boot/src/nsSecureBrowserUIImpl.cpp
+@@ -138,6 +138,7 @@ static PLDHashTableOps gMapOps = {
+   RequestMapInitEntry
+ };
+ 
++#ifdef DEBUG
+ class nsAutoAtomic {
+   public:
+     nsAutoAtomic(PRInt32 &i)
+@@ -155,24 +156,26 @@ class nsAutoAtomic {
+   private:
+     nsAutoAtomic(); // not accessible
+ };
+-
++#endif
+ 
+ nsSecureBrowserUIImpl::nsSecureBrowserUIImpl()
+-  : mNotifiedSecurityState(lis_no_security),
+-    mNotifiedToplevelIsEV(PR_FALSE),
+-    mIsViewSource(PR_FALSE)
++  : mNotifiedSecurityState(lis_no_security)
++  , mNotifiedToplevelIsEV(PR_FALSE)
++  , mNewToplevelSecurityState(STATE_IS_INSECURE)
++  , mNewToplevelIsEV(PR_FALSE)
++  , mNewToplevelSecurityStateKnown(PR_TRUE)
++  , mIsViewSource(PR_FALSE)
++  , mSubRequestsHighSecurity(0)
++  , mSubRequestsLowSecurity(0)
++  , mSubRequestsBrokenSecurity(0)
++  , mSubRequestsNoSecurity(0)
++#ifdef DEBUG
++  , mOnStateLocationChangeReentranceDetection(0)
++#endif
+ {
+   mMonitor = PR_NewMonitor();
+-  mOnStateLocationChangeReentranceDetection = 0;
+   mTransferringRequests.ops = nsnull;
+-  mNewToplevelSecurityState = STATE_IS_INSECURE;
+-  mNewToplevelIsEV = PR_FALSE;
+-  mNewToplevelSecurityStateKnown = PR_TRUE;
+   ResetStateTracking();
+-  mSubRequestsHighSecurity = 0;
+-  mSubRequestsLowSecurity = 0;
+-  mSubRequestsBrokenSecurity = 0;
+-  mSubRequestsNoSecurity = 0;
+   
+ #if defined(PR_LOGGING)
+   if (!gSecureDocLog)
+@@ -608,10 +611,11 @@ nsSecureBrowserUIImpl::OnStateChange(nsI
+                                      PRUint32 aProgressStateFlags,
+                                      nsresult aStatus)
+ {
++#ifdef DEBUG
+   nsAutoAtomic atomic(mOnStateLocationChangeReentranceDetection);
+   NS_ASSERTION(mOnStateLocationChangeReentranceDetection == 1,
+                "unexpected parallel nsIWebProgress OnStateChange and/or OnLocationChange notification");
+-
++#endif
+   /*
+     All discussion, unless otherwise mentioned, only refers to
+     http, https, file or wyciwig requests.
+@@ -1503,10 +1507,11 @@ nsSecureBrowserUIImpl::OnLocationChange(
+                                         nsIRequest* aRequest,
+                                         nsIURI* aLocation)
+ {
++#ifdef DEBUG
+   nsAutoAtomic atomic(mOnStateLocationChangeReentranceDetection);
+   NS_ASSERTION(mOnStateLocationChangeReentranceDetection == 1,
+                "unexpected parallel nsIWebProgress OnStateChange and/or OnLocationChange notification");
+-
++#endif
+   PR_LOG(gSecureDocLog, PR_LOG_DEBUG,
+          ("SecureUI:%p: OnLocationChange\n", this));
+ 
+diff --git a/security/manager/boot/src/nsSecureBrowserUIImpl.h b/security/manager/boot/src/nsSecureBrowserUIImpl.h
+--- a/security/manager/boot/src/nsSecureBrowserUIImpl.h
++++ b/security/manager/boot/src/nsSecureBrowserUIImpl.h
+@@ -96,7 +96,6 @@ public:
+   
+ protected:
+   PRMonitor *mMonitor;
+-  PRInt32 mOnStateLocationChangeReentranceDetection;
+   
+   nsWeakPtr mWindow;
+   nsCOMPtr<nsINetUtil> mIOService;
+@@ -127,6 +126,10 @@ protected:
+   PRInt32 mSubRequestsLowSecurity;
+   PRInt32 mSubRequestsBrokenSecurity;
+   PRInt32 mSubRequestsNoSecurity;
++#ifdef DEBUG
++  /* related to mMonitor */
++  PRInt32 mOnStateLocationChangeReentranceDetection;
++#endif
+ 
+   static already_AddRefed<nsISupports> ExtractSecurityInfo(nsIRequest* aRequest);
+   static nsresult MapInternalToExternalState(PRUint32* aState, lockIconState lock, PRBool ev);

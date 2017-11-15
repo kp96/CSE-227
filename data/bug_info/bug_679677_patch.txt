@@ -1,0 +1,17 @@
+# HG changeset patch
+# Parent 5b6c91beb55643f4909bc57e6553b01e74c0dc42
+
+diff --git a/suite/browser/browser-prefs.js b/suite/browser/browser-prefs.js
+--- a/suite/browser/browser-prefs.js
++++ b/suite/browser/browser-prefs.js
+@@ -512,6 +512,10 @@ pref("app.update.cert.maxErrors", 5);
+ // |app.update.url.override| preference for update checking.
+ pref("app.update.certs.1.issuerName", "OU=Equifax Secure Certificate Authority,O=Equifax,C=US");
+ pref("app.update.certs.1.commonName", "aus2-community.mozilla.org");
++pref("app.update.certs.2.issuerName", 'CN=GeoTrust SSL CA,O="GeoTrust, Inc.",C=US');
++pref("app.update.certs.2.commonName", "aus2-community.mozilla.org");
++pref("app.update.certs.3.issuerName", "CN=Thawte SSL CA,O=\"Thawte, Inc.\",C=US");
++pref("app.update.certs.3.commonName", "aus2-community.mozilla.org");
+ 
+ // Interval: Time between checks for a new version (in seconds)
+ //           default=1 day

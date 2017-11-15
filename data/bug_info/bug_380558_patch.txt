@@ -1,0 +1,88 @@
+Index: security/manager/ssl/src/nsCertVerificationThread.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsCertVerificationThread.cpp,v
+retrieving revision 1.2
+diff -u -8 -r1.2 nsCertVerificationThread.cpp
+--- security/manager/ssl/src/nsCertVerificationThread.cpp	4 Apr 2006 13:18:48 -0000	1.2
++++ security/manager/ssl/src/nsCertVerificationThread.cpp	14 May 2007 13:37:20 -0000
+@@ -118,33 +118,29 @@
+   nsAutoLock threadLock(verification_thread_singleton->mMutex);
+ 
+   verification_thread_singleton->mJobQ.Push(aJob);
+   PR_NotifyAllCondVar(verification_thread_singleton->mCond);
+   
+   return NS_OK;
+ }
+ 
+-#define CONDITION_WAIT_TIME PR_TicksPerSecond() / 4
+-  
+ void nsCertVerificationThread::Run(void)
+ {
+-  const PRIntervalTime wait_time = CONDITION_WAIT_TIME;
+-
+   while (PR_TRUE) {
+ 
+     nsBaseVerificationJob *job = nsnull;
+ 
+     {
+       nsAutoLock threadLock(verification_thread_singleton->mMutex);
+       
+       while (!mExitRequested && (0 == verification_thread_singleton->mJobQ.GetSize())) {
+         // no work to do ? let's wait a moment
+ 
+-        PR_WaitCondVar(mCond, wait_time);
++        PR_WaitCondVar(mCond, PR_INTERVAL_NO_TIMEOUT);
+       }
+       
+       if (mExitRequested)
+         break;
+       
+       job = NS_STATIC_CAST(nsBaseVerificationJob*, mJobQ.PopFront());
+     }
+ 
+Index: security/manager/ssl/src/nsSSLThread.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsSSLThread.cpp,v
+retrieving revision 1.9
+diff -u -8 -r1.9 nsSSLThread.cpp
+--- security/manager/ssl/src/nsSSLThread.cpp	7 Mar 2007 19:54:54 -0000	1.9
++++ security/manager/ssl/src/nsSSLThread.cpp	14 May 2007 13:37:21 -0000
+@@ -381,16 +381,18 @@
+       if (ssl_thread_singleton->mPendingHTTPRequest)
+       {
+         requestToCancel = ssl_thread_singleton->mPendingHTTPRequest;
+         ssl_thread_singleton->mPendingHTTPRequest = nsnull;
+       }
+       
+       close_later = PR_TRUE;
+       ssl_thread_singleton->mSocketScheduledToBeDestroyed = si;
++
++      PR_NotifyAllCondVar(ssl_thread_singleton->mCond);
+     }
+   }
+ 
+   if (requestToCancel)
+   {
+     if (NS_IsMainThread())
+     {
+       requestToCancel->Cancel(NS_ERROR_ABORT);
+@@ -932,18 +934,17 @@
+         {
+           pending_work = PR_TRUE;
+         }
+ 
+         if (!pending_work)
+         {
+           // no work to do ? let's wait a moment
+ 
+-          PRIntervalTime wait_time = PR_TicksPerSecond() / 4;
+-          PR_WaitCondVar(mCond, wait_time);
++          PR_WaitCondVar(mCond, PR_INTERVAL_NO_TIMEOUT);
+         }
+         
+       } while (!pending_work && !mExitRequested && !mSocketScheduledToBeDestroyed);
+       
+       if (mSocketScheduledToBeDestroyed)
+         continue;
+       
+       if (mExitRequested)

@@ -1,0 +1,18 @@
+Index: mozilla/security/manager/ssl/src/nsCRLInfo.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsCRLInfo.cpp,v
+retrieving revision 1.7
+diff -u -u -r1.7 nsCRLInfo.cpp
+--- mozilla/security/manager/ssl/src/nsCRLInfo.cpp	3 Feb 2006 14:18:28 -0000	1.7
++++ mozilla/security/manager/ssl/src/nsCRLInfo.cpp	19 Apr 2006 18:03:39 -0000
+@@ -76,8 +76,8 @@
+   nsAutoString nextUpdateLocale;
+   nsAutoString lastUpdateLocale;
+   nsCAutoString lastFetchURL;
+-  PRTime lastUpdate;
+-  PRTime nextUpdate;
++  PRTime lastUpdate = 0;
++  PRTime nextUpdate = 0;
+   SECStatus sec_rv;
+   
+   // Get the information we need here //

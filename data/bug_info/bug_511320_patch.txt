@@ -1,0 +1,32 @@
+diff -r 47e4c4d472e3 security/manager/locales/en-US/chrome/pippki/pippki.properties
+--- a/security/manager/locales/en-US/chrome/pippki/pippki.properties	Fri Oct 23 14:50:40 2009 -0700
++++ b/security/manager/locales/en-US/chrome/pippki/pippki.properties	Mon Nov 09 18:12:42 2009 -0800
+@@ -151,6 +151,7 @@
+ enable_fips=Enable FIPS
+ disable_fips=Disable FIPS
+ fips_nonempty_password_required=FIPS mode requires that you have a Master Password set for each security device. Please set the password before trying to enable FIPS mode.
++unable_to_toggle_fips=Unable to change the FIPS mode for the security device. It is recommended that you exit and restart this application.
+ 
+ # CRL next update.
+ crlNextUpdateMsg1=%S cannot establish an encrypted connection with "%S".
+diff -r 47e4c4d472e3 security/manager/pki/resources/content/device_manager.js
+--- a/security/manager/pki/resources/content/device_manager.js	Fri Oct 23 14:50:40 2009 -0700
++++ b/security/manager/pki/resources/content/device_manager.js	Mon Nov 09 18:12:42 2009 -0800
+@@ -541,8 +541,15 @@
+         return;
+     }
+   }
+-  
+-  secmoddb.toggleFIPSMode();
++
++   try {
++     secmoddb.toggleFIPSMode();
++   }
++   catch (e) {
++     alert(bundle.GetStringFromName("unable_to_toggle_FIPS"));
++     return;
++   }
++
+   //Remove the existing listed modules so that re-fresh doesn't 
+   //display the module that just changed.
+   ClearDeviceList();

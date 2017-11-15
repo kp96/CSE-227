@@ -1,0 +1,63 @@
+# HG changeset patch
+# Parent 5bb51d786607aefd704aa9e6349893e2a792e9ea
+# User timeless@mozdev.org
+Bug 551918 Deleting a cert while filtered results in a random item being displayed
+r=kaie
+
+diff --git a/security/manager/pki/resources/content/certManager.js b/security/manager/pki/resources/content/certManager.js
+--- a/security/manager/pki/resources/content/certManager.js
++++ b/security/manager/pki/resources/content/certManager.js
+@@ -669,7 +705,8 @@ TreeFilter.prototype = {
+         row.parent = row.trueParent = parent;
+         this.rows[parent].children.push(i);
+         var cert = row.cert = this.treeView.getCert(i);
+-        this.enhanceSpace(searchSpace, cert, i);
++        if (cert)
++          this.enhanceSpace(searchSpace, cert, i);
+         break;
+       }
+       this.rows[i] = row;
+@@ -708,14 +745,17 @@ TreeFilter.prototype = {
+   },
+   search: function search(node) {
+     var hint = node.value;
+-    var clazz = node.id.replace(/-search$/,"");
+-    var descNode = document.getElementById(clazz + "-description");
+-    descNode.firstChild.data =
+-      document.getElementById(
+-        "certmgr." + 
+-        clazz + 
+-        (hint == "" ? ".description" : ".filtered")
++    if ((hint != "") ^ (this.hint != "")) {
++      var clazz = node.id.replace(/-search$/,"");
++      var descNode = document.getElementById(clazz + "-description");
++      descNode.firstChild.data =
++        document.getElementById(
++          "certmgr." +
++          clazz +
++          (hint == "" ? ".description" : ".filtered")
+       ).getAttribute("value");
++    }
++    this.hint = hint;
+     /* TODO: convert to using a timeout otherwise the ui could hang */
+     var rowList = [], rowMap = [];
+     var searchSpace = this.searchSpace;
+@@ -922,9 +962,11 @@ TreeFilter.prototype = {
+   loadCerts: function loadCerts(aType) {
+     this.treeView.loadCerts(aType);
+     this.init();
++    this.search({value:this.hint});
+   },
+   loadCertsFromCache: function loadCertsFromCache(aCache, aType) {
+     this.treeView.loadCertsFromCache(aCache, aType);
++    this.search({value:this.hint});
+   },
+   getCert: function getCert(aRow) {
+     return this.rows[this.rowMap[aRow]].cert;
+@@ -938,5 +980,6 @@ TreeFilter.prototype = {
+   deleteEntryObject: function deleteEntryObject(aRow) {
+     this.treeView.deleteEntryObject(this.rowMap[aRow]);
+     this.init();
++    this.search({value:this.hint});
+   }
+ };

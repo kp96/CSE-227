@@ -1,0 +1,381 @@
+? mozilla/security/manager/ssl/src/nsNSSComponent.cpp.x
+Index: mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp,v
+retrieving revision 1.123
+diff -u -p -r1.123 nsNSSIOLayer.cpp
+--- mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp	9 Feb 2007 19:12:33 -0000	1.123
++++ mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp	15 Feb 2007 02:31:38 -0000
+@@ -179,6 +179,7 @@ PRBool nsSSLSocketThreadData::ensure_buf
+ 
+ nsNSSSocketInfo::nsNSSSocketInfo()
+   : mFd(nsnull),
++    mBlockingState(blocking_state_unknown),
+     mSecurityState(nsIWebProgressListener::STATE_IS_INSECURE),
+     mForSTARTTLS(PR_FALSE),
+     mHandshakePending(PR_TRUE),
+@@ -1207,37 +1208,6 @@ nsSSLIOLayerPoll(PRFileDesc *fd, PRInt16
+   return nsSSLThread::requestPoll(socketInfo, in_flags, out_flags);
+ }
+ 
+-static PRInt32 PR_CALLBACK
+-nsSSLIOLayerRead(PRFileDesc* fd, void* buf, PRInt32 amount)
+-{
+-  nsNSSShutDownPreventionLock locker;
+-  if (!fd || !fd->lower) {
+-    return PR_FAILURE;
+-  }
+-
+-  nsNSSSocketInfo *socketInfo = (nsNSSSocketInfo*)fd->secret;
+-  NS_ASSERTION(socketInfo,"nsNSSSocketInfo was null for an fd");
+-
+-  return nsSSLThread::requestRead(socketInfo, buf, amount);
+-}
+-
+-static PRInt32 PR_CALLBACK
+-nsSSLIOLayerWrite(PRFileDesc* fd, const void* buf, PRInt32 amount)
+-{
+-  nsNSSShutDownPreventionLock locker;
+-  if (!fd || !fd->lower) {
+-    return PR_FAILURE;
+-  }
+-
+-#ifdef DEBUG_SSL_VERBOSE
+-  DEBUG_DUMP_BUFFER((unsigned char*)buf, amount);
+-#endif
+-  nsNSSSocketInfo *socketInfo = (nsNSSSocketInfo*)fd->secret;
+-  NS_ASSERTION(socketInfo,"nsNSSSocketInfo was null for an fd");
+-
+-  return nsSSLThread::requestWrite(socketInfo, buf, amount);
+-}
+-
+ PRDescIdentity nsSSLIOLayerHelpers::nsSSLIOLayerIdentity;
+ PRIOMethods nsSSLIOLayerHelpers::nsSSLIOLayerMethods;
+ PRLock *nsSSLIOLayerHelpers::mutex = nsnull;
+@@ -1344,7 +1314,12 @@ static PRInt32 PR_CALLBACK PSMRecv(PRFil
+     return nsSSLThread::requestRecvMsgPeek(socketInfo, buf, amount, flags, timeout);
+   }
+ 
+-  return fd->lower->methods->recv(fd->lower, buf, amount, flags, timeout);
++  if (flags != 0) {
++    PR_SetError(PR_INVALID_ARGUMENT_ERROR, 0);
++    return -1;
++  }
++
++  return nsSSLThread::requestRead(socketInfo, buf, amount, timeout);
+ }
+ 
+ static PRInt32 PR_CALLBACK PSMSend(PRFileDesc *fd, const void *buf, PRInt32 amount,
+@@ -1356,7 +1331,27 @@ static PRInt32 PR_CALLBACK PSMSend(PRFil
+     return -1;
+   }
+ 
+-  return fd->lower->methods->send(fd->lower, buf, amount, flags, timeout);
++  if (flags != 0) {
++    PR_SetError(PR_INVALID_ARGUMENT_ERROR, 0);
++    return -1;
++  }
++
++  nsNSSSocketInfo *socketInfo = (nsNSSSocketInfo*)fd->secret;
++  NS_ASSERTION(socketInfo,"nsNSSSocketInfo was null for an fd");
++
++  return nsSSLThread::requestWrite(socketInfo, buf, amount, timeout);
++}
++
++static PRInt32 PR_CALLBACK
++nsSSLIOLayerRead(PRFileDesc* fd, void* buf, PRInt32 amount)
++{
++  return PSMRecv(fd, buf, amount, 0, PR_INTERVAL_NO_TIMEOUT);
++}
++
++static PRInt32 PR_CALLBACK
++nsSSLIOLayerWrite(PRFileDesc* fd, const void* buf, PRInt32 amount)
++{
++  return PSMSend(fd, buf, amount, 0, PR_INTERVAL_NO_TIMEOUT);
+ }
+ 
+ static PRStatus PR_CALLBACK PSMConnectcontinue(PRFileDesc *fd, PRInt16 out_flags)
+Index: mozilla/security/manager/ssl/src/nsNSSIOLayer.h
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSIOLayer.h,v
+retrieving revision 1.32
+diff -u -p -r1.32 nsNSSIOLayer.h
+--- mozilla/security/manager/ssl/src/nsNSSIOLayer.h	9 Feb 2007 19:12:33 -0000	1.32
++++ mozilla/security/manager/ssl/src/nsNSSIOLayer.h	15 Feb 2007 02:31:38 -0000
+@@ -173,6 +173,9 @@ public:
+ protected:
+   nsCOMPtr<nsIInterfaceRequestor> mCallbacks;
+   PRFileDesc* mFd;
++  enum { 
++    blocking_state_unknown, is_nonblocking_socket, is_blocking_socket 
++  } mBlockingState;
+   PRUint32 mSecurityState;
+   nsString mShortDesc;
+   PRPackedBool mForSTARTTLS;
+Index: mozilla/security/manager/ssl/src/nsSSLThread.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsSSLThread.cpp,v
+retrieving revision 1.7
+diff -u -p -r1.7 nsSSLThread.cpp
+--- mozilla/security/manager/ssl/src/nsSSLThread.cpp	24 Aug 2006 18:14:40 -0000	1.7
++++ mozilla/security/manager/ssl/src/nsSSLThread.cpp	15 Feb 2007 02:31:39 -0000
+@@ -435,7 +435,36 @@ void nsSSLThread::restoreOriginalSocket_
+   }
+ }
+ 
+-PRInt32 nsSSLThread::requestRead(nsNSSSocketInfo *si, void *buf, PRInt32 amount)
++PRStatus nsSSLThread::getRealFDIfBlockingSocket_locked(nsNSSSocketInfo *si, 
++                                                       PRFileDesc *&out_fd)
++{
++  out_fd = nsnull;
++
++  PRFileDesc *realFD = 
++    (si->mThreadData->mReplacedSSLFileDesc) ?
++      si->mThreadData->mReplacedSSLFileDesc : si->mFd->lower;
++
++  if (si->mBlockingState == nsNSSSocketInfo::blocking_state_unknown)
++  {
++    PRSocketOptionData sod;
++    sod.option = PR_SockOpt_Nonblocking;
++    if (PR_GetSocketOption(realFD, &sod) == PR_FAILURE)
++      return PR_FAILURE;
++
++    si->mBlockingState = sod.value.non_blocking ?
++      nsNSSSocketInfo::is_nonblocking_socket : nsNSSSocketInfo::is_blocking_socket;
++  }
++
++  if (si->mBlockingState == nsNSSSocketInfo::is_blocking_socket)
++  {
++    out_fd = realFD;
++  }
++
++  return PR_SUCCESS;
++}
++
++PRInt32 nsSSLThread::requestRead(nsNSSSocketInfo *si, void *buf, PRInt32 amount, 
++                                 PRIntervalTime timeout)
+ {
+   if (!ssl_thread_singleton || !si || !buf || !amount || !ssl_thread_singleton->mThreadHandle)
+   {
+@@ -446,6 +475,7 @@ PRInt32 nsSSLThread::requestRead(nsNSSSo
+   PRBool this_socket_is_busy = PR_FALSE;
+   PRBool some_other_socket_is_busy = PR_FALSE;
+   nsSSLSocketThreadData::ssl_state my_ssl_state;
++  PRFileDesc *blockingFD = nsnull;
+ 
+   {
+     nsAutoLock threadLock(ssl_thread_singleton->mMutex);
+@@ -455,37 +485,52 @@ PRInt32 nsSSLThread::requestRead(nsNSSSo
+       return -1;
+     }
+ 
+-    my_ssl_state = si->mThreadData->mSSLState;
++    if (getRealFDIfBlockingSocket_locked(si, blockingFD) == PR_FAILURE) {
++      return -1;
++    }
+ 
+-    if (ssl_thread_singleton->mBusySocket == si)
++    if (!blockingFD)
+     {
+-      this_socket_is_busy = PR_TRUE;
+-
+-      if (my_ssl_state == nsSSLSocketThreadData::ssl_reading_done)
++      my_ssl_state = si->mThreadData->mSSLState;
++  
++      if (ssl_thread_singleton->mBusySocket == si)
++      {
++        this_socket_is_busy = PR_TRUE;
++  
++        if (my_ssl_state == nsSSLSocketThreadData::ssl_reading_done)
++        {
++          // we will now care for the data that's ready,
++          // the socket is no longer busy on the ssl thread
++          
++          restoreOriginalSocket_locked(si);
++  
++          ssl_thread_singleton->mBusySocket = nsnull;
++          
++          // We'll handle the results further down,
++          // while not holding the lock.
++        }
++      }
++      else if (ssl_thread_singleton->mBusySocket)
++      {
++        some_other_socket_is_busy = PR_TRUE;
++      }
++  
++      if (!this_socket_is_busy && si->HandshakeTimeout())
+       {
+-        // we will now care for the data that's ready,
+-        // the socket is no longer busy on the ssl thread
+-        
+         restoreOriginalSocket_locked(si);
+-
+-        ssl_thread_singleton->mBusySocket = nsnull;
+-        
+-        // We'll handle the results further down,
+-        // while not holding the lock.
++        PR_SetError(PR_CONNECT_RESET_ERROR, 0);
++        checkHandshake(-1, si->mFd->lower, si);
++        return -1;
+       }
+     }
+-    else if (ssl_thread_singleton->mBusySocket)
+-    {
+-      some_other_socket_is_busy = PR_TRUE;
+-    }
++    // leave this mutex protected scope before the blockingFD handling
++  }
+ 
+-    if (!this_socket_is_busy && si->HandshakeTimeout())
+-    {
+-      restoreOriginalSocket_locked(si);
+-      PR_SetError(PR_CONNECT_RESET_ERROR, 0);
+-      checkHandshake(-1, si->mFd->lower, si);
+-      return -1;
+-    }
++  if (blockingFD)
++  {
++    // this is an exception, we do not use our SSL thread at all,
++    // just pass the call through to libssl.
++    return blockingFD->methods->recv(blockingFD, buf, amount, 0, timeout);
+   }
+ 
+   switch (my_ssl_state)
+@@ -645,7 +690,8 @@ PRInt32 nsSSLThread::requestRead(nsNSSSo
+   return -1;
+ }
+ 
+-PRInt32 nsSSLThread::requestWrite(nsNSSSocketInfo *si, const void *buf, PRInt32 amount)
++PRInt32 nsSSLThread::requestWrite(nsNSSSocketInfo *si, const void *buf, PRInt32 amount,
++                                  PRIntervalTime timeout)
+ {
+   if (!ssl_thread_singleton || !si || !buf || !amount || !ssl_thread_singleton->mThreadHandle)
+   {
+@@ -656,6 +702,7 @@ PRInt32 nsSSLThread::requestWrite(nsNSSS
+   PRBool this_socket_is_busy = PR_FALSE;
+   PRBool some_other_socket_is_busy = PR_FALSE;
+   nsSSLSocketThreadData::ssl_state my_ssl_state;
++  PRFileDesc *blockingFD = nsnull;
+   
+   {
+     nsAutoLock threadLock(ssl_thread_singleton->mMutex);
+@@ -665,37 +712,52 @@ PRInt32 nsSSLThread::requestWrite(nsNSSS
+       return -1;
+     }
+ 
+-    my_ssl_state = si->mThreadData->mSSLState;
++    if (getRealFDIfBlockingSocket_locked(si, blockingFD) == PR_FAILURE) {
++      return -1;
++    }
+ 
+-    if (ssl_thread_singleton->mBusySocket == si)
++    if (!blockingFD)
+     {
+-      this_socket_is_busy = PR_TRUE;
+-      
+-      if (my_ssl_state == nsSSLSocketThreadData::ssl_writing_done)
++      my_ssl_state = si->mThreadData->mSSLState;
++  
++      if (ssl_thread_singleton->mBusySocket == si)
+       {
+-        // we will now care for the data that's ready,
+-        // the socket is no longer busy on the ssl thread
++        this_socket_is_busy = PR_TRUE;
+         
++        if (my_ssl_state == nsSSLSocketThreadData::ssl_writing_done)
++        {
++          // we will now care for the data that's ready,
++          // the socket is no longer busy on the ssl thread
++          
++          restoreOriginalSocket_locked(si);
++  
++          ssl_thread_singleton->mBusySocket = nsnull;
++          
++          // We'll handle the results further down,
++          // while not holding the lock.
++        }
++      }
++      else if (ssl_thread_singleton->mBusySocket)
++      {
++        some_other_socket_is_busy = PR_TRUE;
++      }
++  
++      if (!this_socket_is_busy && si->HandshakeTimeout())
++      {
+         restoreOriginalSocket_locked(si);
+-
+-        ssl_thread_singleton->mBusySocket = nsnull;
+-        
+-        // We'll handle the results further down,
+-        // while not holding the lock.
++        PR_SetError(PR_CONNECT_RESET_ERROR, 0);
++        checkHandshake(-1, si->mFd->lower, si);
++        return -1;
+       }
+     }
+-    else if (ssl_thread_singleton->mBusySocket)
+-    {
+-      some_other_socket_is_busy = PR_TRUE;
+-    }
++    // leave this mutex protected scope before the blockingFD handling
++  }
+ 
+-    if (!this_socket_is_busy && si->HandshakeTimeout())
+-    {
+-      restoreOriginalSocket_locked(si);
+-      PR_SetError(PR_CONNECT_RESET_ERROR, 0);
+-      checkHandshake(-1, si->mFd->lower, si);
+-      return -1;
+-    }
++  if (blockingFD)
++  {
++    // this is an exception, we do not use our SSL thread at all,
++    // just pass the call through to libssl.
++    return blockingFD->methods->send(blockingFD, buf, amount, 0, timeout);
+   }
+ 
+   switch (my_ssl_state)
+Index: mozilla/security/manager/ssl/src/nsSSLThread.h
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsSSLThread.h,v
+retrieving revision 1.1
+diff -u -p -r1.1 nsSSLThread.h
+--- mozilla/security/manager/ssl/src/nsSSLThread.h	4 Apr 2006 06:41:37 -0000	1.1
++++ mozilla/security/manager/ssl/src/nsSSLThread.h	15 Feb 2007 02:31:39 -0000
+@@ -96,7 +96,18 @@ private:
+   // caled from the Necko thread only.
+   static PRFileDesc *getRealSSLFD(nsNSSSocketInfo *si);
+ 
+-  
++  // Support of blocking sockets is very rudimentary.
++  // We only support it because Mozilla's LDAP code requires blocking I/O.
++  // We do not support switching the blocking mode of a socket.
++  // We require the blocking state has been set prior to the first 
++  // read/write call, and will stay that way for the remainder of the socket's lifetime.
++  // This function must be called while holding the lock.
++  // If the socket is a blocking socket, out_fd will contain the real FD, 
++  // on a non-blocking socket out_fd will be nsnull.
++  // If there is a failure in obtaining the status of the socket,
++  // the function will return PR_FAILURE.
++  static PRStatus getRealFDIfBlockingSocket_locked(nsNSSSocketInfo *si, 
++                                                   PRFileDesc *&out_fd);
+ public:
+   nsSSLThread();
+   ~nsSSLThread();
+@@ -108,11 +119,13 @@ public:
+ 
+   static PRInt32 requestRead(nsNSSSocketInfo *si, 
+                              void *buf, 
+-                             PRInt32 amount);
++                             PRInt32 amount,
++                             PRIntervalTime timeout);
+ 
+   static PRInt32 requestWrite(nsNSSSocketInfo *si, 
+                               const void *buf, 
+-                              PRInt32 amount);
++                              PRInt32 amount,
++                              PRIntervalTime timeout);
+ 
+   static PRInt16 requestPoll(nsNSSSocketInfo *si, 
+                              PRInt16 in_flags, 

@@ -1,0 +1,97 @@
+Index: security/manager/ssl/src/nsCertOverrideService.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsCertOverrideService.cpp,v
+retrieving revision 1.3
+diff -u -p -r1.3 nsCertOverrideService.cpp
+--- security/manager/ssl/src/nsCertOverrideService.cpp	19 Nov 2007 15:32:46 -0000	1.3
++++ security/manager/ssl/src/nsCertOverrideService.cpp	24 Jan 2008 11:16:54 -0000
+@@ -22,6 +22,7 @@
+  *
+  * Contributor(s):
+  *   Kai Engert <kengert@redhat.com>
++ *   Ehsan Akhgari <ehsan.akhgari@gmail.com>
+  *
+  * Alternatively, the contents of this file may be used under the terms of
+  * either the GNU General Public License Version 2 or later (the "GPL"), or
+@@ -47,7 +48,9 @@
+ #include "nsILineInputStream.h"
+ #include "nsIObserver.h"
+ #include "nsIObserverService.h"
++#include "nsISupportsPrimitives.h"
+ #include "nsPromiseFlatString.h"
++#include "nsProxiedService.h"
+ #include "nsStringBuffer.h"
+ #include "nsAutoLock.h"
+ #include "nsAutoPtr.h"
+@@ -109,9 +112,10 @@ nsCertOverride::convertStringToBits(cons
+   }
+ }
+ 
+-NS_IMPL_THREADSAFE_ISUPPORTS2(nsCertOverrideService, 
++NS_IMPL_THREADSAFE_ISUPPORTS3(nsCertOverrideService, 
+                               nsICertOverrideService,
+-                              nsIObserver)
++                              nsIObserver,
++                              nsISupportsWeakReference)
+ 
+ nsCertOverrideService::nsCertOverrideService()
+ {
+@@ -151,8 +155,11 @@ nsCertOverrideService::Init()
+ 
+   Read();
+ 
+-  nsCOMPtr<nsIObserverService> mObserverService = 
+-    do_GetService("@mozilla.org/observer-service;1");
++  nsresult rv;
++  NS_WITH_ALWAYS_PROXIED_SERVICE(nsIObserverService, observerService,
++                                 "@mozilla.org/observer-service;1",
++                                 NS_PROXY_TO_MAIN_THREAD, &rv);
++  mObserverService = observerService;
+ 
+   if (mObserverService) {
+     mObserverService->AddObserver(this, "profile-before-change", PR_TRUE);
+Index: security/manager/ssl/src/nsCertOverrideService.h
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsCertOverrideService.h,v
+retrieving revision 1.2
+diff -u -p -r1.2 nsCertOverrideService.h
+--- security/manager/ssl/src/nsCertOverrideService.h	19 Nov 2007 15:32:46 -0000	1.2
++++ security/manager/ssl/src/nsCertOverrideService.h	24 Jan 2008 11:16:54 -0000
+@@ -22,6 +22,7 @@
+  *
+  * Contributor(s):
+  *   Kai Engert <kengert@redhat.com>
++ *   Ehsan Akhgari <ehsan.akhgari@gmail.com>
+  *
+  * Alternatively, the contents of this file may be used under the terms of
+  * either the GNU General Public License Version 2 or later (the "GPL"), or
+@@ -42,11 +43,13 @@
+ 
+ #include "nsICertOverrideService.h"
+ #include "nsTHashtable.h"
++#include "nsIObserverService.h"
+ #include "nsIObserver.h"
+ #include "nsString.h"
+ #include "nsIFile.h"
+ #include "prmon.h"
+ #include "secoidt.h"
++#include "nsWeakReference.h"
+ 
+ class nsCertOverride
+ {
+@@ -152,6 +155,7 @@ class nsCertOverrideEntry : public PLDHa
+ 
+ class nsCertOverrideService : public nsICertOverrideService
+                             , public nsIObserver
++                            , public nsSupportsWeakReference
+ {
+ public:
+   NS_DECL_ISUPPORTS
+@@ -176,6 +180,7 @@ public:
+ protected:
+     PRMonitor *monitor;
+     nsCOMPtr<nsIFile> mSettingsFile;
++    nsCOMPtr<nsIObserverService> mObserverService;
+     nsTHashtable<nsCertOverrideEntry> mSettingsTable;
+ 
+     SECOidTag mOidTagForStoringNewHashes;

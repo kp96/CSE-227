@@ -1,0 +1,25 @@
+Index: security/manager/ssl/src/nsNSSIOLayer.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp,v
+retrieving revision 1.109
+diff -u -8 -r1.109 nsNSSIOLayer.cpp
+--- security/manager/ssl/src/nsNSSIOLayer.cpp	10 May 2006 17:29:56 -0000	1.109
++++ security/manager/ssl/src/nsNSSIOLayer.cpp	19 May 2006 01:26:16 -0000
+@@ -1043,16 +1043,17 @@
+     case SSL_ERROR_ILLEGAL_PARAMETER_ALERT:
+     case SSL_ERROR_NO_CYPHER_OVERLAP:
+     case SSL_ERROR_BAD_SERVER:
+     case SSL_ERROR_BAD_BLOCK_PADDING:
+     case SSL_ERROR_UNSUPPORTED_VERSION:
+     case SSL_ERROR_PROTOCOL_VERSION_ALERT:
+     case SSL_ERROR_RX_MALFORMED_FINISHED:
+     case SSL_ERROR_BAD_HANDSHAKE_HASH_VALUE:
++    case SSL_ERROR_DECODE_ERROR_ALERT:
+     case SSL_ERROR_RX_UNKNOWN_ALERT:
+       return PR_TRUE;
+   }
+   
+   return PR_FALSE;
+ }
+ 
+ PRInt32

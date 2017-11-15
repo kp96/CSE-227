@@ -1,0 +1,26 @@
+Index: mozilla/docshell/base/nsDocShell.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/docshell/base/nsDocShell.cpp,v
+retrieving revision 1.747
+diff -u -p -8 -r1.747 nsDocShell.cpp
+--- mozilla/docshell/base/nsDocShell.cpp	1 Oct 2005 20:38:46 -0000	1.747
++++ mozilla/docshell/base/nsDocShell.cpp	3 Oct 2005 21:57:06 -0000
+@@ -3049,17 +3049,17 @@ nsDocShell::DisplayLoadError(nsresult aE
+         NS_ENSURE_SUCCESS(rv, rv);
+         messageStr.Assign(str.get());
+     }
+ 
+     // Display the error as a page or an alert prompt
+     NS_ENSURE_FALSE(messageStr.IsEmpty(), NS_ERROR_FAILURE);
+     // Note: For now, display an alert instead of an error page if we have no
+     // URI object. Missing URI objects are handled badly by session history.
+-    if (mUseErrorPages && aURI) {
++    if (mUseErrorPages && aURI && aFailedChannel) {
+         // Display an error page
+         LoadErrorPage(aURI, aURL, error.get(), messageStr.get(),
+                       aFailedChannel);
+     } 
+     else
+     {
+         // Display a message box
+         prompter->Alert(nsnull, messageStr.get());

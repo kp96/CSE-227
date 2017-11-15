@@ -1,0 +1,110 @@
+Index: security/manager/boot/src/nsSecureBrowserUIImpl.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/boot/src/nsSecureBrowserUIImpl.cpp,v
+retrieving revision 1.34.6.2
+diff -u -9 -p -r1.34.6.2 nsSecureBrowserUIImpl.cpp
+--- security/manager/boot/src/nsSecureBrowserUIImpl.cpp	27 Jul 2004 22:54:44 -0000	1.34.6.2
++++ security/manager/boot/src/nsSecureBrowserUIImpl.cpp	8 Oct 2004 21:27:27 -0000
+@@ -123,20 +123,20 @@ static PLDHashTableOps gMapOps = {
+   RequestMapMatchEntry,
+   PL_DHashMoveEntryStub,
+   PL_DHashClearEntryStub,
+   PL_DHashFinalizeStub,
+   RequestMapInitEntry
+ };
+ 
+ 
+ nsSecureBrowserUIImpl::nsSecureBrowserUIImpl()
+-  : mIsViewSource(PR_FALSE),
+-    mPreviousSecurityState(lis_no_security)
++  : mPreviousSecurityState(lis_no_security),
++    mIsViewSource(PR_FALSE)
+ {
+   mTransferringRequests.ops = nsnull;
+   mNewToplevelSecurityState = STATE_IS_INSECURE;
+   mNewToplevelSecurityStateKnown = PR_TRUE;
+   ResetStateTracking();
+   
+ #if defined(PR_LOGGING)
+   if (!gSecureDocLog)
+     gSecureDocLog = PR_NewLogModule("nsSecureBrowserUI");
+@@ -1110,33 +1110,35 @@ nsresult nsSecureBrowserUIImpl::UpdateSe
+ 
+   return NS_OK; 
+ }
+ 
+ NS_IMETHODIMP
+ nsSecureBrowserUIImpl::OnLocationChange(nsIWebProgress* aWebProgress,
+                                         nsIRequest* aRequest,
+                                         nsIURI* aLocation)
+ {
+-  mCurrentURI = aLocation;
+-
+-  if (mCurrentURI)
++  if (aLocation)
+   {
+     PRBool vs;
+-    
+-    if (NS_SUCCEEDED(mCurrentURI->SchemeIs("view-source", &vs)) && vs)
+-    {
++
++    nsresult rv = aLocation->SchemeIs("view-source", &vs);
++    NS_ENSURE_SUCCESS(rv, rv);
++
++    if (vs) {
+       PR_LOG(gSecureDocLog, PR_LOG_DEBUG,
+              ("SecureUI:%p: OnLocationChange: view-source\n", this));
+-
+-      mIsViewSource = PR_TRUE;
+     }
++
++    mIsViewSource = vs;
+   }
+ 
++  mCurrentURI = aLocation;
++
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsSecureBrowserUIImpl::OnStatusChange(nsIWebProgress* aWebProgress,
+                                       nsIRequest* aRequest,
+                                       nsresult aStatus,
+                                       const PRUnichar* aMessage)
+ {
+Index: security/manager/boot/src/nsSecureBrowserUIImpl.h
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/boot/src/nsSecureBrowserUIImpl.h,v
+retrieving revision 1.11
+diff -u -9 -p -r1.11 nsSecureBrowserUIImpl.h
+--- security/manager/boot/src/nsSecureBrowserUIImpl.h	29 Sep 2003 06:03:53 -0000	1.11
++++ security/manager/boot/src/nsSecureBrowserUIImpl.h	8 Oct 2004 21:27:27 -0000
+@@ -87,25 +87,25 @@ protected:
+   
+   enum lockIconState {
+     lis_no_security,
+     lis_broken_security,
+     lis_mixed_security,
+     lis_low_security,
+     lis_high_security
+   };
+ 
+-  PRBool mIsViewSource;
+-
+   lockIconState mPreviousSecurityState;
+ 
+   void ResetStateTracking();
+   PRUint32 mNewToplevelSecurityState;
+-  PRBool mNewToplevelSecurityStateKnown;
++  PRPackedBool mNewToplevelSecurityStateKnown;
++  PRPackedBool mIsViewSource;
++
+   nsXPIDLString mInfoTooltip;
+   PRInt32 mDocumentRequestsInProgress;
+   PRInt32 mSubRequestsInProgress;
+   PRInt32 mSubRequestsHighSecurity;
+   PRInt32 mSubRequestsLowSecurity;
+   PRInt32 mSubRequestsBrokenSecurity;
+   PRInt32 mSubRequestsNoSecurity;
+ 
+   nsresult UpdateSecurityState(nsIRequest* aRequest);

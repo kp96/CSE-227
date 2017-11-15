@@ -1,0 +1,1426 @@
+# HG changeset patch
+# Parent 351055d8053fd4d03d905be3ed21e12e390a29fb
+# User Masatoshi Kimura <VYV03354@nifty.ne.jp>
+
+diff --git a/netwerk/base/public/security-prefs.js b/netwerk/base/public/security-prefs.js
+--- a/netwerk/base/public/security-prefs.js
++++ b/netwerk/base/public/security-prefs.js
+@@ -1,15 +1,16 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+ pref("security.tls.version.min", 1);
+ pref("security.tls.version.max", 3);
+ pref("security.tls.version.fallback-limit", 3);
++pref("security.tls.min_dhe_key_bits", 1024);
+ 
+ pref("security.ssl.allow_unrestricted_renego_everywhere__temporarily_available_pref", false);
+ pref("security.ssl.renego_unrestricted_hosts", "");
+ pref("security.ssl.treat_unsafe_negotiation_as_broken", false);
+ pref("security.ssl.require_safe_negotiation",  false);
+ pref("security.ssl.warn_missing_rfc5746",  1);
+ pref("security.ssl.enable_ocsp_stapling", true);
+ pref("security.ssl.enable_false_start", true);
+diff --git a/security/manager/ssl/src/nsNSSComponent.cpp b/security/manager/ssl/src/nsNSSComponent.cpp
+--- a/security/manager/ssl/src/nsNSSComponent.cpp
++++ b/security/manager/ssl/src/nsNSSComponent.cpp
+@@ -615,21 +615,26 @@ nsNSSComponent::InitializePIPNSSBundle()
+                               getter_AddRefs(mNSSErrorsBundle));
+   if (!mNSSErrorsBundle)
+     rv = NS_ERROR_FAILURE;
+ 
+   return rv;
+ }
+ 
+ // Table of pref names and SSL cipher ID
++enum CipherPrefFlags {
++  RC4Encryption = 1 << 0,
++  DHEKeyExchange = 1 << 1,
++};
++
+ typedef struct {
+   const char* pref;
+   long id;
+   bool enabledByDefault;
+-  bool weak;
++  CipherPrefFlags flags;
+ } CipherPref;
+ 
+ // Update the switch statement in HandshakeCallback in nsNSSCallbacks.cpp when
+ // you add/remove cipher suites here.
+ static const CipherPref sCipherPrefs[] = {
+  { "security.ssl3.ecdhe_rsa_aes_128_gcm_sha256",
+    TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, true },
+  { "security.ssl3.ecdhe_ecdsa_aes_128_gcm_sha256",
+@@ -640,40 +645,40 @@ static const CipherPref sCipherPrefs[] =
+    TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA, true },
+ 
+  { "security.ssl3.ecdhe_rsa_aes_256_sha",
+    TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA, true },
+  { "security.ssl3.ecdhe_ecdsa_aes_256_sha",
+    TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA, true },
+ 
+  { "security.ssl3.dhe_rsa_aes_128_sha",
+-   TLS_DHE_RSA_WITH_AES_128_CBC_SHA, true },
++   TLS_DHE_RSA_WITH_AES_128_CBC_SHA, true, DHEKeyExchange },
+ 
+  { "security.ssl3.dhe_rsa_aes_256_sha",
+-   TLS_DHE_RSA_WITH_AES_256_CBC_SHA, true },
++   TLS_DHE_RSA_WITH_AES_256_CBC_SHA, true, DHEKeyExchange },
+ 
+  { "security.ssl3.dhe_dss_aes_128_sha",
+-   TLS_DHE_DSS_WITH_AES_128_CBC_SHA, false }, // deprecated (DSS)
++   TLS_DHE_DSS_WITH_AES_128_CBC_SHA, false, DHEKeyExchange }, // deprecated (DSS)
+ 
+  { "security.ssl3.ecdhe_rsa_rc4_128_sha",
+-   TLS_ECDHE_RSA_WITH_RC4_128_SHA, true, true }, // deprecated (RC4)
++   TLS_ECDHE_RSA_WITH_RC4_128_SHA, true, RC4Encryption }, // deprecated (RC4)
+  { "security.ssl3.ecdhe_ecdsa_rc4_128_sha",
+-   TLS_ECDHE_ECDSA_WITH_RC4_128_SHA, true, true }, // deprecated (RC4)
++   TLS_ECDHE_ECDSA_WITH_RC4_128_SHA, true, RC4Encryption }, // deprecated (RC4)
+ 
+  { "security.ssl3.rsa_aes_128_sha",
+    TLS_RSA_WITH_AES_128_CBC_SHA, true }, // deprecated (RSA key exchange)
+  { "security.ssl3.rsa_aes_256_sha",
+    TLS_RSA_WITH_AES_256_CBC_SHA, true }, // deprecated (RSA key exchange)
+  { "security.ssl3.rsa_des_ede3_sha",
+    TLS_RSA_WITH_3DES_EDE_CBC_SHA, true }, // deprecated (RSA key exchange, 3DES)
+ 
+  { "security.ssl3.rsa_rc4_128_sha",
+-   TLS_RSA_WITH_RC4_128_SHA, true, true }, // deprecated (RSA key exchange, RC4)
++   TLS_RSA_WITH_RC4_128_SHA, true, RC4Encryption }, // deprecated (RSA key exchange, RC4)
+  { "security.ssl3.rsa_rc4_128_md5",
+-   TLS_RSA_WITH_RC4_128_MD5, true, true }, // deprecated (RSA key exchange, RC4, HMAC-MD5)
++   TLS_RSA_WITH_RC4_128_MD5, true, RC4Encryption }, // deprecated (RSA key exchange, RC4, HMAC-MD5)
+ 
+  // All the rest are disabled by default
+ 
+  { nullptr, 0 } // end marker
+ };
+ 
+ // Bit flags indicating what weak ciphers are enabled.
+ // The bit index will correspond to the index in sCipherPrefs.
+@@ -695,16 +700,28 @@ nsNSSComponent::UseWeakCiphersOnSocket(P
+   const CipherPref* const cp = sCipherPrefs;
+   for (size_t i = 0; cp[i].pref; ++i) {
+     if (enabledWeakCiphers & ((uint32_t)1 << i)) {
+       SSL_CipherPrefSet(fd, cp[i].id, true);
+     }
+   }
+ }
+ 
++/*static*/ void
++nsNSSComponent::DisableDHECiphersOnSocket(PRFileDesc* fd)
++{
++  const CipherPref* const cp = sCipherPrefs;
++  for (size_t i = 0; cp[i].pref; ++i) {
++    if (cp[i].flags & DHEKeyExchange) {
++      SSL_CipherPrefSet(fd, cp[i].id, false);
++    }
++  }
++  SSL_ClearSessionCache();
++}
++
+ // This function will convert from pref values like 0, 1, ...
+ // to the internal values of SSL_LIBRARY_VERSION_3_0,
+ // SSL_LIBRARY_VERSION_TLS_1_0, ...
+ /*static*/ void
+ nsNSSComponent::FillTLSVersionRange(SSLVersionRange& rangeOut,
+                                     uint32_t minFromPrefs,
+                                     uint32_t maxFromPrefs,
+                                     SSLVersionRange defaults)
+@@ -812,17 +829,17 @@ CipherSuiteChangeObserver::Observe(nsISu
+   if (nsCRT::strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID) == 0) {
+     NS_ConvertUTF16toUTF8  prefName(someData);
+     // Look through the cipher table and set according to pref setting
+     const CipherPref* const cp = sCipherPrefs;
+     for (size_t i = 0; cp[i].pref; ++i) {
+       if (prefName.Equals(cp[i].pref)) {
+         bool cipherEnabled = Preferences::GetBool(cp[i].pref,
+                                                   cp[i].enabledByDefault);
+-        if (cp[i].weak) {
++        if (cp[i].flags & RC4Encryption) {
+           // Weak ciphers will not be used by default even if they
+           // are enabled in prefs. They are only used on specific
+           // sockets as a part of a fallback mechanism.
+           // Only the main thread will change sEnabledWeakCiphers.
+           uint32_t enabledWeakCiphers = sEnabledWeakCiphers;
+           if (cipherEnabled) {
+             enabledWeakCiphers |= ((uint32_t)1 << i);
+           } else {
+@@ -1697,17 +1714,17 @@ InitializeCipherSuite()
+   }
+ 
+   // Now only set SSL/TLS ciphers we knew about at compile time
+   uint32_t enabledWeakCiphers = 0;
+   const CipherPref* const cp = sCipherPrefs;
+   for (size_t i = 0; cp[i].pref; ++i) {
+     bool cipherEnabled = Preferences::GetBool(cp[i].pref,
+                                               cp[i].enabledByDefault);
+-    if (cp[i].weak) {
++    if (cp[i].flags & RC4Encryption) {
+       // Weak ciphers are not used by default. See the comment
+       // in CipherSuiteChangeObserver::Observe for details.
+       if (cipherEnabled) {
+         enabledWeakCiphers |= ((uint32_t)1 << i);
+       }
+     } else {
+       SSL_CipherPrefSetDefault(cp[i].id, cipherEnabled);
+     }
+diff --git a/security/manager/ssl/src/nsNSSComponent.h b/security/manager/ssl/src/nsNSSComponent.h
+--- a/security/manager/ssl/src/nsNSSComponent.h
++++ b/security/manager/ssl/src/nsNSSComponent.h
+@@ -149,19 +149,20 @@ public:
+                                  const nsAString& token);
+ #endif
+ 
+   NS_IMETHOD IsNSSInitialized(bool* initialized);
+ 
+   ::mozilla::TemporaryRef<mozilla::psm::SharedCertVerifier>
+     GetDefaultCertVerifier() MOZ_OVERRIDE;
+ 
+-  // The following two methods are thread-safe.
++  // The following three methods are thread-safe.
+   static bool AreAnyWeakCiphersEnabled();
+   static void UseWeakCiphersOnSocket(PRFileDesc* fd);
++  static void DisableDHECiphersOnSocket(PRFileDesc* fd);
+ 
+   static void FillTLSVersionRange(SSLVersionRange& rangeOut,
+                                   uint32_t minFromPrefs,
+                                   uint32_t maxFromPrefs,
+                                   SSLVersionRange defaults);
+ 
+ protected:
+   virtual ~nsNSSComponent();
+diff --git a/security/manager/ssl/src/nsNSSIOLayer.cpp b/security/manager/ssl/src/nsNSSIOLayer.cpp
+--- a/security/manager/ssl/src/nsNSSIOLayer.cpp
++++ b/security/manager/ssl/src/nsNSSIOLayer.cpp
+@@ -105,16 +105,19 @@ static const bool FALSE_START_REQUIRE_FO
+ 
+ // Historically, we have required that the server negotiate ALPN or NPN in
+ // order to false start, as a compatibility hack to work around
+ // implementations that just stop responding during false start. However, now
+ // false start is resricted to modern crypto (TLS 1.2 and AEAD cipher suites)
+ // so it is less likely that requring NPN or ALPN is still necessary.
+ static const bool FALSE_START_REQUIRE_NPN_DEFAULT = false;
+ 
++// keep this value in sync with security-prefs.js
++static const uint32_t DEFAULT_MIN_DHE_KEY_BITS = 1024;
++
+ } // unnamed namespace
+ 
+ #ifdef PR_LOGGING
+ extern PRLogModuleInfo* gPIPNSSLog;
+ #endif
+ 
+ nsNSSSocketInfo::nsNSSSocketInfo(SharedSSLState& aState, uint32_t providerFlags)
+   : mFd(nullptr),
+@@ -661,28 +664,64 @@ nsNSSSocketInfo::SetCertVerificationWait
+   // mCertVerificationState may be before_cert_verification for the first
+   // handshake on the connection, or after_cert_verification for subsequent
+   // renegotiation handshakes.
+   NS_ASSERTION(mCertVerificationState != waiting_for_cert_verification,
+                "Invalid state transition to waiting_for_cert_verification");
+   mCertVerificationState = waiting_for_cert_verification;
+ }
+ 
++bool
++nsNSSSocketInfo::IsDHEKeyWeak(PRErrorCode& errorCode,
++                              SSLErrorMessageType& errorMessageType)
++{
++  if (errorCode != 0) {
++    // Don't overwrite the error if the cert verification failed.
++    return false;
++  }
++
++  SSLChannelInfo channelInfo;
++  SECStatus rv = SSL_GetChannelInfo(mFd, &channelInfo, sizeof(channelInfo));
++  if (rv != SECSuccess) {
++    errorCode = PR_INVALID_STATE_ERROR;
++  } else {
++    SSLCipherSuiteInfo cipherInfo;
++    rv = SSL_GetCipherSuiteInfo(channelInfo.cipherSuite, &cipherInfo,
++                                sizeof cipherInfo);
++    if (rv != SECSuccess) {
++      errorCode = PR_INVALID_STATE_ERROR;
++    } else if (cipherInfo.keaType == ssl_kea_dh &&
++               channelInfo.keaKeyBits <
++                 SharedState().IOLayerHelpers().mMinDHEKeyBits) {
++      errorCode = SSL_ERROR_WEAK_SERVER_EPHEMERAL_DH_KEY;
++    }
++  }
++
++  if (errorCode == 0) {
++    return false;
++  }
++
++  PR_SetError(errorCode, 0);
++  errorMessageType = PlainErrorMessage;
++
++  return true;
++}
++
+ // Be careful that SetCertVerificationResult does NOT get called while we are
+ // processing a SSL callback function, because SSL_AuthCertificateComplete will
+ // attempt to acquire locks that are already held by libssl when it calls
+ // callbacks.
+ void
+ nsNSSSocketInfo::SetCertVerificationResult(PRErrorCode errorCode,
+                                            SSLErrorMessageType errorMessageType)
+ {
+   NS_ASSERTION(mCertVerificationState == waiting_for_cert_verification,
+                "Invalid state transition to cert_verification_finished");
+ 
+-  if (mFd) {
++  if (mFd && !IsDHEKeyWeak(errorCode, errorMessageType)) {
+     SECStatus rv = SSL_AuthCertificateComplete(mFd, errorCode);
+     // Only replace errorCode if there was originally no error
+     if (rv != SECSuccess && errorCode == 0) {
+       errorCode = PR_GetError();
+       errorMessageType = PlainErrorMessage;
+       if (errorCode == 0) {
+         NS_ERROR("SSL_AuthCertificateComplete didn't set error code");
+         errorCode = PR_INVALID_STATE_ERROR;
+@@ -858,16 +897,17 @@ nsSSLIOLayerHelpers::rememberTolerantAtV
+     if (entry.strongCipherStatus == StrongCipherStatusUnknown) {
+       entry.strongCipherStatus = StrongCiphersWorked;
+     }
+   } else {
+     entry.tolerant = tolerant;
+     entry.intolerant = 0;
+     entry.intoleranceReason = 0;
+     entry.strongCipherStatus = StrongCiphersWorked;
++    entry.dheKeyBits = 0;
+   }
+ 
+   entry.AssertInvariant();
+ 
+   mTLSIntoleranceInfo.Put(key, entry);
+ }
+ 
+ uint16_t
+@@ -885,16 +925,17 @@ nsSSLIOLayerHelpers::forgetIntolerance(c
+     entry.AssertInvariant();
+ 
+     tolerant = entry.tolerant;
+     entry.intolerant = 0;
+     entry.intoleranceReason = 0;
+     if (entry.strongCipherStatus != StrongCiphersWorked) {
+       entry.strongCipherStatus = StrongCipherStatusUnknown;
+     }
++    entry.dheKeyBits = 0;
+ 
+     entry.AssertInvariant();
+     mTLSIntoleranceInfo.Put(key, entry);
+   }
+ 
+   return tolerant;
+ }
+ 
+@@ -966,16 +1007,17 @@ nsSSLIOLayerHelpers::rememberIntolerantA
+     }
+     if ((entry.intolerant != 0 && intolerant >= entry.intolerant)) {
+       // We already know that the server is intolerant at a lower version.
+       return true;
+     }
+   } else {
+     entry.tolerant = 0;
+     entry.strongCipherStatus = StrongCipherStatusUnknown;
++    entry.dheKeyBits = 0;
+   }
+ 
+   entry.intolerant = intolerant;
+   entry.intoleranceReason = intoleranceReason;
+   entry.AssertInvariant();
+   mTLSIntoleranceInfo.Put(key, entry);
+ 
+   return true;
+@@ -998,30 +1040,64 @@ nsSSLIOLayerHelpers::rememberStrongCiphe
+     if (entry.strongCipherStatus != StrongCipherStatusUnknown) {
+       // We already know if the server supports a strong cipher.
+       return false;
+     }
+   } else {
+     entry.tolerant = 0;
+     entry.intolerant = 0;
+     entry.intoleranceReason = intoleranceReason;
++    entry.dheKeyBits = 0;
+   }
+ 
+   entry.strongCipherStatus = StrongCiphersFailed;
+   entry.AssertInvariant();
+   mTLSIntoleranceInfo.Put(key, entry);
+ 
+   return true;
+ }
+ 
++// returns true if we should retry the handshake
++bool
++nsSSLIOLayerHelpers::rememberDHEKeyBits(const nsACString& hostName,
++                                        int16_t port,
++                                        uint32_t dheKeyBits)
++{
++  nsCString key;
++  getSiteKey(hostName, port, key);
++
++  MutexAutoLock lock(mutex);
++
++  IntoleranceEntry entry;
++  if (mTLSIntoleranceInfo.Get(key, &entry)) {
++    entry.AssertInvariant();
++    if (entry.dheKeyBits == dheKeyBits) {
++      // We already tried without DH cipher suites.
++      return false;
++    }
++  } else {
++    entry.tolerant = 0;
++    entry.intolerant = 0;
++    entry.intoleranceReason = SSL_ERROR_WEAK_SERVER_EPHEMERAL_DH_KEY;
++    entry.strongCipherStatus = StrongCipherStatusUnknown;
++  }
++
++  entry.dheKeyBits = dheKeyBits;
++  entry.AssertInvariant();
++  mTLSIntoleranceInfo.Put(key, entry);
++
++  return true;
++}
++
+ void
+-nsSSLIOLayerHelpers::adjustForTLSIntolerance(const nsACString& hostName,
+-                                             int16_t port,
+-                                             /*in/out*/ SSLVersionRange& range,
+-                                             /*out*/ StrongCipherStatus& strongCipherStatus)
++nsSSLIOLayerHelpers::adjustForFallback(const nsACString& hostName,
++                                       int16_t port,
++                                       /*in/out*/ SSLVersionRange& range,
++                                       /*out*/ StrongCipherStatus& strongCipherStatus,
++                                       /*out*/ DHEKeyStatus& dheKeyStatus)
+ {
+   IntoleranceEntry entry;
+ 
+   {
+     nsCString key;
+     getSiteKey(hostName, port, key);
+ 
+     MutexAutoLock lock(mutex);
+@@ -1035,16 +1111,18 @@ nsSSLIOLayerHelpers::adjustForTLSIntoler
+   if (entry.intolerant != 0) {
+     // We've tried connecting at a higher range but failed, so try at the
+     // version we haven't tried yet, unless we have reached the minimum.
+     if (range.min < entry.intolerant) {
+       range.max = entry.intolerant - 1;
+     }
+   }
+   strongCipherStatus = entry.strongCipherStatus;
++  dheKeyStatus = entry.dheKeyBits != 0 && entry.dheKeyBits < mMinDHEKeyBits
++               ? DHEKeyWeak : DHEKeyStrong;
+ }
+ 
+ PRErrorCode
+ nsSSLIOLayerHelpers::getIntoleranceReason(const nsACString& hostName,
+                                           int16_t port)
+ {
+   IntoleranceEntry entry;
+ 
+@@ -1250,16 +1328,34 @@ retryDueToTLSIntolerance(PRErrorCode err
+     Telemetry::Accumulate(Telemetry::SSL_VERSION_FALLBACK_INAPPROPRIATE,
+                           tlsIntoleranceTelemetryBucket(originalReason));
+ 
+     socketInfo->SharedState().IOLayerHelpers()
+       .forgetIntolerance(socketInfo->GetHostName(), socketInfo->GetPort());
+ 
+     return false;
+   }
++
++  if (err == SSL_ERROR_WEAK_SERVER_EPHEMERAL_DH_KEY) {
++    // Do not fallback if the DHE key is smaller than 512 bits because
++    // MiTM can forge a DHE key smaller than 512 bits due to bug 601635.
++    PRFileDesc* sslSock;
++    SSLChannelInfo channelInfo;
++    if (NS_FAILED(socketInfo->GetFileDescPtr(&sslSock)) ||
++        SSL_GetChannelInfo(sslSock, &channelInfo, sizeof(channelInfo))
++          != SECSuccess ||
++        channelInfo.keaKeyBits < 512) {
++      return false;
++    }
++
++    return socketInfo->SharedState().IOLayerHelpers()
++      .rememberDHEKeyBits(socketInfo->GetHostName(), socketInfo->GetPort(),
++                          channelInfo.keaKeyBits);
++  }
++
+   if ((err == SSL_ERROR_NO_CYPHER_OVERLAP || err == PR_END_OF_FILE_ERROR) &&
+       nsNSSComponent::AreAnyWeakCiphersEnabled()) {
+     if (socketInfo->SharedState().IOLayerHelpers()
+                   .rememberStrongCiphersFailed(socketInfo->GetHostName(),
+                                                socketInfo->GetPort(), err)) {
+       Telemetry::Accumulate(Telemetry::SSL_WEAK_CIPHERS_FALLBACK,
+                             tlsIntoleranceTelemetryBucket(err));
+       return true;
+@@ -1481,16 +1577,18 @@ nsSSLIOLayerPoll(PRFileDesc* fd, int16_t
+ nsSSLIOLayerHelpers::nsSSLIOLayerHelpers()
+   : mRenegoUnrestrictedSites(nullptr)
+   , mTreatUnsafeNegotiationAsBroken(false)
+   , mWarnLevelMissingRFC5746(1)
+   , mTLSIntoleranceInfo()
+   , mFalseStartRequireNPN(true)
+   , mFalseStartRequireForwardSecrecy(false)
+   , mVersionFallbackLimit(SSL_LIBRARY_VERSION_TLS_1_0)
++  // minus 8 to workaround bug 623658
++  , mMinDHEKeyBits(DEFAULT_MIN_DHE_KEY_BITS - 8)
+   , mutex("nsSSLIOLayerHelpers.mutex")
+ {
+ }
+ 
+ static int
+ _PSM_InvalidInt(void)
+ {
+     PR_ASSERT(!"I/O method is invalid");
+@@ -1709,16 +1807,18 @@ PrefObserver::Observe(nsISupports* aSubj
+         Preferences::GetBool("security.ssl.false_start.require-npn",
+                              FALSE_START_REQUIRE_NPN_DEFAULT);
+     } else if (prefName.EqualsLiteral("security.ssl.false_start.require-forward-secrecy")) {
+       mOwner->mFalseStartRequireForwardSecrecy =
+         Preferences::GetBool("security.ssl.false_start.require-forward-secrecy",
+                              FALSE_START_REQUIRE_FORWARD_SECRECY_DEFAULT);
+     } else if (prefName.EqualsLiteral("security.tls.version.fallback-limit")) {
+       mOwner->loadVersionFallbackLimit();
++    } else if (prefName.EqualsLiteral("security.tls.min_dhe_key_bits")) {
++      mOwner->loadMinDHEKeyBits();
+     }
+   }
+   return NS_OK;
+ }
+ 
+ static int32_t
+ PlaintextRecv(PRFileDesc* fd, void* buf, int32_t amount, int flags,
+               PRIntervalTime timeout)
+@@ -1818,30 +1918,33 @@ nsSSLIOLayerHelpers::Init()
+ 
+   mFalseStartRequireNPN =
+     Preferences::GetBool("security.ssl.false_start.require-npn",
+                          FALSE_START_REQUIRE_NPN_DEFAULT);
+   mFalseStartRequireForwardSecrecy =
+     Preferences::GetBool("security.ssl.false_start.require-forward-secrecy",
+                          FALSE_START_REQUIRE_FORWARD_SECRECY_DEFAULT);
+   loadVersionFallbackLimit();
++  loadMinDHEKeyBits();
+ 
+   mPrefObserver = new PrefObserver(this);
+   Preferences::AddStrongObserver(mPrefObserver,
+                                  "security.ssl.renego_unrestricted_hosts");
+   Preferences::AddStrongObserver(mPrefObserver,
+                                  "security.ssl.treat_unsafe_negotiation_as_broken");
+   Preferences::AddStrongObserver(mPrefObserver,
+                                  "security.ssl.warn_missing_rfc5746");
+   Preferences::AddStrongObserver(mPrefObserver,
+                                  "security.ssl.false_start.require-npn");
+   Preferences::AddStrongObserver(mPrefObserver,
+                                  "security.ssl.false_start.require-forward-secrecy");
+   Preferences::AddStrongObserver(mPrefObserver,
+                                  "security.tls.version.fallback-limit");
++  Preferences::AddStrongObserver(mPrefObserver,
++                                 "security.tls.min_dhe_key_bits");
+   return NS_OK;
+ }
+ 
+ void
+ nsSSLIOLayerHelpers::loadVersionFallbackLimit()
+ {
+   // see nsNSSComponent::setEnabledTLSVersions for pref handling rules
+   uint32_t limit = Preferences::GetUint("security.tls.version.fallback-limit",
+@@ -1850,16 +1953,32 @@ nsSSLIOLayerHelpers::loadVersionFallback
+                                SSL_LIBRARY_VERSION_TLS_1_0 };
+   SSLVersionRange filledInRange;
+   nsNSSComponent::FillTLSVersionRange(filledInRange, limit, limit, defaults);
+ 
+   mVersionFallbackLimit = filledInRange.max;
+ }
+ 
+ void
++nsSSLIOLayerHelpers::loadMinDHEKeyBits()
++{
++  uint32_t length = Preferences::GetUint("security.tls.min_dhe_key_bits",
++                                         DEFAULT_MIN_DHE_KEY_BITS);
++  if (length < DEFAULT_MIN_DHE_KEY_BITS) {
++    length = DEFAULT_MIN_DHE_KEY_BITS;
++  }
++
++  // minus 8 to workaround bug 623658
++  if (mMinDHEKeyBits != length - 8) {
++    mMinDHEKeyBits = length - 8;
++    SSL_ClearSessionCache();
++  }
++}
++
++void
+ nsSSLIOLayerHelpers::clearStoredData()
+ {
+   mRenegoUnrestrictedSites->Clear();
+   mTLSIntoleranceInfo.Clear();
+ }
+ 
+ void
+ nsSSLIOLayerHelpers::setRenegoUnrestrictedSites(const nsCString& str)
+@@ -2639,35 +2758,40 @@ nsSSLIOLayerSetOptions(PRFileDesc* fd, b
+ 
+   SSLVersionRange range;
+   if (SSL_VersionRangeGet(fd, &range) != SECSuccess) {
+     return NS_ERROR_FAILURE;
+   }
+ 
+   uint16_t maxEnabledVersion = range.max;
+   StrongCipherStatus strongCiphersStatus = StrongCipherStatusUnknown;
++  DHEKeyStatus dheKeyStatus = DHEKeyStrong;
+   infoObject->SharedState().IOLayerHelpers()
+-    .adjustForTLSIntolerance(infoObject->GetHostName(), infoObject->GetPort(),
+-                             range, strongCiphersStatus);
++    .adjustForFallback(infoObject->GetHostName(), infoObject->GetPort(),
++                       range, strongCiphersStatus, dheKeyStatus);
+   PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
+          ("[%p] nsSSLIOLayerSetOptions: using TLS version range (0x%04x,0x%04x)%s\n",
+           fd, static_cast<unsigned int>(range.min),
+               static_cast<unsigned int>(range.max),
+           strongCiphersStatus == StrongCiphersFailed ? " with weak ciphers" : ""));
+ 
+   if (SSL_VersionRangeSet(fd, &range) != SECSuccess) {
+     return NS_ERROR_FAILURE;
+   }
+   infoObject->SetTLSVersionRange(range);
+ 
+   if (strongCiphersStatus == StrongCiphersFailed) {
+     nsNSSComponent::UseWeakCiphersOnSocket(fd);
+   }
+ 
+-  // when adjustForTLSIntolerance tweaks the maximum version downward,
++  if (dheKeyStatus == DHEKeyWeak) {
++    nsNSSComponent::DisableDHECiphersOnSocket(fd);
++  }
++
++  // when adjustForFallback tweaks the maximum version downward,
+   // we tell the server using this SCSV so they can detect a downgrade attack
+   if (range.max < maxEnabledVersion) {
+     PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
+            ("[%p] nsSSLIOLayerSetOptions: enabling TLS_FALLBACK_SCSV\n", fd));
+     if (SECSuccess != SSL_OptionSet(fd, SSL_ENABLE_FALLBACK_SCSV, true)) {
+       return NS_ERROR_FAILURE;
+     }
+   }
+diff --git a/security/manager/ssl/src/nsNSSIOLayer.h b/security/manager/ssl/src/nsNSSIOLayer.h
+--- a/security/manager/ssl/src/nsNSSIOLayer.h
++++ b/security/manager/ssl/src/nsNSSIOLayer.h
+@@ -166,24 +166,32 @@ private:
+   int16_t mMACAlgorithmUsed;
+   bool    mBypassAuthentication;
+ 
+   uint32_t mProviderFlags;
+   mozilla::TimeStamp mSocketCreationTimestamp;
+   uint64_t mPlaintextBytesRead;
+ 
+   nsCOMPtr<nsIX509Cert> mClientCert;
++
++  bool IsDHEKeyWeak(PRErrorCode& errorCode,
++                    ::mozilla::psm::SSLErrorMessageType& errorMessageType);
+ };
+ 
+ enum StrongCipherStatus {
+   StrongCipherStatusUnknown,
+   StrongCiphersWorked,
+   StrongCiphersFailed
+ };
+ 
++enum DHEKeyStatus {
++  DHEKeyWeak,
++  DHEKeyStrong
++};
++
+ class nsSSLIOLayerHelpers
+ {
+ public:
+   nsSSLIOLayerHelpers();
+   ~nsSSLIOLayerHelpers();
+ 
+   nsresult Init();
+   void Cleanup();
+@@ -205,47 +213,54 @@ public:
+ 
+ private:
+   struct IntoleranceEntry
+   {
+     uint16_t tolerant;
+     uint16_t intolerant;
+     PRErrorCode intoleranceReason;
+     StrongCipherStatus strongCipherStatus;
++    // The size of the DHE key used. 0 if DHE wasn't used.
++    uint32_t dheKeyBits;
+ 
+     void AssertInvariant() const
+     {
+       MOZ_ASSERT(intolerant == 0 || tolerant < intolerant);
+     }
+   };
+   nsDataHashtable<nsCStringHashKey, IntoleranceEntry> mTLSIntoleranceInfo;
+ public:
+   void rememberTolerantAtVersion(const nsACString& hostname, int16_t port,
+                                  uint16_t tolerant);
+   bool rememberIntolerantAtVersion(const nsACString& hostname, int16_t port,
+                                    uint16_t intolerant, uint16_t minVersion,
+                                    PRErrorCode intoleranceReason);
+   bool rememberStrongCiphersFailed(const nsACString& hostName, int16_t port,
+                                    PRErrorCode intoleranceReason);
++  bool rememberDHEKeyBits(const nsACString& hostName, int16_t port,
++                          uint32_t dheKeyBits);
+   // returns the known tolerant version
+   // or 0 if there is no known tolerant version
+   uint16_t forgetIntolerance(const nsACString& hostname, int16_t port);
+-  void adjustForTLSIntolerance(const nsACString& hostname, int16_t port,
+-                               /*in/out*/ SSLVersionRange& range,
+-                               /*out*/ StrongCipherStatus& strongCipherStatus);
++  void adjustForFallback(const nsACString& hostname, int16_t port,
++                         /*in/out*/ SSLVersionRange& range,
++                         /*out*/ StrongCipherStatus& strongCipherStatus,
++                         /*out*/ DHEKeyStatus& dheKeyStatus);
+   PRErrorCode getIntoleranceReason(const nsACString& hostname, int16_t port);
+ 
+   void setRenegoUnrestrictedSites(const nsCString& str);
+   bool isRenegoUnrestrictedSite(const nsCString& str);
+   void clearStoredData();
+   void loadVersionFallbackLimit();
++  void loadMinDHEKeyBits();
+ 
+   bool mFalseStartRequireNPN;
+   bool mFalseStartRequireForwardSecrecy;
+   uint16_t mVersionFallbackLimit;
++  uint32_t mMinDHEKeyBits;
+ private:
+   mozilla::Mutex mutex;
+   nsCOMPtr<nsIObserver> mPrefObserver;
+ };
+ 
+ nsresult nsSSLIOLayerNewSocket(int32_t family,
+                                const char* host,
+                                int32_t port,
+diff --git a/security/manager/ssl/tests/gtest/TLSIntoleranceTest.cpp b/security/manager/ssl/tests/gtest/TLSIntoleranceTest.cpp
+--- a/security/manager/ssl/tests/gtest/TLSIntoleranceTest.cpp
++++ b/security/manager/ssl/tests/gtest/TLSIntoleranceTest.cpp
+@@ -23,96 +23,108 @@ TEST_F(TLSIntoleranceTest, Test_Full_Fal
+ {
+   helpers.mVersionFallbackLimit = SSL_LIBRARY_VERSION_3_0;
+ 
+   // No adjustment made when there is no entry for the site.
+   {
+     SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
+                               SSL_LIBRARY_VERSION_TLS_1_2 };
+     StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
+-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
+     ASSERT_EQ(StrongCipherStatusUnknown, strongCipherStatus);
++    ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
+ 
+     ASSERT_TRUE(
+       helpers.rememberStrongCiphersFailed(
+         HOST, PORT, SSL_ERROR_NO_CYPHER_OVERLAP));
+     ASSERT_EQ(SSL_ERROR_NO_CYPHER_OVERLAP,
+               helpers.getIntoleranceReason(HOST, PORT));
+   }
+ 
+   {
+     SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
+                               SSL_LIBRARY_VERSION_TLS_1_2 };
+     StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
+-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
+     ASSERT_EQ(StrongCiphersFailed, strongCipherStatus);
++    ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
+ 
+     ASSERT_FALSE(helpers.rememberStrongCiphersFailed(HOST, PORT, 0));
+     ASSERT_TRUE(helpers.rememberIntolerantAtVersion(HOST, PORT,
+                                                     range.min, range.max, 0));
+   }
+ 
+   {
+     SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
+                               SSL_LIBRARY_VERSION_TLS_1_2 };
+     StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
+-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_1, range.max);
+     ASSERT_EQ(StrongCiphersFailed, strongCipherStatus);
++    ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
+ 
+     ASSERT_FALSE(helpers.rememberStrongCiphersFailed(HOST, PORT, 0));
+     ASSERT_TRUE(helpers.rememberIntolerantAtVersion(HOST, PORT,
+                                                     range.min, range.max, 0));
+   }
+ 
+   {
+     SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
+                               SSL_LIBRARY_VERSION_TLS_1_2 };
+     StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
+-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_0, range.max);
+     ASSERT_EQ(StrongCiphersFailed, strongCipherStatus);
++    ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
+ 
+     ASSERT_FALSE(helpers.rememberStrongCiphersFailed(HOST, PORT, 0));
+     ASSERT_TRUE(helpers.rememberIntolerantAtVersion(HOST, PORT,
+                                                     range.min, range.max, 0));
+   }
+ 
+   {
+     SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
+                               SSL_LIBRARY_VERSION_TLS_1_2 };
+ 
+     StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
+-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.max);
+     ASSERT_EQ(StrongCiphersFailed, strongCipherStatus);
++    ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
+ 
+     ASSERT_FALSE(helpers.rememberStrongCiphersFailed(HOST, PORT, 0));
+     // false because we reached the floor set by range.min
+     ASSERT_FALSE(helpers.rememberIntolerantAtVersion(HOST, PORT,
+                                                      range.min, range.max, 0));
+   }
+ 
+   {
+     SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
+                               SSL_LIBRARY_VERSION_TLS_1_2 };
+     StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
+-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
+     // When rememberIntolerantAtVersion returns false, it also resets the
+     // intolerance information for the server.
+     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
+     ASSERT_EQ(StrongCipherStatusUnknown, strongCipherStatus);
++    ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
+   }
+ }
+ 
+ TEST_F(TLSIntoleranceTest, Test_Disable_Fallback_With_High_Limit)
+ {
+   // this value disables version fallback entirely: with this value, all efforts
+   // to mark an origin as version intolerant fail
+   helpers.mVersionFallbackLimit = SSL_LIBRARY_VERSION_TLS_1_2;
+@@ -151,20 +163,22 @@ TEST_F(TLSIntoleranceTest, Test_Fallback
+   ASSERT_TRUE(helpers.rememberIntolerantAtVersion(HOST, PORT,
+                                                   SSL_LIBRARY_VERSION_TLS_1_1,
+                                                   SSL_LIBRARY_VERSION_TLS_1_2,
+                                                   0));
+   {
+     SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
+                               SSL_LIBRARY_VERSION_TLS_1_2 };
+     StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
+-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_1, range.max);
+     ASSERT_EQ(StrongCipherStatusUnknown, strongCipherStatus);
++    ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
+   }
+ 
+   ASSERT_FALSE(helpers.rememberIntolerantAtVersion(HOST, PORT,
+                                                    SSL_LIBRARY_VERSION_TLS_1_1,
+                                                    SSL_LIBRARY_VERSION_TLS_1_1,
+                                                    0));
+ }
+ 
+@@ -173,54 +187,60 @@ TEST_F(TLSIntoleranceTest, Test_Tolerant
+   ASSERT_TRUE(helpers.rememberIntolerantAtVersion(HOST, PORT,
+                                                   SSL_LIBRARY_VERSION_3_0,
+                                                   SSL_LIBRARY_VERSION_TLS_1_1,
+                                                   0));
+   helpers.rememberTolerantAtVersion(HOST, PORT, SSL_LIBRARY_VERSION_TLS_1_1);
+   SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
+                             SSL_LIBRARY_VERSION_TLS_1_2 };
+   StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
+-  helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
++  DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++  helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
+   ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
+   ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_1, range.max);
+   ASSERT_EQ(StrongCiphersWorked, strongCipherStatus);
++  ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
+ }
+ 
+ TEST_F(TLSIntoleranceTest, Test_Tolerant_Overrides_Intolerant_2)
+ {
+   ASSERT_TRUE(helpers.rememberIntolerantAtVersion(HOST, PORT,
+                                                   SSL_LIBRARY_VERSION_3_0,
+                                                   SSL_LIBRARY_VERSION_TLS_1_1,
+                                                   0));
+   helpers.rememberTolerantAtVersion(HOST, PORT, SSL_LIBRARY_VERSION_TLS_1_2);
+   SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
+                             SSL_LIBRARY_VERSION_TLS_1_2 };
+   StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
+-  helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
++  DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++  helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
+   ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
+   ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
+   ASSERT_EQ(StrongCiphersWorked, strongCipherStatus);
++  ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
+ }
+ 
+ TEST_F(TLSIntoleranceTest, Test_Intolerant_Does_Not_Override_Tolerant)
+ {
+   // No adjustment made when there is no entry for the site.
+   helpers.rememberTolerantAtVersion(HOST, PORT, SSL_LIBRARY_VERSION_TLS_1_1);
+   // false because we reached the floor set by rememberTolerantAtVersion.
+   ASSERT_FALSE(helpers.rememberIntolerantAtVersion(HOST, PORT,
+                                                    SSL_LIBRARY_VERSION_3_0,
+                                                    SSL_LIBRARY_VERSION_TLS_1_1,
+                                                    0));
+   SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
+                             SSL_LIBRARY_VERSION_TLS_1_2 };
+   StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
+-  helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
++  DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++  helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
+   ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
+   ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
+   ASSERT_EQ(StrongCiphersWorked, strongCipherStatus);
++  ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
+ }
+ 
+ TEST_F(TLSIntoleranceTest, Test_Port_Is_Relevant)
+ {
+   helpers.rememberTolerantAtVersion(HOST, 1, SSL_LIBRARY_VERSION_TLS_1_2);
+   ASSERT_FALSE(helpers.rememberIntolerantAtVersion(HOST, 1,
+                                                    SSL_LIBRARY_VERSION_3_0,
+                                                    SSL_LIBRARY_VERSION_TLS_1_2,
+@@ -229,25 +249,27 @@ TEST_F(TLSIntoleranceTest, Test_Port_Is_
+                                                   SSL_LIBRARY_VERSION_3_0,
+                                                   SSL_LIBRARY_VERSION_TLS_1_2,
+                                                   0));
+ 
+   {
+     SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
+                               SSL_LIBRARY_VERSION_TLS_1_2 };
+     StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
+-    helpers.adjustForTLSIntolerance(HOST, 1, range, strongCipherStatus);
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, 1, range, strongCipherStatus, dheKeyStatus);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
+   }
+ 
+   {
+     SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
+                               SSL_LIBRARY_VERSION_TLS_1_2 };
+     StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
+-    helpers.adjustForTLSIntolerance(HOST, 2, range, strongCipherStatus);
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, 2, range, strongCipherStatus, dheKeyStatus);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_1, range.max);
+   }
+ }
+ 
+ TEST_F(TLSIntoleranceTest, Test_Intolerance_Reason_Initial)
+ {
+   ASSERT_EQ(0, helpers.getIntoleranceReason(HOST, 1));
+ 
+@@ -287,94 +309,106 @@ TEST_F(TLSIntoleranceTest, Test_Strong_C
+   helpers.mVersionFallbackLimit = SSL_LIBRARY_VERSION_TLS_1_1;
+ 
+   ASSERT_TRUE(helpers.rememberStrongCiphersFailed(HOST, PORT, 0));
+ 
+   {
+     SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
+                               SSL_LIBRARY_VERSION_TLS_1_2 };
+     StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
+-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
+     ASSERT_EQ(StrongCiphersFailed, strongCipherStatus);
++    ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
+ 
+     ASSERT_TRUE(helpers.rememberIntolerantAtVersion(HOST, PORT,
+                                                     range.min, range.max, 0));
+   }
+ 
+   {
+     SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
+                               SSL_LIBRARY_VERSION_TLS_1_2 };
+     StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
+-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_1, range.max);
+     ASSERT_EQ(StrongCiphersFailed, strongCipherStatus);
++    ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
+ 
+     ASSERT_FALSE(helpers.rememberIntolerantAtVersion(HOST, PORT,
+                                                      range.min, range.max, 0));
+   }
+ 
+   {
+     SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
+                               SSL_LIBRARY_VERSION_TLS_1_2 };
+     StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
+-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
+     // When rememberIntolerantAtVersion returns false, it also resets the
+     // intolerance information for the server.
+     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
+     ASSERT_EQ(StrongCipherStatusUnknown, strongCipherStatus);
++    ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
+   }
+ }
+ 
+ TEST_F(TLSIntoleranceTest, Test_Strong_Ciphers_Failed_At_1_1)
+ {
+   helpers.mVersionFallbackLimit = SSL_LIBRARY_VERSION_3_0;
+ 
+   // No adjustment made when there is no entry for the site.
+   {
+     SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
+                               SSL_LIBRARY_VERSION_TLS_1_2 };
+     StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
+-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
+     ASSERT_TRUE(helpers.rememberIntolerantAtVersion(HOST, PORT,
+                                                     range.min, range.max, 0));
+   }
+ 
+   {
+     SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
+                               SSL_LIBRARY_VERSION_TLS_1_2 };
+     StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
+-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
+     ASSERT_TRUE(helpers.rememberStrongCiphersFailed(HOST, PORT, 0));
+   }
+ 
+   {
+     SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
+                               SSL_LIBRARY_VERSION_TLS_1_2 };
+     StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
+-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_1, range.max);
+     ASSERT_EQ(StrongCiphersFailed, strongCipherStatus);
++    ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
+ 
+     ASSERT_TRUE(helpers.rememberIntolerantAtVersion(HOST, PORT,
+                                                     range.min, range.max, 0));
+   }
+ 
+   {
+     SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
+                               SSL_LIBRARY_VERSION_TLS_1_2 };
+     StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
+-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_0, range.max);
+     ASSERT_EQ(StrongCiphersFailed, strongCipherStatus);
++    ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
+   }
+ }
+ 
+ TEST_F(TLSIntoleranceTest, Test_Strong_Ciphers_Failed_With_High_Limit)
+ {
+   // this value disables version fallback entirely: with this value, all efforts
+   // to mark an origin as version intolerant fail
+   helpers.mVersionFallbackLimit = SSL_LIBRARY_VERSION_TLS_1_2;
+@@ -397,123 +431,336 @@ TEST_F(TLSIntoleranceTest, Test_Strong_C
+ TEST_F(TLSIntoleranceTest, Test_Tolerant_Does_Not_Override_Weak_Ciphers_Fallback)
+ {
+   ASSERT_TRUE(helpers.rememberStrongCiphersFailed(HOST, PORT, 0));
+   // No adjustment made when intolerant is zero.
+   helpers.rememberTolerantAtVersion(HOST, PORT, SSL_LIBRARY_VERSION_TLS_1_1);
+   SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
+                             SSL_LIBRARY_VERSION_TLS_1_2 };
+   StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
+-  helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
++  DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++  helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
+   ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
+   ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
+   ASSERT_EQ(StrongCiphersFailed, strongCipherStatus);
++  ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
+ }
+ 
+ TEST_F(TLSIntoleranceTest, Test_Weak_Ciphers_Fallback_Does_Not_Override_Tolerant)
+ {
+   // No adjustment made when there is no entry for the site.
+   helpers.rememberTolerantAtVersion(HOST, PORT, SSL_LIBRARY_VERSION_TLS_1_1);
+   // false because strongCipherWorked is set by rememberTolerantAtVersion.
+   ASSERT_FALSE(helpers.rememberStrongCiphersFailed(HOST, PORT, 0));
+   SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
+                             SSL_LIBRARY_VERSION_TLS_1_2 };
+   StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
+-  helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
++  DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++  helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
+   ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
+   ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
+   ASSERT_EQ(StrongCiphersWorked, strongCipherStatus);
++  ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
++}
++
++TEST_F(TLSIntoleranceTest, Test_Weak_DHE_Key)
++{
++  helpers.mVersionFallbackLimit = SSL_LIBRARY_VERSION_TLS_1_2;
++  helpers.mMinDHEKeyBits = 1024;
++
++  {
++    SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
++                              SSL_LIBRARY_VERSION_TLS_1_2 };
++    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
++    ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
++    ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
++    ASSERT_EQ(StrongCipherStatusUnknown, strongCipherStatus);
++    ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
++  }
++
++  helpers.mMinDHEKeyBits = 2048;
++
++  {
++    SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
++                              SSL_LIBRARY_VERSION_TLS_1_2 };
++    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
++    ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
++    ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
++    ASSERT_EQ(StrongCipherStatusUnknown, strongCipherStatus);
++    ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
++  }
++
++  helpers.mMinDHEKeyBits = 1024;
++  ASSERT_TRUE(helpers.rememberDHEKeyBits(HOST, PORT, 1024));
++  ASSERT_FALSE(helpers.rememberDHEKeyBits(HOST, PORT, 1024));
++
++  {
++    SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
++                              SSL_LIBRARY_VERSION_TLS_1_2 };
++    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
++    ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
++    ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
++    ASSERT_EQ(StrongCipherStatusUnknown, strongCipherStatus);
++    ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
++  }
++
++  helpers.mMinDHEKeyBits = 2048;
++
++  {
++    SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
++                              SSL_LIBRARY_VERSION_TLS_1_2 };
++    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
++    ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
++    ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
++    ASSERT_EQ(StrongCipherStatusUnknown, strongCipherStatus);
++    ASSERT_EQ(DHEKeyWeak, dheKeyStatus);
++  }
++
++  ASSERT_TRUE(helpers.rememberDHEKeyBits(HOST, PORT, 2048));
++
++  {
++    SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
++                              SSL_LIBRARY_VERSION_TLS_1_2 };
++    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
++    ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
++    ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
++    ASSERT_EQ(StrongCipherStatusUnknown, strongCipherStatus);
++    ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
++  }
++
++  ASSERT_TRUE(helpers.rememberDHEKeyBits(HOST, PORT, 1024));
++
++  {
++    SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
++                              SSL_LIBRARY_VERSION_TLS_1_2 };
++    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
++    ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
++    ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
++    ASSERT_EQ(StrongCipherStatusUnknown, strongCipherStatus);
++    ASSERT_EQ(DHEKeyWeak, dheKeyStatus);
++  }
++
++  helpers.mMinDHEKeyBits = 1024;
++
++  {
++    SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
++                              SSL_LIBRARY_VERSION_TLS_1_2 };
++    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
++    ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
++    ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
++    ASSERT_EQ(StrongCipherStatusUnknown, strongCipherStatus);
++    ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
++  }
++
++  ASSERT_TRUE(helpers.rememberDHEKeyBits(HOST, PORT, 512));
++
++  {
++    SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
++                              SSL_LIBRARY_VERSION_TLS_1_2 };
++    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
++    ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
++    ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
++    ASSERT_EQ(StrongCipherStatusUnknown, strongCipherStatus);
++    ASSERT_EQ(DHEKeyWeak, dheKeyStatus);
++
++    ASSERT_FALSE(helpers.rememberIntolerantAtVersion(HOST, PORT,
++                                                     range.min, range.max, 0));
++  }
++
++  {
++    SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
++                              SSL_LIBRARY_VERSION_TLS_1_2 };
++    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
++    ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
++    // When rememberIntolerantAtVersion returns false, it also resets the
++    // intolerance information for the server.
++    ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
++    ASSERT_EQ(StrongCipherStatusUnknown, strongCipherStatus);
++    ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
++  }
++}
++
++TEST_F(TLSIntoleranceTest, Test_Tolerant_Does_Not_Override_Weak_DHE_Key)
++{
++  ASSERT_TRUE(helpers.rememberDHEKeyBits(HOST, PORT, 512));
++  // No adjustment made when intolerant is zero.
++  helpers.rememberTolerantAtVersion(HOST, PORT, SSL_LIBRARY_VERSION_TLS_1_1);
++  SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
++                            SSL_LIBRARY_VERSION_TLS_1_2 };
++  StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
++  DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++  helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
++  ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
++  ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
++  ASSERT_EQ(StrongCiphersWorked, strongCipherStatus);
++  ASSERT_EQ(DHEKeyWeak, dheKeyStatus);
++}
++
++TEST_F(TLSIntoleranceTest, Test_Weak_DHE_Key_Does_Not_Override_Tolerant)
++{
++  // No adjustment made when there is no entry for the site.
++  helpers.rememberTolerantAtVersion(HOST, PORT, SSL_LIBRARY_VERSION_TLS_1_1);
++  ASSERT_TRUE(helpers.rememberDHEKeyBits(HOST, PORT, 512));
++  SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
++                            SSL_LIBRARY_VERSION_TLS_1_2 };
++  StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
++  DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++  helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
++  ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
++  ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
++  ASSERT_EQ(StrongCiphersWorked, strongCipherStatus);
++  ASSERT_EQ(DHEKeyWeak, dheKeyStatus);
+ }
+ 
+ TEST_F(TLSIntoleranceTest, TLS_Forget_Intolerance)
+ {
+   {
+     ASSERT_TRUE(helpers.rememberIntolerantAtVersion(HOST, PORT,
+                                                     SSL_LIBRARY_VERSION_3_0,
+                                                     SSL_LIBRARY_VERSION_TLS_1_2,
+                                                     0));
+ 
+     SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
+                               SSL_LIBRARY_VERSION_TLS_1_2 };
+     StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
+-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_1, range.max);
+     ASSERT_EQ(StrongCipherStatusUnknown, strongCipherStatus);
++    ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
+   }
+ 
+   {
+     helpers.forgetIntolerance(HOST, PORT);
+ 
+     SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
+                               SSL_LIBRARY_VERSION_TLS_1_2 };
+     StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
+-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
+     ASSERT_EQ(StrongCipherStatusUnknown, strongCipherStatus);
++    ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
+   }
+ }
+ 
+ TEST_F(TLSIntoleranceTest, TLS_Forget_Strong_Cipher_Failed)
+ {
+   {
+     ASSERT_TRUE(helpers.rememberStrongCiphersFailed(HOST, PORT, 0));
+ 
+     SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
+                               SSL_LIBRARY_VERSION_TLS_1_2 };
+     StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
+-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
+     ASSERT_EQ(StrongCiphersFailed, strongCipherStatus);
++    ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
+   }
+ 
+   {
+     helpers.forgetIntolerance(HOST, PORT);
+ 
+     SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
+                               SSL_LIBRARY_VERSION_TLS_1_2 };
+     StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
+-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
+     ASSERT_EQ(StrongCipherStatusUnknown, strongCipherStatus);
++    ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
++  }
++}
++
++TEST_F(TLSIntoleranceTest, TLS_Forget_Weak_DHE_Key)
++{
++  ASSERT_TRUE(helpers.rememberDHEKeyBits(HOST, PORT, 512));
++
++  {
++    SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
++                              SSL_LIBRARY_VERSION_TLS_1_2 };
++    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
++    ASSERT_EQ(StrongCipherStatusUnknown, strongCipherStatus);
++    ASSERT_EQ(DHEKeyWeak, dheKeyStatus);
++  }
++
++  helpers.forgetIntolerance(HOST, PORT);
++
++  {
++
++    SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
++                              SSL_LIBRARY_VERSION_TLS_1_2 };
++    StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
++    ASSERT_EQ(StrongCipherStatusUnknown, strongCipherStatus);
++    ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
+   }
+ }
+ 
+ TEST_F(TLSIntoleranceTest, TLS_Dont_Forget_Tolerance)
+ {
+   {
+     helpers.rememberTolerantAtVersion(HOST, PORT, SSL_LIBRARY_VERSION_TLS_1_1);
+ 
+     SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
+                               SSL_LIBRARY_VERSION_TLS_1_2 };
+     StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
+-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
+     ASSERT_EQ(StrongCiphersWorked, strongCipherStatus);
++    ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
+   }
+ 
+   {
+     ASSERT_TRUE(helpers.rememberIntolerantAtVersion(HOST, PORT,
+                                                     SSL_LIBRARY_VERSION_3_0,
+                                                     SSL_LIBRARY_VERSION_TLS_1_2,
+                                                     0));
+ 
+     SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
+                               SSL_LIBRARY_VERSION_TLS_1_2 };
+     StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
+-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_1, range.max);
+     ASSERT_EQ(StrongCiphersWorked, strongCipherStatus);
++    ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
+   }
+ 
+   {
+     helpers.forgetIntolerance(HOST, PORT);
+ 
+     SSLVersionRange range = { SSL_LIBRARY_VERSION_3_0,
+                               SSL_LIBRARY_VERSION_TLS_1_2 };
+     StrongCipherStatus strongCipherStatus = StrongCipherStatusUnknown;
+-    helpers.adjustForTLSIntolerance(HOST, PORT, range, strongCipherStatus);
++    DHEKeyStatus dheKeyStatus = DHEKeyStrong;
++    helpers.adjustForFallback(HOST, PORT, range, strongCipherStatus, dheKeyStatus);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_3_0, range.min);
+     ASSERT_EQ(SSL_LIBRARY_VERSION_TLS_1_2, range.max);
+     ASSERT_EQ(StrongCiphersWorked, strongCipherStatus);
++    ASSERT_EQ(DHEKeyStrong, dheKeyStatus);
+   }
+ }
+diff --git a/toolkit/components/telemetry/Histograms.json b/toolkit/components/telemetry/Histograms.json
+--- a/toolkit/components/telemetry/Histograms.json
++++ b/toolkit/components/telemetry/Histograms.json
+@@ -6494,16 +6494,22 @@
+     "description": "TLS/SSL version fallback reached the minimum version (1=TLS 1.0, 2=TLS 1.1, 3=TLS 1.2) or the fallback limit (4=TLS 1.0, 8=TLS 1.1, 12=TLS 1.2), stopped the fallback"
+   },
+   "SSL_WEAK_CIPHERS_FALLBACK": {
+     "expires_in_version": "never",
+     "kind": "enumerated",
+     "n_values": 64,
+     "description": "Fallback attempted when server did not support any strong cipher suites"
+   },
++  "SSL_WEAK_DHE_KEY_FALLBACK": {
++    "expires_in_version": "never",
++    "kind": "enumerated",
++    "n_values": 24,
++    "description": "Fallback attempted when server used DH ciphers with too short keys"
++  },
+   "SSL_CIPHER_SUITE_FULL": {
+     "expires_in_version": "never",
+     "kind": "enumerated",
+     "n_values": 128,
+     "description": "Negotiated cipher suite in full handshake (see key in HandshakeCallback in nsNSSCallbacks.cpp)"
+   },
+   "SSL_CIPHER_SUITE_RESUMED": {
+     "expires_in_version": "never",

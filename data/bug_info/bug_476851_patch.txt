@@ -1,0 +1,153 @@
+Index: src/content/js/connection/ftpController.js
+===================================================================
+RCS file: /cvs/fireftp/src/content/js/connection/ftpController.js,v
+retrieving revision 1.32
+diff -u -r1.32 ftpController.js
+--- src/content/js/connection/ftpController.js	5 Jun 2008 07:06:04 -0000	1.32
++++ src/content/js/connection/ftpController.js	13 Feb 2009 02:44:10 -0000
+@@ -316,7 +316,7 @@
+   },
+ 
+   onError : function(msg) {
+-    error(msg);
++    error(msg, false, true);
+ 
+     remoteDirTree.extraCallback = null;
+     remoteTree.extraCallback    = null;
+@@ -334,11 +334,11 @@
+   },
+ 
+   onDebug : function(msg, level) {
+-    debug(msg, level);
++    debug(msg, level, true);
+   },
+ 
+   onAppendLog : function(msg, css, type) {
+-    appendLog(msg, css, type);
++    appendLog(msg, css, type, true);
+   },
+ 
+   onIsReadyChange : function(state) {
+@@ -519,9 +519,9 @@
+   onDisconnected      : function()                   { },
+   onReconnecting      : function()                   { },
+   onAbort             : function()                   { },
+-  onError             : function(msg)                { error("[" + this.connNo + "] " + msg); },
+-  onDebug             : function(msg, level)         { debug("[" + this.connNo + "] " + msg, level); },
+-  onAppendLog         : function(msg, css, type)     { appendLog((gDebugMode ? "[" + this.connNo + "] " : "") + msg, css, type); },
++  onError             : function(msg)                { error("[" + this.connNo + "] " + msg, false, true); },
++  onDebug             : function(msg, level)         { debug("[" + this.connNo + "] " + msg, level, true); },
++  onAppendLog         : function(msg, css, type)     { appendLog((gDebugMode ? "[" + this.connNo + "] " : "") + msg, css, type, true); },
+   onShouldRefresh     : function(local, remote, dir) { ftpObserver.onShouldRefresh(local, remote, dir); },
+   onDirNotFound       : function(buffer)             { },
+   onChangeDir         : function(path, dontUpdateView, skipRecursion) { },
+Index: src/content/js/connection/fxp.js
+===================================================================
+RCS file: /cvs/fireftp/src/content/js/connection/fxp.js,v
+retrieving revision 1.4
+diff -u -r1.4 fxp.js
+--- src/content/js/connection/fxp.js	17 Jan 2008 08:59:17 -0000	1.4
++++ src/content/js/connection/fxp.js	13 Feb 2009 02:23:38 -0000
+@@ -110,7 +110,7 @@
+     }
+   },
+   onError             : function(msg)                {
+-    error('[FXP] ' + msg);
++    error('[FXP] ' + msg, false, true);
+ 
+     gFtp.abort(true);
+ 
+@@ -118,8 +118,8 @@
+       gFxp.disconnect();
+     }
+   },
+-  onDebug             : function(msg, level)         { debug('[FXP] ' + msg, level); },
+-  onAppendLog         : function(msg, css, type)     { appendLog('[FXP] ' + msg, css, type); },
++  onDebug             : function(msg, level)         { debug('[FXP] ' + msg, level, true); },
++  onAppendLog         : function(msg, css, type)     { appendLog('[FXP] ' + msg, css, type, true); },
+   onShouldRefresh     : function(local, remote, dir) { },
+   onDirNotFound       : function(buffer)             { },
+   onLoginAccepted     : function(newHost)            { },
+Index: src/content/js/etc/globals.js
+===================================================================
+RCS file: /cvs/fireftp/src/content/js/etc/globals.js,v
+retrieving revision 1.114
+diff -u -r1.114 globals.js
+--- src/content/js/etc/globals.js	15 Dec 2008 07:59:42 -0000	1.114
++++ src/content/js/etc/globals.js	13 Feb 2009 02:44:35 -0000
+@@ -100,4 +100,5 @@
+ var gPromptService;
+ var gPrefsService;
+ var gPrefs;
++var gUnescapeHTMLService;
+ var gFireFTPUtils;
+Index: src/content/js/etc/globals.js.in
+===================================================================
+RCS file: /cvs/fireftp/src/content/js/etc/globals.js.in,v
+retrieving revision 1.26
+diff -u -r1.26 globals.js.in
+--- src/content/js/etc/globals.js.in	8 Mar 2008 04:43:38 -0000	1.26
++++ src/content/js/etc/globals.js.in	13 Feb 2009 02:28:07 -0000
+@@ -100,4 +100,5 @@
+ var gPromptService;
+ var gPrefsService;
+ var gPrefs;
++var gUnescapeHTMLService;
+ var gFireFTPUtils;
+Index: src/content/js/etc/loadUnload.js
+===================================================================
+RCS file: /cvs/fireftp/src/content/js/etc/loadUnload.js,v
+retrieving revision 1.62
+diff -u -r1.62 loadUnload.js
+--- src/content/js/etc/loadUnload.js	12 Jul 2008 01:45:10 -0000	1.62
++++ src/content/js/etc/loadUnload.js	13 Feb 2009 02:28:57 -0000
+@@ -45,6 +45,7 @@
+   gFormHistory           = Components.classes["@mozilla.org/satchel/form-history;1"].getService    (Components.interfaces.nsIFormHistory ?
+                                                                                                     Components.interfaces.nsIFormHistory :
+                                                                                                     Components.interfaces.nsIFormHistory2);
++  gUnescapeHTMLService   = Components.classes["@mozilla.org/feed-unescapehtml;1"].getService(Components.interfaces.nsIScriptableUnescapeHTML);
+   gLoginInfo             = new Components.Constructor("@mozilla.org/login-manager/loginInfo;1",     Components.interfaces.nsILoginInfo, "init");
+ 
+   gPrefs                 = gPrefsService.getBranch("fireftp.");
+Index: src/content/js/etc/log.js
+===================================================================
+RCS file: /cvs/fireftp/src/content/js/etc/log.js,v
+retrieving revision 1.27
+diff -u -r1.27 log.js
+--- src/content/js/etc/log.js	13 Feb 2009 02:15:00 -0000	1.27
++++ src/content/js/etc/log.js	13 Feb 2009 02:43:33 -0000
+@@ -1,12 +1,19 @@
+-function appendLog(message, css, type) {
++function appendLog(message, css, type, untrusted) {
++  if (untrusted) {
++    var dummyElement = document.createElement('DIV');
++    var domNode = gUnescapeHTMLService.parseFragment(message, false, null, dummyElement);
++    var s = new XMLSerializer();
++    message = s.serializeToString(domNode);
++  }
++
+   gLogQueue  += "<div type='" + type + "' style='display:" + (type != "error" && gLogErrorMode ? "none" : "block") + "' " + "class='" + css + "'>"
+              +     message.replace(/\r\n/g, '<br/>').replace(/\n/g, '<br/>')
+              +  "</div>";
+ }
+ 
+-function error(message, skipLog) {
++function error(message, skipLog, untrusted) {
+   if (!skipLog) {
+-    appendLog(message, 'error', "error");
++    appendLog(message, 'error', "error", untrusted);
+   }
+ 
+   if (gErrorMode) {
+@@ -38,9 +45,9 @@
+   }
+ }
+ 
+-function debug(ex, level) {
++function debug(ex, level, untrusted) {
+   if (gDebugMode) {
+-    appendLog((level ? level : "Error") + ": " + (ex.stack ? (ex.message + '\n' + ex.stack) : ex), 'error', "debug");
++    appendLog((level ? level : "Error") + ": " + (ex.stack ? (ex.message + '\n' + ex.stack) : ex), 'error', "debug", untrusted);
+   }
+ }
+

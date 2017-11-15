@@ -1,0 +1,374 @@
+Index: src/browser/BrowserWrapper.h
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/browser/BrowserWrapper.h,v
+retrieving revision 1.72
+diff -u -8 -r1.72 BrowserWrapper.h
+--- src/browser/BrowserWrapper.h	24 Jul 2009 23:50:15 -0000	1.72
++++ src/browser/BrowserWrapper.h	10 Aug 2009 21:02:54 -0000
+@@ -188,17 +188,17 @@
+                            // If we never become the primary view, we don't bother creating the listeners.
+   BOOL mActivateOnLoad;    // If set, activate the browser view when loading starts.
+ 
+   TransientBar*             mTopTransientBar;    // strong
+   TransientBar*             mBottomTransientBar; // strong
+ 
+   IBOutlet SafeBrowsingBar* mSafeBrowsingBar; // loaded on demand, can be nil, strong
+   IBOutlet NSTextField*     mSafeBrowsingBarLabel;
+-  NSMutableDictionary*      mBlockedSitesAndInfo; // strong
++  NSMutableDictionary*      mIgnoredBlockedSites; // strong
+ }
+ 
+ - (id)initWithTab:(NSTabViewItem*)aTab inWindow:(NSWindow*)window;
+ - (id)initWithFrame:(NSRect)frameRect inWindow:(NSWindow*)window;
+ 
+ // only the BrowserWrapper in the frontmost tab has a non-null delegate
+ - (void)setDelegate:(id<BrowserUIDelegate>)delegate;
+ - (id<BrowserUIDelegate>)delegate;
+Index: src/browser/BrowserWrapper.mm
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/browser/BrowserWrapper.mm,v
+retrieving revision 1.167
+diff -u -8 -r1.167 BrowserWrapper.mm
+--- src/browser/BrowserWrapper.mm	24 Jul 2009 23:50:15 -0000	1.167
++++ src/browser/BrowserWrapper.mm	10 Aug 2009 21:02:56 -0000
+@@ -94,16 +94,17 @@
+   eStatusScript        = 2, // javascript window.status
+   eStatusScriptDefault = 3, // javascript window.defaultStatus
+ };
+ 
+ NSString* const kBrowserInstanceClosedNotification = @"BrowserInstanceClosed";
+ 
+ static NSString* const kBlockedSiteInformationBlockedDateKey = @"BlockedDate";
+ static NSString* const kBlockedSiteInformationBlockedReasonKey = @"BlockedReason";
++static NSString* const kSafeBrowsingErrorOverlayMalwareBlockedIndicator = @"e=malwareBlocked";
+ 
+ static const NSTimeInterval kTimeIntervalToConsiderSiteBlockingStatusValid = 900.0;
+ 
+ @interface BrowserWrapper(Private)
+ 
+ - (void)ensureContentClickListeners;
+ 
+ - (void)setPendingActive:(BOOL)active;
+@@ -133,19 +134,20 @@
+ 
+ - (void)addFindBarViewAndDisplay;
+ - (void)removeFindBarViewAndDisplay;
+ 
+ - (void)performCommandForXULElementWithID:(NSString*)elementIdentifier onPage:(NSString*)pageURI;
+ 
+ - (void)xpcomTerminate:(NSNotification*)aNotification;
+ 
++- (void)ignoreBlockedSite:(NSString*)aBlockedURI withReason:(ESafeBrowsingBlockedReason)aBlockedReason;
+ - (void)showSafeBrowsingBar;
+ - (ESafeBrowsingBlockedReason)reasonForBlockingURL:(NSString*)aURL;
+-- (BOOL)hasPreviouslyBlockedURLInRecentTimeframe:(NSString*)aURL;
++- (BOOL)hasIgnoredBlockingForURLInRecentTimeframe:(NSString*)aURL;
+ 
+ @end
+ 
+ #pragma mark -
+ 
+ @implementation BrowserWrapper
+ 
+ - (id)initWithTab:(NSTabViewItem*)aTab inWindow:(NSWindow*)window
+@@ -200,17 +202,17 @@
+     mStatusStrings = [[NSMutableArray alloc] initWithObjects:[NSNull null], [NSNull null],
+                                                              [NSNull null], [NSNull null], nil];
+ 
+     mDisplayTitle = [NSLocalizedString(@"UntitledPageTitle", nil) retain];
+ 
+     mLoadingResources = [[NSMutableSet alloc] init];
+ 
+     mDetectedSearchPlugins = [[NSMutableArray alloc] initWithCapacity:1];
+-    mBlockedSitesAndInfo = [[NSMutableDictionary alloc] init];
++    mIgnoredBlockedSites = [[NSMutableDictionary alloc] init];
+ 
+     [self registerNotificationListeners];
+   }
+   return self;
+ }
+ 
+ - (void)dealloc
+ {
+@@ -244,17 +246,17 @@
+   // These objects have a retain count of 1 when loaded from nibs,
+   // so we have to release them manually.
+   [mBlockedPopupBar release];
+   [mSafeBrowsingBar release];
+ 
+   [mTopTransientBar release];
+   [mBottomTransientBar release];
+ 
+-  [mBlockedSitesAndInfo release];
++  [mIgnoredBlockedSites release];
+ 
+   [super dealloc];
+ }
+ 
+ - (void)xpcomTerminate:(NSNotification*)aNotification
+ {
+   // Make sure we release core objects before XPCOM shuts down; by the time we
+   // get to dealloc it may already be too late.
+@@ -679,20 +681,19 @@
+     // If we are being called from within a history navigation, then core code
+     // has already stored our old size, and will incorrectly truncate the page
+     // later (see bug 350752, and the XXXbryner comment in nsDocShell.cpp). To
+     // work around that, re-set the frame once core is done meddling.
+     BOOL needsFrameAdjustment = NO;
+ 
+     BOOL blockedErrorOverlayIsDisplayed = (requestStatus == eRequestBlocked);
+ 
+-    // If this site has been previously blocked and an error overlay is not being shown,
+-    // the user has chosen to ignore the warning and proceed to the blocked site.
+-    // In this situation, we display a safe browsing transient bar.
+-    BOOL shouldDisplaySafeBrowsingBar = ([self hasPreviouslyBlockedURLInRecentTimeframe:urlSpec] &&
++    // If the safe browsing blocked warning was ignored for this page, and it is
++    // currently loading unblocked, display the safe browsing bar.
++    BOOL shouldDisplaySafeBrowsingBar = ([self hasIgnoredBlockingForURLInRecentTimeframe:urlSpec] &&
+                                          !blockedErrorOverlayIsDisplayed);
+     if (shouldDisplaySafeBrowsingBar)
+       [self showSafeBrowsingBar];
+ 
+     if (mTopTransientBar && !shouldDisplaySafeBrowsingBar) {
+       [self removeTransientBar:mTopTransientBar display:YES];
+       needsFrameAdjustment = YES;
+     }
+@@ -988,54 +989,40 @@
+ 
+   // Get the URI of the page actually containing the XUL element, which will differ
+   // from -[self currentURI] if the command was send from an error overlay, for instance.
+   NSString* documentURI = [self documentURI];
+ 
+   [self performCommandForXULElementWithID:elementID onPage:documentURI];
+ }
+ 
+-- (void)onSafeBrowsingBlockedURI:(NSString*)aBlockedURI
+-                          reason:(ESafeBrowsingBlockedReason)aBlockedReason
+-{
+-  // We keep track of blocked sites for cases when the user ignores the main error
+-  // overlay and proceeds to the site. After ignoring a blocked error for a page 
+-  // we will always present a bar on it, especially when it was loaded unblocked
+-  // from session history.
+-  NSDictionary *blockedSiteInformation = 
+-    [NSDictionary dictionaryWithObjectsAndKeys:[NSNumber numberWithInt:aBlockedReason], kBlockedSiteInformationBlockedReasonKey,
+-                                               [NSDate date], kBlockedSiteInformationBlockedDateKey,
+-                                               nil];
+-  [mBlockedSitesAndInfo setObject:blockedSiteInformation forKey:aBlockedURI];
+-}
+-
+ // The pageURI is supplied because it might differ from -[self currentURI], particularly
+ // if the command was sent from an error page overlay.
+ - (void)performCommandForXULElementWithID:(NSString*)elementIdentifier onPage:(NSString*)pageURI
+ {
+   if ([elementIdentifier isEqualToString:@"exceptionDialogButton"]) {
+     [mDelegate addCertificateOverrideForSite:[self currentURI]];
+   }
+   else if ([pageURI hasPrefix:@"about:safebrowsingblocked"]) {
++    // pageURI contains an |e| parameter to indicate the type of
++    // blocking error, such as e=malwareBlocked.
++    ESafeBrowsingBlockedReason blockedReason = eSafeBrowsingBlockedAsPhishing;
++    if ([pageURI rangeOfString:kSafeBrowsingErrorOverlayMalwareBlockedIndicator].location != NSNotFound)
++      blockedReason = eSafeBrowsingBlockedAsMalware;
++
+     if ([elementIdentifier isEqualToString:@"getMeOutButton"]) {
+       [mDelegate runAwayFromSafeBrowsingBlockedSite];
+     }
+     else if ([elementIdentifier isEqualToString:@"ignoreWarningButton"]) {
+-      [self loadURI:[self currentURI] 
+-           referrer:nil 
+-              flags:NSLoadFlagsBypassClassifier 
+-       focusContent:YES 
+-        allowPopups:NO];
++      [self ignoreBlockedSite:[self currentURI] withReason:blockedReason];
+     }
+     else if ([elementIdentifier isEqualToString:@"whyBlockedButton"]) {
+-      // Examine pageURI for e=phishingBlocked or e=malwareBlocked
+-      // to customize the blocking info location for each case.
+-      if ([pageURI rangeOfString:@"e=malwareBlocked"].location != NSNotFound)
++      if (blockedReason == eSafeBrowsingBlockedAsMalware)
+         [mDelegate showMalwareDiagnosticInformation];
+-      else // e=phishingBlocked
++      else
+         [mDelegate showSafeBrowsingInformation];
+     }
+   }
+ }
+ 
+ - (BOOL)performKeyEquivalent:(NSEvent*)theEvent
+ {
+   // Catch Command-back/forward, and map them to history back/forward unless
+@@ -1663,48 +1650,70 @@
+   if (aShouldDisplay && barWasRemoved) {
+     [self setFrame:[self frame] resizingBrowserViewIfHidden:YES];
+     [self display];
+   }
+ }
+ 
+ #pragma mark -
+ 
+-// If |aURL| has been previously blocked by safe browsing upon visiting, returns
+-// the reason it was blocked (e.g. malware or phishing).  If |aURL| hasn't
+-// been visited and blocked, returns eSafeBrowsingNotBlocked.
++// Called when the user chooses to ignore the safe browsing blocked warning. 
++// Navigates to the blocked site, and ensures the safe browsing bar will 
++// appear now and on all subsequent visits to this site without the blocking
++// overlay.
++- (void)ignoreBlockedSite:(NSString*)aBlockedURI withReason:(ESafeBrowsingBlockedReason)aBlockedReason
++{
++  // Remember ignored blocked sites so we can display the safe browsing bar on them.
++  // If we only chose to display it now, right when the error was ignored, the bar
++  // would not appear when visiting the site from session history (which will also
++  // load bypassing safe browsing).
++  NSDictionary* blockedSiteInformation = 
++    [NSDictionary dictionaryWithObjectsAndKeys:
++      [NSNumber numberWithInt:aBlockedReason], kBlockedSiteInformationBlockedReasonKey,
++      [NSDate date], kBlockedSiteInformationBlockedDateKey,
++      nil];
++    [mIgnoredBlockedSites setObject:blockedSiteInformation forKey:aBlockedURI];
++
++  [self loadURI:[self currentURI] 
++       referrer:nil 
++          flags:NSLoadFlagsBypassClassifier 
++   focusContent:YES 
++    allowPopups:NO];
++}
++
++// If the safe browsing blocked warning was previously ignored for |aURL|, returns
++// the reason it was blocked (e.g. malware or phishing). If the blocked warning for
++// |aURL| was never ignored, eSafeBrowsingNotBlocked is returned.
+ - (ESafeBrowsingBlockedReason)reasonForBlockingURL:(NSString*)aURL
+ {
+-  NSDictionary* blockedSiteInfo = [mBlockedSitesAndInfo objectForKey:aURL];
++  NSDictionary* blockedSiteInfo = [mIgnoredBlockedSites objectForKey:aURL];
+   if (!blockedSiteInfo)
+     return eSafeBrowsingNotBlocked;
+ 
+   NSNumber* blockedReasonNumber = [blockedSiteInfo objectForKey:kBlockedSiteInformationBlockedReasonKey];
+   return static_cast<ESafeBrowsingBlockedReason>([blockedReasonNumber intValue]);
+ }
+ 
+-// Returns YES if |aURL| was visited and blocked by safe browsing recently. 
+-// (We stop remembering previously blocked sites after a certain amount
+-// of time in case any were mistakingly blocked. The safe browsing database will
+-// always offer current checking, this method is merely to check if the site was
+-// blocked on a previous visit).
+-- (BOOL)hasPreviouslyBlockedURLInRecentTimeframe:(NSString*)aURL
++// Returns YES if the safe browsing blocked warning was ignored recently for |aURL|.
++// (We stop remembering ignored blocked sites after a certain amount of time in
++// case any were mistakingly blocked.)
++- (BOOL)hasIgnoredBlockingForURLInRecentTimeframe:(NSString*)aURL
+ {
+-  NSDictionary* blockedSiteInfo = [mBlockedSitesAndInfo objectForKey:aURL];
++  NSDictionary* blockedSiteInfo = [mIgnoredBlockedSites objectForKey:aURL];
+   if (!blockedSiteInfo)
+     return NO;
+ 
+   NSDate* dateSiteWasBlocked = [blockedSiteInfo objectForKey:kBlockedSiteInformationBlockedDateKey];
+   NSTimeInterval blockedTimeSinceNow = -[dateSiteWasBlocked timeIntervalSinceNow];
+   if (blockedTimeSinceNow <= kTimeIntervalToConsiderSiteBlockingStatusValid) {
+     return YES;
+   }
+   else {
+     // Also remove the URL from our local cache since it was not blocked recently enough
+-    [mBlockedSitesAndInfo removeObjectForKey:aURL];
++    [mIgnoredBlockedSites removeObjectForKey:aURL];
+     return NO;
+   }
+ }
+ 
+ - (void)showSafeBrowsingBar
+ {
+   if (!mSafeBrowsingBar)
+     [NSBundle loadNibNamed:@"SafeBrowsingBar" owner:self];
+Index: src/embedding/CHBrowserListener.mm
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/embedding/CHBrowserListener.mm,v
+retrieving revision 1.59
+diff -u -8 -r1.59 CHBrowserListener.mm
+--- src/embedding/CHBrowserListener.mm	6 Jul 2009 20:33:21 -0000	1.59
++++ src/embedding/CHBrowserListener.mm	10 Aug 2009 21:02:57 -0000
+@@ -742,27 +742,22 @@
+     aLocation->GetSpec(spec);
+ 
+   NSString* location = [NSString stringWithUTF8String:spec.get()];
+ 
+   ERequestStatus requestStatus = eRequestSucceeded;
+   if (aRequest) { // aRequest can be null (e.g. for relative anchors)
+     nsresult status = NS_OK;
+     aRequest->GetStatus(&status);
+-    if (status == NS_ERROR_MALWARE_URI) {
+-      [mContainer onSafeBrowsingBlockedURI:location reason:eSafeBrowsingBlockedAsMalware];
++    if (status == NS_ERROR_MALWARE_URI)
+       requestStatus = eRequestBlocked;
+-    }
+-    else if (status == NS_ERROR_PHISHING_URI) {
+-      [mContainer onSafeBrowsingBlockedURI:location reason:eSafeBrowsingBlockedAsPhishing];
++    else if (status == NS_ERROR_PHISHING_URI)
+       requestStatus = eRequestBlocked;
+-    }
+-    else if (!NS_SUCCEEDED(status)) {
++    else if (!NS_SUCCEEDED(status))
+       requestStatus = eRequestFailed;
+-    }
+   }
+ 
+   NSEnumerator* enumerator = [mListeners objectEnumerator];
+   id<CHBrowserListener> obj;
+   while ((obj = [enumerator nextObject]))
+     [obj onLocationChange:location isNewPage:(aRequest != nsnull) requestStatus:requestStatus];
+ 
+   return NS_OK;
+Index: src/embedding/CHBrowserView.h
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/embedding/CHBrowserView.h,v
+retrieving revision 1.65
+diff -u -8 -r1.65 CHBrowserView.h
+--- src/embedding/CHBrowserView.h	6 Jul 2009 20:33:21 -0000	1.65
++++ src/embedding/CHBrowserView.h	10 Aug 2009 21:02:57 -0000
+@@ -111,18 +111,16 @@
+ - (void)onFoundShortcutIcon:(NSString*)inIconURI;
+ // Called when a feed link element is noticed
+ - (void)onFeedDetected:(NSString*)inFeedURI feedTitle:(NSString*)inFeedTitle;
+ // Called when a search plugin link element is noticed.
+ - (void)onSearchPluginDetected:(NSURL*)pluginURL mimeType:(NSString*)pluginMIMEType displayName:(NSString*)pluginName;
+ // Called when an XUL element was activated (e.g. clicked) in the content area, 
+ // typically on an about: page.
+ - (void)onXULCommand:(nsIDOMNSEvent*)aDOMEvent;
+-- (void)onSafeBrowsingBlockedURI:(NSString*)aBlockedURI
+-                          reason:(ESafeBrowsingBlockedReason)aBlockedReason;
+ 
+ @end
+ 
+ typedef enum {
+   NSStatusTypeScript            = 0x0001,
+   NSStatusTypeScriptDefault     = 0x0002,
+   NSStatusTypeLink              = 0x0003,
+ } NSStatusType;
+Index: src/formfill/KeychainService.mm
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/formfill/KeychainService.mm,v
+retrieving revision 1.48
+diff -u -8 -r1.48 KeychainService.mm
+--- src/formfill/KeychainService.mm	6 Jul 2009 20:33:21 -0000	1.48
++++ src/formfill/KeychainService.mm	10 Aug 2009 21:02:59 -0000
+@@ -1460,20 +1460,16 @@
+ - (void)onSearchPluginDetected:(NSURL*)pluginURL mimeType:(NSString*)pluginMIMEType displayName:(NSString*)pluginName
+ {
+ }
+ 
+ - (void)onXULCommand:(nsIDOMNSEvent*)aDOMEvent
+ {
+ }
+ 
+-- (void)onSafeBrowsingBlockedURI:(NSString*)aBlockedURI reason:(ESafeBrowsingBlockedReason)aBlockedReason
+-{
+-}
+-
+ @end
+ 
+ //
+ // GetNSWindow
+ //
+ // Finds the native window for the given DOM window
+ //
+ NSWindow* GetNSWindow(nsIDOMWindow* inWindow)

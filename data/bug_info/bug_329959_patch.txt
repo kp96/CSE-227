@@ -1,0 +1,63 @@
+Index: xpfe/global/resources/content/commonDialog.js
+===================================================================
+RCS file: /cvsroot/mozilla/xpfe/global/resources/content/commonDialog.js,v
+retrieving revision 1.58
+diff -u -8 -r1.58 commonDialog.js
+--- xpfe/global/resources/content/commonDialog.js	10 Feb 2006 13:23:41 -0000	1.58
++++ xpfe/global/resources/content/commonDialog.js	19 Mar 2006 22:35:42 -0000
+@@ -98,18 +98,27 @@
+   // XXXjag bug 325251
+   // Need to set this after aNode.setAttribute("value", aLabel);
+   if (accessKey)
+     aNode.accessKey = accessKey;
+ }
+ 
+ function commonDialogOnLoad()
+ {
+-  // set the document title
+-  document.title = gCommonDialogParam.GetString(12);
++  // Set the document title. On Mac, we only care about URI's.
++  if (/Mac/.test(navigator.platform)) {
++    var titleString = gCommonDialogParam.GetString(12);
++    if (/^\w+:\/\/\w/.test(titleString)) {
++      setElementText("info.title", titleString, true);
++      unHideElementById("info.title"); // Show URI inside dialog.
++    }
++  }
++  else {
++    document.title = gCommonDialogParam.GetString(12);
++  }
+ 
+   // set the number of command buttons
+   var nButtons = gCommonDialogParam.GetInt(2);
+   var dialog = document.documentElement;
+   switch (nButtons) {
+     case 1:
+       dialog.getButton("cancel").hidden = true;
+       break;
+Index: xpfe/global/resources/content/commonDialog.xul
+===================================================================
+RCS file: /cvsroot/mozilla/xpfe/global/resources/content/commonDialog.xul,v
+retrieving revision 1.43
+diff -u -8 -r1.43 commonDialog.xul
+--- xpfe/global/resources/content/commonDialog.xul	11 Oct 2004 12:41:09 -0000	1.43
++++ xpfe/global/resources/content/commonDialog.xul	19 Mar 2006 22:35:42 -0000
+@@ -16,16 +16,18 @@
+   <script type="application/x-javascript" src="chrome://global/content/commonDialog.js"/>
+ 
+   <hbox flex="1">
+     <hbox align="start">
+       <image id="info.icon" class="spaced"/>
+     </hbox>
+     
+     <vbox flex="1" style="max-width: 45em;">
++      <!-- title -->
++      <description id="info.title" class="header" hidden="true"/>
+       <!-- text -->
+       <description id="info.header" class="header"/>
+       <vbox id="info.box"/>
+ 
+       <!-- textboxes -->
+       <vbox id="loginContainer" hidden="true">
+         <label id="loginLabel" value="&editfield0.label;" control="loginTextbox"/>
+         <textbox id="loginTextbox"/>

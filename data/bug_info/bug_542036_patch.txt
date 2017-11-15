@@ -1,0 +1,26 @@
+Index: resources/application/all-camino.js.in
+===================================================================
+RCS file: /cvsroot/mozilla/camino/resources/application/all-camino.js.in,v
+retrieving revision 1.28
+diff -u -8 -r1.28 all-camino.js.in
+--- resources/application/all-camino.js.in	7 Oct 2009 20:30:03 -0000	1.28
++++ resources/application/all-camino.js.in	26 Jan 2010 20:35:20 -0000
+@@ -233,17 +233,17 @@
+ 
+ // Data provider error reporting URLs
+ pref("browser.safebrowsing.provider.0.reportPhishingURL", "http://www.google.com/safebrowsing/report_phish/?tpl=generic&continue=%CONTINUE_TO_URL%&url=%REPORTED_URL%&hl=%LANGUAGE%");
+ pref("browser.safebrowsing.provider.0.reportPhishingErrorURL", "http://www.google.com/safebrowsing/report_error/?tpl=generic&continue=%CONTINUE_TO_URL%&url=%REPORTED_URL%&hl=%LANGUAGE%");
+ pref("browser.safebrowsing.provider.0.reportMalwareURL", "http://www.google.com/safebrowsing/report_badware/?tpl=generic&continue=%CONTINUE_TO_URL%&url=%REPORTED_URL%&hl=%LANGUAGE%");
+ pref("browser.safebrowsing.provider.0.reportMalwareErrorURL", "http://google.com/safebrowsing/diagnostic?tpl={moz:client}&site=%REPORTED_URL%&hl=%LANGUAGE%");
+ 
+ // URL the user is forwarded to after submitting an error report
+-pref("browser.safebrowsing.sendToURLAfterReporting", "http://caminobrowser.org/security/report-submitted.php");
++pref("browser.safebrowsing.sendToURLAfterReporting", "http://caminobrowser.org/documentation/security/report-submitted/");
+ 
+ // Location of more information about the safe browsing feature
+ pref("browser.safebrowsing.warning.infoURL", "http://caminobrowser.org/documentation/security/#safebrowsing");
+ 
+ // Name of the about: page contributed by safebrowsing to handle display of error
+ // pages on phishing/malware hits.
+ pref("urlclassifier.alternate_error_page", "safebrowsingblocked");
+ 

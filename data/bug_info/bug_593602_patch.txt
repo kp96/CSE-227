@@ -1,0 +1,129 @@
+From: Blake Kaplan <mrbkap@gmail.com>
+
+Fix bug 593602.
+
+diff --git a/js/src/xpconnect/wrappers/AccessCheck.cpp b/js/src/xpconnect/wrappers/AccessCheck.cpp
+--- a/js/src/xpconnect/wrappers/AccessCheck.cpp
++++ b/js/src/xpconnect/wrappers/AccessCheck.cpp
+@@ -187,16 +187,22 @@ IsFrameId(JSContext *cx, JSObject *obj, 
+ }
+ 
+ static bool
+ IsWindow(const char *name)
+ {
+     return name[0] == 'W' && !strcmp(name, "Window");
+ }
+ 
++static bool
++IsLocation(const char *name)
++{
++    return name[0] == 'L' && !strcmp(name, "Location");
++}
++
+ static nsIPrincipal *
+ GetPrincipal(JSObject *obj)
+ {
+     NS_ASSERTION(!IS_SLIM_WRAPPER(obj), "global object is a slim wrapper?");
+     if (!IS_WN_WRAPPER(obj)) {
+         NS_ASSERTION(!(~obj->getClass()->flags &
+                        (JSCLASS_PRIVATE_IS_NSISUPPORTS | JSCLASS_HAS_PRIVATE)),
+                      "bad object");
+@@ -235,57 +241,61 @@ AccessCheck::isCrossOriginAccessPermitte
+         const char *prop = JS_GetStringBytes(str);
+         if (IsPermitted(name, prop, act == JSWrapper::SET))
+             return true;
+     }
+ 
+     if (IsWindow(name) && IsFrameId(cx, obj, id))
+         return true;
+ 
+-    JSObject *scope = nsnull;
+-    JSStackFrame *fp = nsnull;
+-    JS_FrameIterator(cx, &fp);
+-    if (fp) {
+-        while (fp->isDummyFrame()) {
+-            if (!JS_FrameIterator(cx, &fp))
+-                break;
++    // We only reach this point for cross origin location objects (see
++    // SameOriginOrCrossOriginAccessiblePropertiesOnly::check).
++    if (!IsLocation(name)) {
++        JSObject *scope = nsnull;
++        JSStackFrame *fp = nsnull;
++        JS_FrameIterator(cx, &fp);
++        if (fp) {
++            while (fp->isDummyFrame()) {
++                if (!JS_FrameIterator(cx, &fp))
++                    break;
++            }
++
++            if (fp)
++                scope = &fp->scopeChain();
+         }
+ 
+-        if (fp)
+-            scope = &fp->scopeChain();
++        if (!scope)
++            scope = JS_GetScopeChain(cx);
++
++        nsIPrincipal *subject;
++        nsIPrincipal *object;
++
++        {
++            JSAutoEnterCompartment ac;
++
++            if (!ac.enter(cx, scope))
++                return false;
++
++            subject = GetPrincipal(JS_GetGlobalForObject(cx, scope));
++        }
++
++        {
++            JSAutoEnterCompartment ac;
++
++            if (!ac.enter(cx, obj))
++                return false;
++
++            object = GetPrincipal(JS_GetGlobalForObject(cx, obj));
++        }
++
++        PRBool subsumes;
++        if (NS_SUCCEEDED(subject->Subsumes(object, &subsumes)) && subsumes)
++            return true;
+     }
+ 
+-    if (!scope)
+-        scope = JS_GetScopeChain(cx);
+-
+-    nsIPrincipal *subject;
+-    nsIPrincipal *object;
+-
+-    {
+-        JSAutoEnterCompartment ac;
+-
+-        if (!ac.enter(cx, scope))
+-            return false;
+-
+-        subject = GetPrincipal(JS_GetGlobalForObject(cx, scope));
+-    }
+-
+-    {
+-        JSAutoEnterCompartment ac;
+-
+-        if (!ac.enter(cx, obj))
+-            return false;
+-
+-        object = GetPrincipal(JS_GetGlobalForObject(cx, obj));
+-    }
+-
+-    PRBool subsumes;
+-    if (NS_SUCCEEDED(subject->Subsumes(object, &subsumes)) && subsumes)
+-        return true;
+-
+     return (act == JSWrapper::SET)
+            ? nsContentUtils::IsCallerTrustedForWrite()
+            : nsContentUtils::IsCallerTrustedForRead();
+ }
+ 
+ bool
+ AccessCheck::isSystemOnlyAccessPermitted(JSContext *cx)
+ {

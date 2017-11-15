@@ -1,0 +1,54 @@
+Index: mozilla/mailnews/base/resources/content/msgMail3PaneWindow.js
+===================================================================
+RCS file: /cvsroot/mozilla/mailnews/base/resources/content/msgMail3PaneWindow.js,v
+retrieving revision 1.305
+diff -u -r1.305 msgMail3PaneWindow.js
+--- mozilla/mailnews/base/resources/content/msgMail3PaneWindow.js	3 Apr 2007 11:16:23 -0000	1.305
++++ mozilla/mailnews/base/resources/content/msgMail3PaneWindow.js	24 Apr 2007 15:47:32 -0000
+@@ -1497,11 +1497,6 @@
+     gDBView.selectMsgByKey(msgHdr.messageKey);
+ }
+ 
+-function ReloadWithAllParts()
+-{
+-  gDBView.reloadMessageWithAllParts();
+-}
+-
+ function ReloadMessage()
+ {
+   gDBView.reloadMessage();
+Index: mozilla/mailnews/extensions/smime/resources/content/msgReadSMIMEOverlay.js
+===================================================================
+RCS file: /cvsroot/mozilla/mailnews/extensions/smime/resources/content/msgReadSMIMEOverlay.js,v
+retrieving revision 1.4
+diff -u -r1.4 msgReadSMIMEOverlay.js
+--- mozilla/mailnews/extensions/smime/resources/content/msgReadSMIMEOverlay.js	6 Jan 2006 20:38:14 -0000	1.4
++++ mozilla/mailnews/extensions/smime/resources/content/msgReadSMIMEOverlay.js	24 Apr 2007 15:47:32 -0000
+@@ -68,7 +68,7 @@
+     if (promptService.confirm(window,
+           gBrandBundle.getString("brandShortName"),
+           gBundle.getString("ImapOnDemand"))) {
+-      ReloadWithAllParts();
++      gDBView.reloadMessageWithAllParts();
+     }
+   }
+ }
+Index: mozilla/mail/base/content/msgMail3PaneWindow.js
+===================================================================
+RCS file: /cvsroot/mozilla/mail/base/content/msgMail3PaneWindow.js,v
+retrieving revision 1.122
+diff -u -r1.122 msgMail3PaneWindow.js
+--- mozilla/mail/base/content/msgMail3PaneWindow.js	12 Mar 2007 23:02:35 -0000	1.122
++++ mozilla/mail/base/content/msgMail3PaneWindow.js	24 Apr 2007 15:47:33 -0000
+@@ -1714,11 +1714,6 @@
+     gDBView.selectMsgByKey(msgHdr.messageKey);
+ }
+ 
+-function ReloadWithAllParts()
+-{
+-  gDBView.reloadMessageWithAllParts();
+-}
+-
+ function ReloadMessage()
+ {
+   gDBView.reloadMessage();

@@ -1,0 +1,197 @@
+Index: src/browser/BrowserWindowController.mm
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/browser/BrowserWindowController.mm,v
+retrieving revision 1.201.2.113
+diff -u -8 -r1.201.2.113 BrowserWindowController.mm
+--- src/browser/BrowserWindowController.mm	12 Apr 2007 15:48:27 -0000	1.201.2.113
++++ src/browser/BrowserWindowController.mm	20 Apr 2007 05:33:13 -0000
+@@ -4027,16 +4027,17 @@
+ - (NSMenu*)getContextMenu
+ {
+   if (!mDataOwner->mGotOnContextMenu)
+     return nil;
+ 
+   BOOL showFrameItems = NO;
+   BOOL showSpellingItems = NO;
+   BOOL needsAlternates = NO;
++  BOOL isUnsafeLink = NO;
+ 
+   NSArray* emailAddresses = nil;
+   unsigned numEmailAddresses = 0;
+ 
+   BOOL hasSelection = [[mBrowserView getBrowserView] canCopy];
+   BOOL isMidas = NO;
+ 
+   if (mDataOwner->mContextMenuNode) {
+@@ -4066,16 +4067,26 @@
+   NSMenu* menuPrototype = nil;
+   int contextMenuFlags = mDataOwner->mContextMenuFlags;
+ 
+   if ((contextMenuFlags & nsIContextMenuListener::CONTEXT_LINK) != 0) {
+     emailAddresses = [self mailAddressesInContextMenuLinkNode];
+     if (emailAddresses != nil)
+       numEmailAddresses = [emailAddresses count];
+ 
++    // Verify that it is safe to open this link.
++    NSString* referrerURL = [[mBrowserView getBrowserView] getFocusedURLString];
++    nsCOMPtr<nsIDOMElement> linkElement;
++    nsAutoString hrefURL;
++    GeckoUtils::GetEnclosingLinkElementAndHref(mDataOwner->mContextMenuNode,
++                                               getter_AddRefs(linkElement),
++                                               hrefURL);
++    if (!GeckoUtils::IsSafeToOpenURIFromReferrer(NS_ConvertUTF16toUTF8(hrefURL).get(), [referrerURL UTF8String]))
++      isUnsafeLink = YES;
++
+     if ((contextMenuFlags & nsIContextMenuListener::CONTEXT_IMAGE) != 0) {
+       if (numEmailAddresses > 0)
+         menuPrototype = mImageMailToLinkMenu;
+       else
+         menuPrototype = mImageLinkMenu;
+ 
+       needsAlternates = YES;
+     }
+@@ -4136,16 +4147,26 @@
+     [mForwardItem setEnabled: [[mBrowserView getBrowserView] canGoForward]];
+     [mCopyItem    setEnabled:hasSelection];
+   }
+ 
+   // we have to clone the menu and return that, so that we don't change
+   // our only copy of the menu
+   NSMenu* result = [[menuPrototype copy] autorelease];
+ 
++  if (isUnsafeLink) {
++    // To avoid updating the BrowserWindow.nib close to release time, the
++    // menu items to remove will be removed from index 0 three times. After
++    // the 1.1 release, this needs to be changed (see bug 378081). The first
++    // two remove calls will pull out the "Open Link in *" menu items.
++    [result removeItemAtIndex:0];
++    [result removeItemAtIndex:0];
++    [result removeItemAtIndex:0];  // remove separator 
++  }
++
+   // validate View Page/Frame Source
+   BrowserWrapper* browser = [self getBrowserWrapper];
+   if ([browser isInternalURI] || ![[browser getBrowserView] isTextBasedContent]) {
+     [[result itemWithTarget:self andAction:@selector(viewPageSource:)] setEnabled:NO];
+     [[result itemWithTarget:self andAction:@selector(viewSource:)] setEnabled:NO];
+   }
+ 
+   // validate 'Bookmark This Page'
+Index: src/browser/ContentClickListener.mm
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/browser/ContentClickListener.mm,v
+retrieving revision 1.27.2.4
+diff -u -8 -r1.27.2.4 ContentClickListener.mm
+--- src/browser/ContentClickListener.mm	7 Feb 2007 20:47:46 -0000	1.27.2.4
++++ src/browser/ContentClickListener.mm	20 Apr 2007 05:33:13 -0000
+@@ -102,16 +102,19 @@
+ 
+     NSRange firstColon = [hrefStr rangeOfString:@":"];
+     NSString* hrefScheme;
+     if (firstColon.location != NSNotFound)
+       hrefScheme = [hrefStr substringToIndex:firstColon.location];
+     else
+       hrefScheme = @"file"; // implicitly file:// if no colon is found
+ 
++    if (!GeckoUtils::IsSafeToOpenURIFromReferrer([hrefStr UTF8String], [referrer UTF8String]))
++      return NS_OK;
++
+     // The Command key is down or we got a middle-click.
+     // Open the link in a new window or tab if it's an internally handled, non-Javascript link.
+     if (![hrefScheme isEqualToString:@"javascript"] && GeckoUtils::isProtocolInternal([hrefScheme UTF8String])) {
+       BOOL useTab           = [[PreferenceManager sharedInstance] getBooleanPref:"browser.tabs.opentabfor.middleclick" withSuccess:NULL];
+       BOOL loadInBackground = [BrowserWindowController shouldLoadInBackground:nil];
+ 
+       if (useTab)
+         [mBrowserController openNewTabWithURL:hrefStr referrer:referrer loadInBackground:loadInBackground allowPopups:NO setJumpback:YES];
+Index: src/extensions/GeckoUtils.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/extensions/GeckoUtils.cpp,v
+retrieving revision 1.1.2.6
+diff -u -8 -r1.1.2.6 GeckoUtils.cpp
+--- src/extensions/GeckoUtils.cpp	7 Feb 2007 20:47:48 -0000	1.1.2.6
++++ src/extensions/GeckoUtils.cpp	20 Apr 2007 05:33:13 -0000
+@@ -50,16 +50,18 @@
+ #include "nsIURI.h"
+ #include "nsISimpleEnumerator.h"
+ #include "nsString.h"
+ #include "nsCOMPtr.h"
+ #include "nsIIOService.h"
+ #include "nsIProtocolHandler.h"
+ #include "nsIServiceManager.h"
+ #include "nsIExternalProtocolHandler.h"
++#include "nsIScriptSecurityManager.h"
++#include "nsNetUtil.h"
+ 
+ #include "nsIEditor.h"
+ #include "nsISelection.h"
+ 
+ #include "nsIDocShell.h"
+ #include "nsIDocShellTreeItem.h"
+ 
+ #include "nsIDOMDocument.h"
+@@ -221,16 +223,35 @@
+   nsCOMPtr<nsIURI> uri;
+   nav->GetCurrentURI(getter_AddRefs(uri));
+   if (!uri)
+     aURI.Truncate();
+   else
+     uri->GetSpec(aURI);
+ }
+ 
++/* static */
++PRBool 
++GeckoUtils::IsSafeToOpenURIFromReferrer(const char* aTargetUri, const char* aReferrerUri)
++{
++  PRBool isUnsafeLink = PR_TRUE;
++  nsCOMPtr<nsIURI> referrerUri;
++  nsCOMPtr<nsIURI> targetUri;
++  NS_NewURI(getter_AddRefs(referrerUri), aReferrerUri);
++  NS_NewURI(getter_AddRefs(targetUri), aTargetUri);
++
++  nsCOMPtr<nsIScriptSecurityManager> secManager = do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID);
++  if (secManager&& referrerUri && targetUri) {
++    nsresult rv = secManager->CheckLoadURI(referrerUri, targetUri, 0);
++    isUnsafeLink = NS_SUCCEEDED(rv);
++  }
++
++  return isUnsafeLink;
++}
++
+ // NOTE: this addrefs the result!
+ /* static */
+ void GeckoUtils::FindDocShellForURI (nsIURI *aURI, nsIDocShell *aRoot, nsIDocShell **outMatch)
+ {
+   *outMatch = nsnull;
+   if (!aURI || !aRoot)
+     return;
+ 
+Index: src/extensions/GeckoUtils.h
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/extensions/GeckoUtils.h,v
+retrieving revision 1.5.2.5
+diff -u -8 -r1.5.2.5 GeckoUtils.h
+--- src/extensions/GeckoUtils.h	7 Feb 2007 20:47:50 -0000	1.5.2.5
++++ src/extensions/GeckoUtils.h	20 Apr 2007 05:33:13 -0000
+@@ -59,17 +59,20 @@
+     static void GetEnclosingLinkElementAndHref(nsIDOMNode* aNode, nsIDOMElement** aLinkContent, nsString& aHref);
+ 
+     // Returns whether or not the given protocol ('http', 'file', 'mailto', etc.)
+     // is handled internally. Returns PR_TRUE in error cases.
+     static PRBool isProtocolInternal(const char* aProtocol);
+ 
+     /* Ouputs the docshell |aDocShell|'s URI as a nsACString. */
+     static void GetURIForDocShell(nsIDocShell* aDocShell, nsACString& aURI);
+-  
++
++    /* Find out if a URI is safe to load given the referrer URI */
++    static PRBool IsSafeToOpenURIFromReferrer(const char* aTargetUri, const char* aReferrerUri);
++
+     // Finds the anchor node for the selection in the given editor
+     static void GetAnchorNodeFromSelection(nsIEditor* inEditor, nsIDOMNode** outAnchorNode, PRInt32* outAnchorOffset);
+     
+     /* Given a URI, and a docshell node, will traverse the tree looking for the docshell with the
+        given URI.  This is used for example when unblocking popups, because the popup "windows" are docshells
+        found somewhere in a document's docshell tree.  NOTE: Addrefs the found docshell! 
+     */
+     static void FindDocShellForURI(nsIURI *aURI, nsIDocShell *aRoot, nsIDocShell **outMatch);

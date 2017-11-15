@@ -1,0 +1,98 @@
+# HG changeset patch
+# Parent 8d603861d0aa68893b18a609127cf4a835ec5a85
+# User Ed Morley <bmo@edmorley.co.uk>
+Bug 654600 - Remove WinCE code from security/manager/Makefile.in; r=kaie
+
+diff --git a/security/manager/Makefile.in b/security/manager/Makefile.in
+--- a/security/manager/Makefile.in
++++ b/security/manager/Makefile.in
+@@ -63,17 +63,17 @@ ifndef NSS_DISABLE_DBM
+ NSSDBM3_LIB = $(DLL_PREFIX)nssdbm3$(DLL_SUFFIX)
+ NSSDBM3_CHK = $(DLL_PREFIX)nssdbm3.chk
+ else
+ NSSDBM3_LIB = 
+ NSSDBM3_CHK = 
+ endif
+ 
+ ifndef MOZ_NATIVE_NSS
+-ifneq (,$(filter OS2 WINCE WINNT,$(OS_ARCH)))
++ifneq (,$(filter OS2 WINNT,$(OS_ARCH)))
+ SDK_LIBS = \
+   $(DIST)/lib/$(LIB_PREFIX)crmf.$(LIB_SUFFIX) \
+   $(DIST)/lib/$(LIB_PREFIX)smime3.$(LIB_SUFFIX) \
+   $(DIST)/lib/$(LIB_PREFIX)ssl3.$(LIB_SUFFIX) \
+   $(DIST)/lib/$(LIB_PREFIX)nss3.$(LIB_SUFFIX) \
+   $(DIST)/lib/$(LIB_PREFIX)nssutil3.$(LIB_SUFFIX) \
+   $(NULL)
+ else
+@@ -157,21 +157,18 @@ else
+ NSPR_LIB_DIR = $(ABS_DIST)/lib
+ endif
+ # Can't pass this in DEFAULT_GMAKE_FLAGS because that overrides
+ # definitions in NSS, so just export it into the sub-make's environment.
+ ifeq (WINNT_1,$(OS_TARGET)_$(MOZ_MEMORY))
+ export DLLFLAGS
+ endif
+ 
+-ifndef WINCE
+-# why is this disabled on WINCE?  See bug 514295.
+ # To get debug symbols from NSS
+ export MOZ_DEBUG_SYMBOLS
+-endif
+ 
+ ifdef .PYMAKE
+ NSSMAKE = $(GMAKE)
+ else
+ NSSMAKE = $(MAKE)
+ endif
+ 
+ # NSS makefiles are not safe for parallel execution.
+@@ -241,48 +238,29 @@ endif
+ # See bug 580679 comment 18.
+ DEFAULT_GMAKE_FLAGS += NSS_ENABLE_ZLIB=
+ 
+ # Disable building of the test programs in security/nss/lib/zlib
+ DEFAULT_GMAKE_FLAGS += PROGRAMS=
+ 
+ ifdef CROSS_COMPILE
+ 
+-ifdef WINCE
+-DEFAULT_GMAKE_FLAGS += \
+-	NATIVE_CC="$(HOST_CC)" \
+-	CC="$(CC)" \
+-	CCC="$(CC)" \
+-	LINK="$(LD)" \
+-	LD="$(LD) -DLL" \
+-	AS="$(AS) -Cp -Sn -Zi -coff $(INCLUDES)" \
+-	AR='$(AR) -NOLOG0 -OUT:$$@' \
+-	RANLIB="echo" \
+-	RC="$(RC) $(RCFLAGS)" \
+-	OS_ARCH="$(OS_ARCH)" \
+-	OS_TEST="$(OS_TEST)" \
+-	CPU_ARCH="ARM" \
+-	USE_MSYS=1 \
+-	WINCE=1 \
+-	$(NULL)
+-else
+ DEFAULT_GMAKE_FLAGS += \
+ 	NATIVE_CC="$(HOST_CC)" \
+ 	CC="$(CC)" \
+ 	CCC="$(CXX)" \
+ 	LINK="$(LD)" \
+ 	AS="$(AS)" \
+ 	AR='$(AR) $(AR_FLAGS:$@=$$@)' \
+ 	RANLIB="$(RANLIB)" \
+ 	RC="$(RC) $(RCFLAGS)" \
+ 	OS_ARCH="$(OS_ARCH)" \
+ 	OS_TEST="$(OS_TEST)" \
+ 	CPU_ARCH="$(TARGET_CPU)" \
+ 	$(NULL)
+-endif
+ 
+ # Android has pthreads integrated into -lc, so OS_LIBS is set to nothing
+ ifeq ($(OS_TARGET), Android)
+ DEFAULT_GMAKE_FLAGS += \
+ 	OS_RELEASE="2.6" \
+ 	OS_LIBS= \
+ 	STANDARDS_CFLAGS="-std=gnu89" \
+ 	DSO_CFLAGS="$(CFLAGS) -DCHECK_FORK_GETPID -DRTLD_NOLOAD=0 -DANDROID_VERSION=$(ANDROID_VERSION) -include $(ABS_topsrcdir)/security/manager/android_stub.h" \

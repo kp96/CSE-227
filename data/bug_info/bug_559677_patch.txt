@@ -1,0 +1,6 @@
+revert the patches from bug 469555
+http://hg.mozilla.org/mozilla-central/rev/7a3f4933c44f
+because there are follow up regressions which aren't trivial to solve
+(bug 559677 and bug 554009)
+
+cat http://hg.mozilla.org/mozilla-central/raw-rev/7a3f4933c44f | patch -R

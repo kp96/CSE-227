@@ -1,0 +1,25 @@
+Index: mozilla/security/manager/ssl/src/nsIdentityChecking.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsIdentityChecking.cpp,v
+retrieving revision 1.18
+diff -u -u -8 -p -r1.18 nsIdentityChecking.cpp
+--- mozilla/security/manager/ssl/src/nsIdentityChecking.cpp	9 Apr 2008 01:48:02 -0000	1.18
++++ mozilla/security/manager/ssl/src/nsIdentityChecking.cpp	10 Apr 2008 22:42:31 -0000
+@@ -910,16 +910,17 @@ nsNSSCertificate::hasValidEVOidTag(SECOi
+ 
+   cvin[2].type = cert_pi_trustAnchors;
+   cvin[2].value.pointer.chain = rootList;
+ 
+   cvin[3].type = cert_pi_end;
+ 
+   CERTValOutParam cvout[2];
+   cvout[0].type = cert_po_trustAnchor;
++  cvout[0].value.pointer.cert = nsnull;
+   cvout[1].type = cert_po_end;
+ 
+   PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("calling CERT_PKIXVerifyCert nss cert %p\n", mCert));
+   rv = CERT_PKIXVerifyCert(mCert, certificateUsageSSLServer,
+                            cvin, cvout, nsnull);
+   if (rv != SECSuccess)
+     return NS_OK;
+ 

@@ -1,0 +1,97 @@
+diff --git a/security/nss/TAG-INFO b/security/nss/TAG-INFO
+--- a/security/nss/TAG-INFO
++++ b/security/nss/TAG-INFO
+@@ -1,1 +1,1 @@
+-NSS_3_12_10_BETA1
++NSS_3_12_10_RTM
+diff --git a/security/nss/lib/nss/nss.h b/security/nss/lib/nss/nss.h
+--- a/security/nss/lib/nss/nss.h
++++ b/security/nss/lib/nss/nss.h
+@@ -31,17 +31,17 @@
+  * under the terms of either the GPL or the LGPL, and not to allow others to
+  * use your version of this file under the terms of the MPL, indicate your
+  * decision by deleting the provisions above and replace them with the notice
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+-/* $Id: nss.h,v 1.81.2.5 2011/01/12 21:39:21 christophe.ravel.bugs%sun.com Exp $ */
++/* $Id: nss.h,v 1.81.2.6 2011/05/06 17:04:37 christophe.ravel.bugs%sun.com Exp $ */
+ 
+ #ifndef __nss_h_
+ #define __nss_h_
+ 
+ /* The private macro _NSS_ECC_STRING is for NSS internal use only. */
+ #ifdef NSS_ENABLE_ECC
+ #ifdef NSS_ECC_MORE_THAN_SUITE_B
+ #define _NSS_ECC_STRING " Extended ECC"
+@@ -61,22 +61,22 @@
+ 
+ /*
+  * NSS's major version, minor version, patch level, build number, and whether
+  * this is a beta release.
+  *
+  * The format of the version string should be
+  *     "<major version>.<minor version>[.<patch level>[.<build number>]][ <ECC>][ <Beta>]"
+  */
+-#define NSS_VERSION  "3.12.10.0" _NSS_ECC_STRING _NSS_CUSTOMIZED " Beta"
++#define NSS_VERSION  "3.12.10.0" _NSS_ECC_STRING _NSS_CUSTOMIZED
+ #define NSS_VMAJOR   3
+ #define NSS_VMINOR   12
+ #define NSS_VPATCH   10
+ #define NSS_VBUILD   0
+-#define NSS_BETA     PR_TRUE
++#define NSS_BETA     PR_FALSE
+ 
+ #ifndef RC_INVOKED
+ 
+ #include "seccomon.h"
+ 
+ typedef struct NSSInitParametersStr NSSInitParameters;
+ 
+ /*
+diff --git a/security/nss/lib/softoken/softkver.h b/security/nss/lib/softoken/softkver.h
+--- a/security/nss/lib/softoken/softkver.h
++++ b/security/nss/lib/softoken/softkver.h
+@@ -52,16 +52,16 @@
+ 
+ /*
+  * Softoken's major version, minor version, patch level, build number,
+  * and whether this is a beta release.
+  *
+  * The format of the version string should be
+  *     "<major version>.<minor version>[.<patch level>[.<build number>]][ <ECC>][ <Beta>]"
+  */
+-#define SOFTOKEN_VERSION  "3.12.10.0" SOFTOKEN_ECC_STRING " Beta"
++#define SOFTOKEN_VERSION  "3.12.10.0" SOFTOKEN_ECC_STRING
+ #define SOFTOKEN_VMAJOR   3
+ #define SOFTOKEN_VMINOR   12
+ #define SOFTOKEN_VPATCH   10
+ #define SOFTOKEN_VBUILD   0
+-#define SOFTOKEN_BETA     PR_TRUE
++#define SOFTOKEN_BETA     PR_FALSE
+ 
+ #endif /* _SOFTKVER_H_ */
+diff --git a/security/nss/lib/util/nssutil.h b/security/nss/lib/util/nssutil.h
+--- a/security/nss/lib/util/nssutil.h
++++ b/security/nss/lib/util/nssutil.h
+@@ -46,16 +46,16 @@
+ 
+ /*
+  * NSS utilities's major version, minor version, patch level, build number,
+  * and whether this is a beta release.
+  *
+  * The format of the version string should be
+  *     "<major version>.<minor version>[.<patch level>[.<build number>]][ <Beta>]"
+  */
+-#define NSSUTIL_VERSION  "3.12.10.0 Beta"
++#define NSSUTIL_VERSION  "3.12.10.0"
+ #define NSSUTIL_VMAJOR   3
+ #define NSSUTIL_VMINOR   12
+ #define NSSUTIL_VPATCH   10
+ #define NSSUTIL_VBUILD   0
+-#define NSSUTIL_BETA     PR_TRUE
++#define NSSUTIL_BETA     PR_FALSE
+ 
+ #endif /* __nssutil_h_ */

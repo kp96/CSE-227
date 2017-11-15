@@ -1,0 +1,1589 @@
+diff --git a/security/manager/ssl/public/nsIX509Cert.idl b/security/manager/ssl/public/nsIX509Cert.idl
+--- a/security/manager/ssl/public/nsIX509Cert.idl
++++ b/security/manager/ssl/public/nsIX509Cert.idl
+@@ -209,35 +209,37 @@ interface nsIX509Cert : nsISupports {
+    *  @return The chain of certifficates including the issuers.
+    */
+   nsIArray getChain();
+ 
+   /**
+    *  Obtain an array of human readable strings describing
+    *  the certificate's certified usages.
+    *
+-   *  @param ignoreOcsp Do not use OCSP even if it is currently activated.
++   *  @param localOnly Do not hit the network, even if revocation information
++   *                   downloading is currently activated.
+    *  @param verified The certificate verification result, see constants.
+    *  @param count The number of human readable usages returned.
+    *  @param usages The array of human readable usages.
+    */
+-  void getUsagesArray(in boolean ignoreOcsp,
++  void getUsagesArray(in boolean localOnly,
+                       out PRUint32 verified,
+                       out PRUint32 count, 
+                       [array, size_is(count)] out wstring usages);
+ 
+   /**
+    *  Obtain a single comma separated human readable string describing
+    *  the certificate's certified usages.
+    *
+-   *  @param ignoreOcsp Do not use OCSP even if it is currently activated.
++   *  @param localOnly Do not hit the network, even if revocation information
++   *                   downloading is currently activated.
+    *  @param verified The certificate verification result, see constants.
+    *  @param purposes The string listing the usages.
+    */
+-  void getUsagesString(in boolean ignoreOcsp, out PRUint32 verified, out AString usages);
++  void getUsagesString(in boolean localOnly, out PRUint32 verified, out AString usages);
+ 
+   /**
+    *  Verify the certificate for a particular usage.
+    *
+    *  @return The certificate verification result, see constants.
+    */
+    unsigned long verifyForUsage(in unsigned long usage);
+ 
+diff --git a/security/manager/ssl/src/Makefile.in b/security/manager/ssl/src/Makefile.in
+--- a/security/manager/ssl/src/Makefile.in
++++ b/security/manager/ssl/src/Makefile.in
+@@ -50,16 +50,17 @@ LIBRARY_NAME	= pipnss
+ IS_COMPONENT	= 1
+ MODULE_NAME	= NSS
+ EXPORT_LIBRARY	= 1
+ META_COMPONENT	= crypto
+ GRE_MODULE	= 1
+ LIBXUL_LIBRARY	= 1
+ 
+ CPPSRCS = 				\
++	nsCERTValInParamWrapper.cpp     \
+ 	nsNSSCleaner.cpp                \
+ 	nsCertOverrideService.cpp   \
+ 	nsRecentBadCerts.cpp \
+         nsClientAuthRemember.cpp        \
+ 	nsPSMBackgroundThread.cpp       \
+ 	nsSSLThread.cpp                 \
+ 	nsCertVerificationThread.cpp    \
+ 	nsCipherInfo.cpp \
+diff --git a/security/manager/ssl/src/nsCERTValInParamWrapper.cpp b/security/manager/ssl/src/nsCERTValInParamWrapper.cpp
+new file mode 100644
+--- /dev/null
++++ b/security/manager/ssl/src/nsCERTValInParamWrapper.cpp
+@@ -0,0 +1,157 @@
++/* ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is mozilla.org code.
++ *
++ * The Initial Developer of the Original Code is
++ * Red Hat, Inc.
++ * Portions created by the Initial Developer are Copyright (C) 2011
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *   Kai Engert <kengert@redhat.com>
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either the GNU General Public License Version 2 or later (the "GPL"), or
++ * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++#include "nsCERTValInParamWrapper.h"
++
++NS_IMPL_THREADSAFE_ADDREF(nsCERTValInParamWrapper)
++NS_IMPL_THREADSAFE_RELEASE(nsCERTValInParamWrapper)
++
++nsCERTValInParamWrapper::nsCERTValInParamWrapper()
++:mAlreadyConstructed(PR_FALSE)
++,mCVIN(nsnull)
++,mRev(nsnull)
++{
++  MOZ_COUNT_CTOR(nsCERTValInParamWrapper);
++}
++
++nsCERTValInParamWrapper::~nsCERTValInParamWrapper()
++{
++  MOZ_COUNT_DTOR(nsCERTValInParamWrapper);
++  if (mRev) {
++    CERT_DestroyCERTRevocationFlags(mRev);
++  }
++  if (mCVIN)
++    PORT_Free(mCVIN);
++}
++
++nsresult nsCERTValInParamWrapper::Construct(missing_cert_download_config mcdc,
++                                            crl_download_config cdc,
++                                            ocsp_download_config odc,
++                                            ocsp_strict_config osc,
++                                            any_revo_fresh_config arfc,
++					    const char *firstNetworkRevocationMethod)
++{
++  if (mAlreadyConstructed)
++    return NS_ERROR_FAILURE;
++
++  CERTValInParam *p = (CERTValInParam*)PORT_Alloc(3 * sizeof(CERTValInParam));
++  if (!p)
++    return NS_ERROR_OUT_OF_MEMORY;
++
++  CERTRevocationFlags *rev = CERT_AllocCERTRevocationFlags(
++      cert_revocation_method_ocsp +1, 1,
++      cert_revocation_method_ocsp +1, 1);
++  
++  if (!rev) {
++    PORT_Free(p);
++    return NS_ERROR_OUT_OF_MEMORY;
++  }
++  
++  p[0].type = cert_pi_useAIACertFetch;
++  p[0].value.scalar.b = (mcdc == missing_cert_download_on);
++  p[1].type = cert_pi_revocationFlags;
++  p[1].value.pointer.revocation = rev;
++  p[2].type = cert_pi_end;
++  
++  rev->leafTests.cert_rev_flags_per_method[cert_revocation_method_crl] =
++  rev->chainTests.cert_rev_flags_per_method[cert_revocation_method_crl] =
++    // implicit default source - makes no sense for CRLs
++    CERT_REV_M_IGNORE_IMPLICIT_DEFAULT_SOURCE
++
++    // let's not stop on fresh CRL. If OCSP is enabled, too, let's check it
++    | CERT_REV_M_CONTINUE_TESTING_ON_FRESH_INFO
++
++    // no fresh CRL? well, let other flag decide whether to fail or not
++    | CERT_REV_M_IGNORE_MISSING_FRESH_INFO
++
++    // testing using local CRLs is always allowed
++    | CERT_REV_M_TEST_USING_THIS_METHOD
++
++    // no local crl and don't know where to get it from? ignore
++    | CERT_REV_M_SKIP_TEST_ON_MISSING_SOURCE
++
++    // crl download based on parameter
++    | ((cdc == crl_download_allowed) ?
++        CERT_REV_M_ALLOW_NETWORK_FETCHING : CERT_REV_M_FORBID_NETWORK_FETCHING)
++    ;
++
++  rev->leafTests.cert_rev_flags_per_method[cert_revocation_method_ocsp] =
++  rev->chainTests.cert_rev_flags_per_method[cert_revocation_method_ocsp] =
++    // is ocsp enabled at all?
++    ((odc == ocsp_on) ?
++      CERT_REV_M_TEST_USING_THIS_METHOD : CERT_REV_M_DO_NOT_TEST_USING_THIS_METHOD)
++
++    // ocsp enabled controls network fetching, too
++    | ((odc == ocsp_on) ?
++        CERT_REV_M_ALLOW_NETWORK_FETCHING : CERT_REV_M_FORBID_NETWORK_FETCHING)
++
++    // ocsp set to strict==required?
++    | ((osc == ocsp_strict) ?
++        CERT_REV_M_FAIL_ON_MISSING_FRESH_INFO : CERT_REV_M_IGNORE_MISSING_FRESH_INFO)
++
++    // if app has a default OCSP responder configured, let's use it
++    | CERT_REV_M_ALLOW_IMPLICIT_DEFAULT_SOURCE
++
++    // of course OCSP doesn't work without a source. let's accept such certs
++    | CERT_REV_M_SKIP_TEST_ON_MISSING_SOURCE
++
++    // ocsp success is sufficient
++    | CERT_REV_M_STOP_TESTING_ON_FRESH_INFO
++    ;
++
++  PRBool wantsCrlFirst = (firstNetworkRevocationMethod != nsnull)
++			 && (strcmp("crl", firstNetworkRevocationMethod) == 0);
++    
++  rev->leafTests.preferred_methods[0] =
++  rev->chainTests.preferred_methods[0] =
++    wantsCrlFirst ? cert_revocation_method_crl : cert_revocation_method_ocsp;
++
++  rev->leafTests.cert_rev_method_independent_flags =
++  rev->chainTests.cert_rev_method_independent_flags =
++    // avoiding the network is good, let's try local first
++    CERT_REV_MI_TEST_ALL_LOCAL_INFORMATION_FIRST
++
++    // is overall revocation requirement strict or relaxed?
++    | ((arfc == any_revo_strict) ?
++        CERT_REV_MI_REQUIRE_SOME_FRESH_INFO_AVAILABLE : CERT_REV_MI_NO_OVERALL_INFO_REQUIREMENT)
++    ;
++
++  mAlreadyConstructed = PR_TRUE;
++  mCVIN = p;
++  mRev = rev;
++  return NS_OK;
++}
+diff --git a/security/manager/ssl/src/nsCERTValInParamWrapper.h b/security/manager/ssl/src/nsCERTValInParamWrapper.h
+new file mode 100644
+--- /dev/null
++++ b/security/manager/ssl/src/nsCERTValInParamWrapper.h
+@@ -0,0 +1,102 @@
++/* ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is mozilla.org code.
++ *
++ * The Initial Developer of the Original Code is
++ * Red Hat, Inc.
++ * Portions created by the Initial Developer are Copyright (C) 2011
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *   Kai Engert <kengert@redhat.com>
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either the GNU General Public License Version 2 or later (the "GPL"), or
++ * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++#ifndef _nsCERTValInParamWrapper_H
++#define _nsCERTValInParamWrapper_H
++
++#include "nsISupports.h"
++#include "cert.h"
++
++/*
++ * This is a wrapper around type
++ * CERTValInParam is a nested input parameter type for CERT_PKIXVerifyCert.
++ * The values inside this type depend on application preferences,
++ * as a consequence it's expensive to construct this object.
++ * (and we shall avoid to access prefs from secondary threads anyway).
++ * We want to create an instance of that input type once, and use as long as possible.
++ * Every time the preferences change, we will create a new default object.
++ *
++ * A race is possible between "verification function is active and object in use"
++ * and "must switch to new defaults".
++ *
++ * The global default object may be replaced at any time with a new object.
++ * The contents of inner CERTValInParam are supposed to be stable (const).
++ *
++ * In order to protect against the race, we use a reference counted wrapper.
++ * Each user of a foreign nsCERTValInParamWrapper object
++ * (e.g. the current global default object)
++ * must use nsRefPtr<nsCERTValInParamWrapper> = other-object
++ * prior to calling CERT_PKIXVerifyCert.
++ * 
++ * This guarantees the object will still be alive after the call,
++ * and if the default object has been replaced in the meantime,
++ * the reference counter will go to zero, and the old default
++ * object will get destroyed automatically.
++ */
++class nsCERTValInParamWrapper
++{
++ public:
++    NS_IMETHOD_(nsrefcnt) AddRef();
++    NS_IMETHOD_(nsrefcnt) Release();
++
++public:
++  nsCERTValInParamWrapper();
++  virtual ~nsCERTValInParamWrapper();
++
++  enum missing_cert_download_config { missing_cert_download_off = 0, missing_cert_download_on };
++  enum crl_download_config { crl_local_only = 0, crl_download_allowed };
++  enum ocsp_download_config { ocsp_off = 0, ocsp_on };
++  enum ocsp_strict_config { ocsp_relaxed = 0, ocsp_strict };
++  enum any_revo_fresh_config { any_revo_relaxed = 0, any_revo_strict };
++
++  nsresult Construct(missing_cert_download_config ac, crl_download_config cdc,
++                     ocsp_download_config odc, ocsp_strict_config osc,
++                     any_revo_fresh_config arfc,
++		     const char *firstNetworkRevocationMethod);
++
++private:
++  nsAutoRefCnt mRefCnt;
++  NS_DECL_OWNINGTHREAD
++  PRBool mAlreadyConstructed;
++  CERTValInParam *mCVIN;
++  CERTRevocationFlags *mRev;
++  
++public:
++  CERTValInParam *GetRawPointerForNSS() { return mCVIN; }
++};
++
++#endif
+diff --git a/security/manager/ssl/src/nsCMS.cpp b/security/manager/ssl/src/nsCMS.cpp
+--- a/security/manager/ssl/src/nsCMS.cpp
++++ b/security/manager/ssl/src/nsCMS.cpp
+@@ -41,23 +41,26 @@
+ #include "nsNSSHelper.h"
+ #include "nsNSSCertificate.h"
+ #include "smime.h"
+ #include "cms.h"
+ #include "nsICMSMessageErrors.h"
+ #include "nsIArray.h"
+ #include "nsArrayUtils.h"
+ #include "nsCertVerificationThread.h"
++#include "nsCERTValInParamWrapper.h"
+ 
+ #include "prlog.h"
+ #ifdef PR_LOGGING
+ extern PRLogModuleInfo* gPIPNSSLog;
+ #endif
+ 
+ #include "nsNSSCleaner.h"
++#include "nsNSSComponent.h"
++static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID);
+ 
+ NSSCleanupAutoPtrClass(CERTCertificate, CERT_DestroyCertificate)
+ 
+ NS_IMPL_THREADSAFE_ISUPPORTS2(nsCMSMessage, nsICMSMessage, 
+                                             nsICMSMessage2)
+ 
+ nsCMSMessage::nsCMSMessage()
+ {
+@@ -242,16 +245,18 @@ nsresult nsCMSMessage::CommonVerifySigna
+     return NS_ERROR_NOT_AVAILABLE;
+ 
+   PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CommonVerifySignature, content level count %d\n", NSS_CMSMessage_ContentLevelCount(m_cmsMsg)));
+   NSSCMSContentInfo *cinfo = nsnull;
+   NSSCMSSignedData *sigd = nsnull;
+   NSSCMSSignerInfo *si;
+   PRInt32 nsigners;
+   nsresult rv = NS_ERROR_FAILURE;
++  nsRefPtr<nsCERTValInParamWrapper> survivingParams;
++  nsCOMPtr<nsINSSComponent> inss;
+ 
+   if (!NSS_CMSMessage_IsSigned(m_cmsMsg)) {
+     PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CommonVerifySignature - not signed\n"));
+     return NS_ERROR_CMS_VERIFY_NOT_SIGNED;
+   } 
+ 
+   cinfo = NSS_CMSMessage_ContentLevel(m_cmsMsg, 0);
+   if (cinfo) {
+@@ -282,26 +287,49 @@ nsresult nsCMSMessage::CommonVerifySigna
+   if (NSS_CMSSignedData_ImportCerts(sigd, CERT_GetDefaultCertDB(), certUsageEmailRecipient, PR_TRUE) != SECSuccess) {
+     PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CommonVerifySignature - can not import certs\n"));
+   }
+ 
+   nsigners = NSS_CMSSignedData_SignerInfoCount(sigd);
+   PR_ASSERT(nsigners > 0);
+   si = NSS_CMSSignedData_GetSignerInfo(sigd, 0);
+ 
+-
+   // See bug 324474. We want to make sure the signing cert is 
+   // still valid at the current time.
++
++if (!nsNSSComponent::globalConstFlagUsePKIXVerification) {
+   if (CERT_VerifyCertificateNow(CERT_GetDefaultCertDB(), si->cert, PR_TRUE, 
+                                 certificateUsageEmailSigner,
+                                 si->cmsg->pwfn_arg, NULL) != SECSuccess) {
+     PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CommonVerifySignature - signing cert not trusted now\n"));
+     rv = NS_ERROR_CMS_VERIFY_UNTRUSTED;
+     goto loser;
+   }
++}
++else {
++  CERTValOutParam cvout[1];
++  cvout[0].type = cert_po_end;
++
++  inss = do_GetService(kNSSComponentCID, &rv);
++  if (!inss) {
++    goto loser;
++  }
++
++  if (NS_FAILED(inss->GetDefaultCERTValInParam(survivingParams))) {
++    goto loser;
++  }
++  rv = CERT_PKIXVerifyCert(si->cert, certificateUsageEmailSigner,
++                           survivingParams->GetRawPointerForNSS(),
++                           cvout, si->cmsg->pwfn_arg);
++  if (rv != SECSuccess) {
++    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CommonVerifySignature - signing cert not trusted now\n"));
++    rv = NS_ERROR_CMS_VERIFY_UNTRUSTED;
++    goto loser;
++  }
++}
+ 
+   // We verify the first signer info,  only //
+   if (NSS_CMSSignedData_VerifySignerInfo(sigd, 0, CERT_GetDefaultCertDB(), certUsageEmailSigner) != SECSuccess) {
+     PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CommonVerifySignature - unable to verify signature\n"));
+ 
+     if (NSSCMSVS_SigningCertNotFound == si->verificationStatus) {
+       PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CommonVerifySignature - signing cert not found\n"));
+       rv = NS_ERROR_CMS_VERIFY_NOCERT;
+diff --git a/security/manager/ssl/src/nsNSSCallbacks.cpp b/security/manager/ssl/src/nsNSSCallbacks.cpp
+--- a/security/manager/ssl/src/nsNSSCallbacks.cpp
++++ b/security/manager/ssl/src/nsNSSCallbacks.cpp
+@@ -70,16 +70,17 @@
+ #include "nsProxyRelease.h"
+ #include "nsIConsoleService.h"
+ 
+ #include "ssl.h"
+ #include "cert.h"
+ #include "ocsp.h"
+ #include "nssb64.h"
+ #include "secerr.h"
++#include "sslerr.h"
+ 
+ using namespace mozilla;
+ 
+ static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID);
+ NSSCleanupAutoPtrClass(CERTCertificate, CERT_DestroyCertificate)
+ 
+ #ifdef PR_LOGGING
+ extern PRLogModuleInfo* gPIPNSSLog;
+@@ -953,16 +954,70 @@ void PR_CALLBACK HandshakeCallback(PRFil
+     status->mCipherName.Assign(cipherName);
+   }
+ 
+   PORT_Free(cipherName);
+   PR_FREEIF(certOrgName);
+   PR_Free(signer);
+ }
+ 
++SECStatus
++PSM_SSL_PKIX_AuthCertificate(PRFileDesc *fd, CERTCertificate *peerCert, PRBool checksig, PRBool isServer)
++{
++    SECStatus          rv;
++    SECCertUsage       certUsage;
++    SECCertificateUsage certificateusage;
++    void *             pinarg;
++    char *             hostname;
++    
++    pinarg = SSL_RevealPinArg(fd);
++    hostname = SSL_RevealURL(fd);
++    
++    /* this may seem backwards, but isn't. */
++    certUsage = isServer ? certUsageSSLClient : certUsageSSLServer;
++    certificateusage = isServer ? certificateUsageSSLClient : certificateUsageSSLServer;
++
++if (!nsNSSComponent::globalConstFlagUsePKIXVerification) {
++    rv = CERT_VerifyCertNow(CERT_GetDefaultCertDB(), peerCert, checksig, certUsage,
++                            pinarg);
++}
++else {
++    nsresult nsrv;
++    nsCOMPtr<nsINSSComponent> inss = do_GetService(kNSSComponentCID, &nsrv);
++    if (!inss)
++      return SECFailure;
++    nsRefPtr<nsCERTValInParamWrapper> survivingParams;
++    if (NS_FAILED(inss->GetDefaultCERTValInParam(survivingParams)))
++      return SECFailure;
++
++    CERTValOutParam cvout[1];
++    cvout[0].type = cert_po_end;
++
++    rv = CERT_PKIXVerifyCert(peerCert, certificateusage,
++                             survivingParams->GetRawPointerForNSS(),
++                             cvout, pinarg);
++}
++
++    if ( rv == SECSuccess && isServer ) {
++        /* cert is OK.  This is the client side of an SSL connection.
++        * Now check the name field in the cert against the desired hostname.
++        * NB: This is our only defense against Man-In-The-Middle (MITM) attacks!
++        */
++        if (hostname && hostname[0])
++            rv = CERT_VerifyCertName(peerCert, hostname);
++        else
++            rv = SECFailure;
++        if (rv != SECSuccess)
++            PORT_SetError(SSL_ERROR_BAD_CERT_DOMAIN);
++    }
++        
++    PORT_Free(hostname);
++    return rv;
++}
++
+ struct nsSerialBinaryBlacklistEntry
+ {
+   unsigned int len;
+   const char *binary_serial;
+ };
+ 
+ // bug 642395
+ static struct nsSerialBinaryBlacklistEntry myUTNBlacklistEntries[] = {
+@@ -1020,18 +1075,17 @@ SECStatus PR_CALLBACK AuthCertificateCal
+       if (server_cert_comparison_len == locked_cert_comparison_len &&
+           !memcmp(server_cert_comparison_start, locked_cert_comparison_start, locked_cert_comparison_len)) {
+         PR_SetError(SEC_ERROR_REVOKED_CERTIFICATE, 0);
+         return SECFailure;
+       }
+     }
+   }
+   
+-  // first the default action
+-  SECStatus rv = SSL_AuthCertificate(CERT_GetDefaultCertDB(), fd, checksig, isServer);
++  SECStatus rv = PSM_SSL_PKIX_AuthCertificate(fd, serverCert, checksig, isServer);
+ 
+   // We want to remember the CA certs in the temp db, so that the application can find the
+   // complete chain at any time it might need it.
+   // But we keep only those CA certs in the temp db, that we didn't already know.
+ 
+   if (serverCert) {
+     nsNSSSocketInfo* infoObject = (nsNSSSocketInfo*) fd->higher->secret;
+     nsRefPtr<nsSSLStatus> status = infoObject->SSLStatus();
+diff --git a/security/manager/ssl/src/nsNSSCertificate.cpp b/security/manager/ssl/src/nsNSSCertificate.cpp
+--- a/security/manager/ssl/src/nsNSSCertificate.cpp
++++ b/security/manager/ssl/src/nsNSSCertificate.cpp
+@@ -1284,16 +1284,25 @@ NS_IMETHODIMP
+ nsNSSCertificate::VerifyForUsage(PRUint32 usage, PRUint32 *verificationResult)
+ {
+   nsNSSShutDownPreventionLock locker;
+   if (isAlreadyShutDown())
+     return NS_ERROR_NOT_AVAILABLE;
+ 
+   NS_ENSURE_ARG(verificationResult);
+ 
++  nsresult nsrv;
++  nsCOMPtr<nsINSSComponent> inss = do_GetService(kNSSComponentCID, &nsrv);
++  if (!inss)
++    return nsrv;
++  nsRefPtr<nsCERTValInParamWrapper> survivingParams;
++  nsrv = inss->GetDefaultCERTValInParam(survivingParams);
++  if (NS_FAILED(nsrv))
++    return nsrv;
++  
+   SECCertificateUsage nss_usage;
+   
+   switch (usage)
+   {
+     case CERT_USAGE_SSLClient:
+       nss_usage = certificateUsageSSLClient;
+       break;
+ 
+@@ -1340,20 +1349,31 @@ nsNSSCertificate::VerifyForUsage(PRUint3
+     case CERT_USAGE_AnyCA:
+       nss_usage = certificateUsageAnyCA;
+       break;
+ 
+     default:
+       return NS_ERROR_FAILURE;
+   }
+ 
++  SECStatus verify_result;
++if (!nsNSSComponent::globalConstFlagUsePKIXVerification) {
+   CERTCertDBHandle *defaultcertdb = CERT_GetDefaultCertDB();
+-
+-  if (CERT_VerifyCertificateNow(defaultcertdb, mCert, PR_TRUE, 
+-                         nss_usage, NULL, NULL) == SECSuccess)
++  verify_result = CERT_VerifyCertificateNow(defaultcertdb, mCert, PR_TRUE, 
++					    nss_usage, NULL, NULL);
++}
++else {
++  CERTValOutParam cvout[1];
++  cvout[0].type = cert_po_end;
++  verify_result = CERT_PKIXVerifyCert(mCert, nss_usage,
++				      survivingParams->GetRawPointerForNSS(),
++				      cvout, NULL);
++}
++  
++  if (verify_result == SECSuccess)
+   {
+     *verificationResult = VERIFIED_OK;
+   }
+   else
+   {
+     int err = PR_GetError();
+ 
+     // this list was cloned from verifyFailed
+@@ -1396,32 +1416,32 @@ nsNSSCertificate::VerifyForUsage(PRUint3
+     }
+   }
+   
+   return NS_OK;  
+ }
+ 
+ 
+ NS_IMETHODIMP
+-nsNSSCertificate::GetUsagesArray(PRBool ignoreOcsp,
++nsNSSCertificate::GetUsagesArray(PRBool localOnly,
+                                  PRUint32 *_verified,
+                                  PRUint32 *_count,
+                                  PRUnichar ***_usages)
+ {
+   nsNSSShutDownPreventionLock locker;
+   if (isAlreadyShutDown())
+     return NS_ERROR_NOT_AVAILABLE;
+ 
+   nsresult rv;
+   const int max_usages = 13;
+   PRUnichar *tmpUsages[max_usages];
+   const char *suffix = "";
+   PRUint32 tmpCount;
+   nsUsageArrayHelper uah(mCert);
+-  rv = uah.GetUsagesArray(suffix, ignoreOcsp, max_usages, _verified, &tmpCount, tmpUsages);
++  rv = uah.GetUsagesArray(suffix, localOnly, max_usages, _verified, &tmpCount, tmpUsages);
+   NS_ENSURE_SUCCESS(rv,rv);
+   if (tmpCount > 0) {
+     *_usages = (PRUnichar **)nsMemory::Alloc(sizeof(PRUnichar *) * tmpCount);
+     if (!*_usages)
+       return NS_ERROR_OUT_OF_MEMORY;
+     for (PRUint32 i=0; i<tmpCount; i++) {
+       (*_usages)[i] = tmpUsages[i];
+     }
+@@ -1451,31 +1471,31 @@ nsNSSCertificate::RequestUsagesArrayAsyn
+   nsresult rv = nsCertVerificationThread::addJob(job);
+   if (NS_FAILED(rv))
+     delete job;
+ 
+   return rv;
+ }
+ 
+ NS_IMETHODIMP
+-nsNSSCertificate::GetUsagesString(PRBool ignoreOcsp,
++nsNSSCertificate::GetUsagesString(PRBool localOnly,
+                                   PRUint32   *_verified,
+                                   nsAString &_usages)
+ {
+   nsNSSShutDownPreventionLock locker;
+   if (isAlreadyShutDown())
+     return NS_ERROR_NOT_AVAILABLE;
+ 
+   nsresult rv;
+   const int max_usages = 13;
+   PRUnichar *tmpUsages[max_usages];
+   const char *suffix = "_p";
+   PRUint32 tmpCount;
+   nsUsageArrayHelper uah(mCert);
+-  rv = uah.GetUsagesArray(suffix, ignoreOcsp, max_usages, _verified, &tmpCount, tmpUsages);
++  rv = uah.GetUsagesArray(suffix, localOnly, max_usages, _verified, &tmpCount, tmpUsages);
+   NS_ENSURE_SUCCESS(rv,rv);
+   _usages.Truncate();
+   for (PRUint32 i=0; i<tmpCount; i++) {
+     if (i>0) _usages.AppendLiteral(",");
+     _usages.Append(tmpUsages[i]);
+     nsMemory::Free(tmpUsages[i]);
+   }
+   return NS_OK;
+diff --git a/security/manager/ssl/src/nsNSSCertificateDB.cpp b/security/manager/ssl/src/nsNSSCertificateDB.cpp
+--- a/security/manager/ssl/src/nsNSSCertificateDB.cpp
++++ b/security/manager/ssl/src/nsNSSCertificateDB.cpp
+@@ -528,32 +528,42 @@ nsNSSCertificateDB::ImportEmailCertifica
+   SECStatus srv = SECFailure;
+   nsresult nsrv = NS_OK;
+   CERTCertDBHandle *certdb;
+   CERTCertificate **certArray = NULL;
+   CERTCertList *certList = NULL;
+   CERTCertListNode *node;
+   PRTime now;
+   SECCertUsage certusage;
++  SECCertificateUsage certificateusage;
+   SECItem **rawArray;
+   int numcerts;
+   int i;
++  
++  nsCOMPtr<nsINSSComponent> inss = do_GetService(kNSSComponentCID, &nsrv);
++  if (!inss)
++    return nsrv;
++  nsRefPtr<nsCERTValInParamWrapper> survivingParams;
++  nsrv = inss->GetDefaultCERTValInParam(survivingParams);
++  if (NS_FAILED(nsrv))
++    return nsrv;
+  
+   PRArenaPool *arena = PORT_NewArena(DER_DEFAULT_CHUNKSIZE);
+   if (!arena)
+     return NS_ERROR_OUT_OF_MEMORY;
+ 
+   CERTDERCerts *certCollection = getCertsFromPackage(arena, data, length);
+   if (!certCollection) {
+     PORT_FreeArena(arena, PR_FALSE);
+     return NS_ERROR_FAILURE;
+   }
+ 
+   certdb = CERT_GetDefaultCertDB();
+   certusage = certUsageEmailRecipient;
++  certificateusage = certificateUsageEmailRecipient;
+ 
+   numcerts = certCollection->numcerts;
+ 
+   rawArray = (SECItem **) PORT_Alloc(sizeof(SECItem *) * numcerts);
+   if ( !rawArray ) {
+     nsrv = NS_ERROR_FAILURE;
+     goto loser;
+   }
+@@ -586,30 +596,43 @@ nsNSSCertificateDB::ImportEmailCertifica
+     if (cert)
+       CERT_AddCertToListTail(certList, cert);
+   }
+ 
+   /* go down the remaining list of certs and verify that they have
+    * valid chains, then import them.
+    */
+   now = PR_Now();
++  CERTValOutParam cvout[1];
++  cvout[0].type = cert_po_end;
++
+   for (node = CERT_LIST_HEAD(certList);
+        !CERT_LIST_END(node,certList);
+        node = CERT_LIST_NEXT(node)) {
+ 
+     bool alert_and_skip = false;
+ 
+     if (!node->cert) {
+       continue;
+     }
+ 
+-    if (CERT_VerifyCert(certdb, node->cert, 
++if (!nsNSSComponent::globalConstFlagUsePKIXVerification) {
++    if (CERT_VerifyCert(certdb, node->cert,
+         PR_TRUE, certusage, now, ctx, NULL) != SECSuccess) {
+       alert_and_skip = true;
+     }
++}
++else {
++    if (CERT_PKIXVerifyCert(node->cert, certificateusage,
++                            survivingParams->GetRawPointerForNSS(),
++                            cvout, ctx)
++        != SECSuccess) {
++      alert_and_skip = true;
++    }
++}
+ 
+     CERTCertificateList *certChain = nsnull;
+     CERTCertificateListCleaner chainCleaner(certChain);
+ 
+     if (!alert_and_skip) {
+       certChain = CERT_CertChainFromCert(node->cert, certusage, PR_FALSE);
+       if (!certChain) {
+         alert_and_skip = true;
+@@ -769,38 +792,58 @@ nsNSSCertificateDB::ImportValidCACerts(i
+ 
+   return ImportValidCACertsInList(certList, ctx);
+ }
+ 
+ nsresult
+ nsNSSCertificateDB::ImportValidCACertsInList(CERTCertList *certList, nsIInterfaceRequestor *ctx)
+ {
+   SECItem **rawArray;
++  nsresult nsrv;
++  nsCOMPtr<nsINSSComponent> inss = do_GetService(kNSSComponentCID, &nsrv);
++  if (!inss)
++    return nsrv;
++  nsRefPtr<nsCERTValInParamWrapper> survivingParams;
++  nsrv = inss->GetDefaultCERTValInParam(survivingParams);
++  if (NS_FAILED(nsrv))
++    return nsrv;
+ 
+   /* filter out the certs we don't want */
+   SECStatus srv = CERT_FilterCertListByUsage(certList, certUsageAnyCA, PR_TRUE);
+   if (srv != SECSuccess) {
+     return NS_ERROR_FAILURE;
+   }
+ 
+   /* go down the remaining list of certs and verify that they have
+    * valid chains, if yes, then import.
+    */
+-  PRTime now = PR_Now();
+   CERTCertListNode *node;
++  CERTValOutParam cvout[1];
++  cvout[0].type = cert_po_end;
++
+   for (node = CERT_LIST_HEAD(certList);
+        !CERT_LIST_END(node,certList);
+        node = CERT_LIST_NEXT(node)) {
+ 
+     bool alert_and_skip = false;
+ 
++if (!nsNSSComponent::globalConstFlagUsePKIXVerification) {
+     if (CERT_VerifyCert(CERT_GetDefaultCertDB(), node->cert, 
+-        PR_TRUE, certUsageVerifyCA, now, ctx, NULL) != SECSuccess) {
++        PR_TRUE, certUsageVerifyCA, PR_Now(), ctx, NULL) != SECSuccess) {
+       alert_and_skip = true;
+     }
++}
++else {
++    if (CERT_PKIXVerifyCert(node->cert, certificateUsageVerifyCA,
++                            survivingParams->GetRawPointerForNSS(),
++                            cvout, ctx)
++        != SECSuccess) {
++      alert_and_skip = true;
++    }
++}
+ 
+     CERTCertificateList *certChain = nsnull;
+     CERTCertificateListCleaner chainCleaner(certChain);
+ 
+     if (!alert_and_skip) {    
+       certChain = CERT_CertChainFromCert(node->cert, certUsageAnyCA, PR_FALSE);
+       if (!certChain) {
+         alert_and_skip = true;
+diff --git a/security/manager/ssl/src/nsNSSCertificateFakeTransport.cpp b/security/manager/ssl/src/nsNSSCertificateFakeTransport.cpp
+--- a/security/manager/ssl/src/nsNSSCertificateFakeTransport.cpp
++++ b/security/manager/ssl/src/nsNSSCertificateFakeTransport.cpp
+@@ -279,34 +279,34 @@ nsNSSCertificateFakeTransport::GetValidi
+ NS_IMETHODIMP
+ nsNSSCertificateFakeTransport::VerifyForUsage(PRUint32 usage, PRUint32 *verificationResult)
+ {
+   NS_NOTREACHED("Unimplemented on content process");
+   return NS_ERROR_NOT_IMPLEMENTED;
+ }
+ 
+ NS_IMETHODIMP
+-nsNSSCertificateFakeTransport::GetUsagesArray(PRBool ignoreOcsp,
++nsNSSCertificateFakeTransport::GetUsagesArray(PRBool localOnly,
+                                  PRUint32 *_verified,
+                                  PRUint32 *_count,
+                                  PRUnichar ***_usages)
+ {
+   NS_NOTREACHED("Unimplemented on content process");
+   return NS_ERROR_NOT_IMPLEMENTED;
+ }
+ 
+ NS_IMETHODIMP
+ nsNSSCertificateFakeTransport::RequestUsagesArrayAsync(nsICertVerificationListener *aResultListener)
+ {
+   NS_NOTREACHED("Unimplemented on content process");
+   return NS_ERROR_NOT_IMPLEMENTED;
+ }
+ 
+ NS_IMETHODIMP
+-nsNSSCertificateFakeTransport::GetUsagesString(PRBool ignoreOcsp,
++nsNSSCertificateFakeTransport::GetUsagesString(PRBool localOnly,
+                                   PRUint32   *_verified,
+                                   nsAString &_usages)
+ {
+   NS_NOTREACHED("Unimplemented on content process");
+   return NS_ERROR_NOT_IMPLEMENTED;
+ }
+ 
+ /* readonly attribute nsIASN1Object ASN1Structure; */
+diff --git a/security/manager/ssl/src/nsNSSComponent.cpp b/security/manager/ssl/src/nsNSSComponent.cpp
+--- a/security/manager/ssl/src/nsNSSComponent.cpp
++++ b/security/manager/ssl/src/nsNSSComponent.cpp
+@@ -112,16 +112,17 @@
+ #include "sechash.h"
+ #include "secmime.h"
+ #include "ocsp.h"
+ #include "cms.h"
+ #include "nssckbi.h"
+ #include "base64.h"
+ #include "secerr.h"
+ #include "sslerr.h"
++#include "cert.h"
+ 
+ #include "nsXULAppAPI.h"
+ 
+ #ifdef XP_WIN
+ #include "nsILocalFileWin.h"
+ #endif
+ 
+ extern "C" {
+@@ -134,25 +135,25 @@ using namespace mozilla;
+ #ifdef PR_LOGGING
+ PRLogModuleInfo* gPIPNSSLog = nsnull;
+ #endif
+ 
+ #define NS_CRYPTO_HASH_BUFFER_SIZE 4096
+ 
+ static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID);
+ int nsNSSComponent::mInstanceCount = 0;
++PRBool nsNSSComponent::globalConstFlagUsePKIXVerification = PR_FALSE;
+ 
+ // XXX tmp callback for slot password
+ extern char * PR_CALLBACK 
+ pk11PasswordPrompt(PK11SlotInfo *slot, PRBool retry, void *arg);
+ 
+ #define PIPNSS_STRBUNDLE_URL "chrome://pipnss/locale/pipnss.properties"
+ #define NSSERR_STRBUNDLE_URL "chrome://pipnss/locale/nsserrors.properties"
+ 
+-
+ static PLHashNumber PR_CALLBACK certHashtable_keyHash(const void *key)
+ {
+   if (!key)
+     return 0;
+   
+   SECItem *certKey = (SECItem*)key;
+   
+   // lazy hash function, sum up all char values of SECItem
+@@ -584,18 +585,16 @@ nsNSSComponent::DispatchEventToWindow(ns
+   }
+ 
+   PRBool boolrv;
+   rv = target->DispatchEvent(smartCardEvent, &boolrv);
+   return rv;
+ }
+ 
+ 
+-static void setOCSPOptions(nsIPrefBranch * pref);
+-
+ NS_IMETHODIMP
+ nsNSSComponent::PIPBundleFormatStringFromName(const char *name,
+                                               const PRUnichar **params,
+                                               PRUint32 numParams,
+                                               nsAString &outString)
+ {
+   nsresult rv = NS_ERROR_FAILURE;
+ 
+@@ -666,31 +665,41 @@ nsNSSComponent::GetNSSBundleString(const
+       outString = result;
+       rv = NS_OK;
+     }
+   }
+ 
+   return rv;
+ }
+ 
+-
+ NS_IMETHODIMP
+ nsNSSComponent::SkipOcsp()
+ {
+   nsNSSShutDownPreventionLock locker;
+   CERTCertDBHandle *certdb = CERT_GetDefaultCertDB();
+ 
+   SECStatus rv = CERT_DisableOCSPChecking(certdb);
+   return (rv == SECSuccess) ? NS_OK : NS_ERROR_FAILURE;
+ }
+ 
+ NS_IMETHODIMP
+ nsNSSComponent::SkipOcspOff()
+ {
+-  setOCSPOptions(mPrefBranch);
++  nsNSSShutDownPreventionLock locker;
++  PRInt32 ocspEnabled;
++  if (NS_FAILED(mPrefBranch->GetIntPref("security.OCSP.enabled", &ocspEnabled)))
++    ocspEnabled = OCSP_ENABLED_DEFAULT;
++  // 0 = disabled, 1 = enabled, 
++  // 2 = enabled with given default responder
++  
++  setNonPkixOcspEnabled(ocspEnabled, mPrefBranch);
++
++  if (ocspEnabled)
++    SSL_ClearSessionCache();
++
+   return NS_OK;
+ }
+ 
+ void
+ nsNSSComponent::LaunchSmartCardThreads()
+ {
+   nsNSSShutDownPreventionLock locker;
+   {
+@@ -1106,60 +1115,124 @@ nsresult nsNSSComponent::GetNSSCipherIDF
+       aCipherId = (PRUint16) cp->id;
+       return NS_OK;
+     }
+   }
+   
+   return NS_ERROR_NOT_AVAILABLE;
+ }
+ 
+-static void setOCSPOptions(nsIPrefBranch * pref)
++static void
++setNonPkixOcspEnabled(PRInt32 ocspEnabled, nsIPrefBranch * pref)
+ {
+-  nsNSSShutDownPreventionLock locker;
+-  // Set up OCSP //
+-  PRInt32 ocspEnabled;
+-  pref->GetIntPref("security.OCSP.enabled", &ocspEnabled);
+   switch (ocspEnabled) {
+   case 0:
+     CERT_DisableOCSPChecking(CERT_GetDefaultCertDB());
+     CERT_DisableOCSPDefaultResponder(CERT_GetDefaultCertDB());
+     break;
+   case 1:
+     CERT_EnableOCSPChecking(CERT_GetDefaultCertDB());
+     CERT_DisableOCSPDefaultResponder(CERT_GetDefaultCertDB());
+-    SSL_ClearSessionCache();
+     break;
+   case 2:
+     {
+       char *signingCA = nsnull;
+       char *url = nsnull;
+ 
+       // Get the signing CA and service url //
+       pref->GetCharPref("security.OCSP.signingCA", &signingCA);
+       pref->GetCharPref("security.OCSP.URL", &url);
+ 
+       // Set OCSP up
+       CERT_EnableOCSPChecking(CERT_GetDefaultCertDB());
+       CERT_SetOCSPDefaultResponder(CERT_GetDefaultCertDB(), url, signingCA);
+       CERT_EnableOCSPDefaultResponder(CERT_GetDefaultCertDB());
+-      SSL_ClearSessionCache();
+ 
+       nsMemory::Free(signingCA);
+       nsMemory::Free(url);
+     }
+     break;
+   }
++}
++
++#define CRL_DOWNLOAD_DEFAULT PR_FALSE
++#define OCSP_ENABLED_DEFAULT 1
++#define OCSP_REQUIRED_DEFAULT 0
++#define FRESH_REVOCATION_REQUIRED_DEFAULT PR_FALSE
++#define MISSING_CERT_DOWNLOAD_DEFAULT PR_FALSE
++#define FIRST_REVO_METHOD_DEFAULT "ocsp"
++#define USE_NSS_LIBPKIX_DEFAULT PR_FALSE
++
++// Caller must hold a lock on nsNSSComponent::mutex when calling this function
++void nsNSSComponent::setValidationOptions(nsIPrefBranch * pref)
++{
++  nsNSSShutDownPreventionLock locker;
++  nsresult rv;
++
++  PRBool crlDownloading;
++  rv = pref->GetBoolPref("security.CRL_download.enabled", &crlDownloading);
++  if (NS_FAILED(rv))
++    crlDownloading = CRL_DOWNLOAD_DEFAULT;
++  
++  PRInt32 ocspEnabled;
++  rv = pref->GetIntPref("security.OCSP.enabled", &ocspEnabled);
++  // 0 = disabled, 1 = enabled, 
++  // 2 = enabled with given default responder
++  if (NS_FAILED(rv))
++    ocspEnabled = OCSP_ENABLED_DEFAULT;
++
+   PRBool ocspRequired;
+-  pref->GetBoolPref("security.OCSP.require", &ocspRequired);
+-  if (ocspRequired) {
+-    CERT_SetOCSPFailureMode(ocspMode_FailureIsVerificationFailure);
++  rv = pref->GetBoolPref("security.OCSP.require", &ocspRequired);
++  if (NS_FAILED(rv))
++    ocspRequired = OCSP_REQUIRED_DEFAULT;
++
++  PRBool anyFreshRequired;
++  rv = pref->GetBoolPref("security.fresh_revocation_info.require", &anyFreshRequired);
++  if (NS_FAILED(rv))
++    anyFreshRequired = FRESH_REVOCATION_REQUIRED_DEFAULT;
++  
++  PRBool aiaDownloadEnabled;
++  rv = pref->GetBoolPref("security.missing_cert_download.enabled", &aiaDownloadEnabled);
++  if (NS_FAILED(rv))
++    aiaDownloadEnabled = MISSING_CERT_DOWNLOAD_DEFAULT;
++
++  nsCString firstNetworkRevo;
++  rv = pref->GetCharPref("security.first_network_revocation_method", getter_Copies(firstNetworkRevo));
++  if (NS_FAILED(rv))
++    firstNetworkRevo = FIRST_REVO_METHOD_DEFAULT;
++  
++  setNonPkixOcspEnabled(ocspEnabled, pref);
++  
++  CERT_SetOCSPFailureMode( ocspRequired ?
++                           ocspMode_FailureIsVerificationFailure
++                           : ocspMode_FailureIsNotAVerificationFailure);
++
++  nsRefPtr<nsCERTValInParamWrapper> newCVIN = new nsCERTValInParamWrapper;
++  if (NS_SUCCEEDED(newCVIN->Construct(
++      aiaDownloadEnabled ? 
++        nsCERTValInParamWrapper::missing_cert_download_on : nsCERTValInParamWrapper::missing_cert_download_off,
++      crlDownloading ?
++        nsCERTValInParamWrapper::crl_download_allowed : nsCERTValInParamWrapper::crl_local_only,
++      ocspEnabled ? 
++        nsCERTValInParamWrapper::ocsp_on : nsCERTValInParamWrapper::ocsp_off,
++      ocspRequired ? 
++        nsCERTValInParamWrapper::ocsp_strict : nsCERTValInParamWrapper::ocsp_relaxed,
++      anyFreshRequired ?
++        nsCERTValInParamWrapper::any_revo_strict : nsCERTValInParamWrapper::any_revo_relaxed,
++      firstNetworkRevo.get()))) {
++    // Swap to new defaults, and will cause the old defaults to be released,
++    // as soon as any concurrent use of the old default objects has finished.
++    mDefaultCERTValInParam = newCVIN;
+   }
+-  else {
+-    CERT_SetOCSPFailureMode(ocspMode_FailureIsNotAVerificationFailure);
+-  }
++
++  /*
++    * The new defaults might change the validity of already established SSL sessions,
++    * let's not reuse them.
++    */
++  SSL_ClearSessionCache();
+ }
+ 
+ nsresult
+ nsNSSComponent::PostCRLImportEvent(const nsCSubstring &urlString,
+                                    nsIStreamListener *listener)
+ {
+   //Create the event
+   nsCOMPtr<nsIRunnable> event = new CRLDownloadEvent(urlString, listener);
+@@ -1637,16 +1710,20 @@ nsNSSComponent::InitializeNSS(PRBool sho
+       certHashtable_valueCompare, 0, 0 );
+ 
+   #if defined(XP_MACOSX)
+     // function may modify the parameters
+     // ignore return code from conversion, we continue anyway
+     TryCFM2MachOMigration(cfmSecurityPath, profilePath);
+   #endif
+ 
++    rv = mPrefBranch->GetBoolPref("security.use_libpkix_verification", &globalConstFlagUsePKIXVerification);
++    if (NS_FAILED(rv))
++      globalConstFlagUsePKIXVerification = USE_NSS_LIBPKIX_DEFAULT;
++
+     PRBool supress_warning_preference = PR_FALSE;
+     rv = mPrefBranch->GetBoolPref("security.suppress_nss_rw_impossible_warning", &supress_warning_preference);
+ 
+     if (NS_FAILED(rv)) {
+       supress_warning_preference = PR_FALSE;
+     }
+ 
+     // init phase 2, init calls to NSS library
+@@ -1762,18 +1839,33 @@ nsNSSComponent::InitializeNSS(PRBool sho
+       SEC_PKCS12EnableCipher(PKCS12_RC4_128, 1);
+       SEC_PKCS12EnableCipher(PKCS12_RC2_CBC_40, 1);
+       SEC_PKCS12EnableCipher(PKCS12_RC2_CBC_128, 1);
+       SEC_PKCS12EnableCipher(PKCS12_DES_56, 1);
+       SEC_PKCS12EnableCipher(PKCS12_DES_EDE3_168, 1);
+       SEC_PKCS12SetPreferredCipher(PKCS12_DES_EDE3_168, 1);
+       PORT_SetUCS2_ASCIIConversionFunction(pip_ucs2_ascii_conversion_fn);
+ 
+-      // Set up OCSP //
+-      setOCSPOptions(mPrefBranch);
++      // dynamic options from prefs
++      setValidationOptions(mPrefBranch);
++
++      // static validation options for usagesarray - do not hit the network
++      mDefaultCERTValInParamLocalOnly = new nsCERTValInParamWrapper;
++      rv = mDefaultCERTValInParamLocalOnly->Construct(
++          nsCERTValInParamWrapper::missing_cert_download_off,
++          nsCERTValInParamWrapper::crl_local_only,
++          nsCERTValInParamWrapper::ocsp_off,
++          nsCERTValInParamWrapper::ocsp_relaxed,
++          nsCERTValInParamWrapper::any_revo_relaxed,
++	  "ocsp");
++      if (NS_FAILED(rv)) {
++	nsPSMInitPanic::SetPanic();
++	return rv;
++      }
++      
+       RegisterMyOCSPAIAInfoCallback();
+ 
+       mHttpForNSS.initTable();
+       mHttpForNSS.registerHttpClient();
+ 
+       InstallLoadableRoots();
+ 
+       LaunchSmartCardThreads();
+@@ -2268,18 +2360,23 @@ nsNSSComponent::Observe(nsISupports *aSu
+       mPrefBranch->GetIntPref("security.ssl.warn_missing_rfc5746", &warnLevel);
+       nsSSLIOLayerHelpers::setWarnLevelMissingRFC5746(warnLevel);
+ #ifdef SSL_ENABLE_FALSE_START // Requires NSS 3.12.8
+     } else if (prefName.Equals("security.ssl.enable_false_start")) {
+       mPrefBranch->GetBoolPref("security.ssl.enable_false_start", &enabled);
+       SSL_OptionSetDefault(SSL_ENABLE_FALSE_START, enabled);
+ #endif
+     } else if (prefName.Equals("security.OCSP.enabled")
++               || prefName.Equals("security.CRL_download.enabled")
++               || prefName.Equals("security.fresh_revocation_info.require")
++               || prefName.Equals("security.missing_cert_download.enabled")
++	       || prefName.Equals("security.first_network_revocation_method")
+                || prefName.Equals("security.OCSP.require")) {
+-      setOCSPOptions(mPrefBranch);
++      MutexAutoLock lock(mutex);
++      setValidationOptions(mPrefBranch);
+     } else {
+       /* Look through the cipher table and set according to pref setting */
+       for (CipherPref* cp = CipherPrefs; cp->pref; ++cp) {
+         if (prefName.Equals(cp->pref)) {
+           mPrefBranch->GetBoolPref(cp->pref, &enabled);
+           SSL_CipherPrefSetDefault(cp->id, enabled);
+           clearSessionCache = PR_TRUE;
+           break;
+@@ -2556,16 +2653,36 @@ nsNSSComponent::GetClientAuthRememberSer
+ NS_IMETHODIMP
+ nsNSSComponent::IsNSSInitialized(PRBool *initialized)
+ {
+   MutexAutoLock lock(mutex);
+   *initialized = mNSSInitialized;
+   return NS_OK;
+ }
+ 
++NS_IMETHODIMP
++nsNSSComponent::GetDefaultCERTValInParam(nsRefPtr<nsCERTValInParamWrapper> &out)
++{
++  MutexAutoLock lock(mutex);
++  if (!mNSSInitialized)
++      return NS_ERROR_NOT_INITIALIZED;
++  out = mDefaultCERTValInParam;
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++nsNSSComponent::GetDefaultCERTValInParamLocalOnly(nsRefPtr<nsCERTValInParamWrapper> &out)
++{
++  MutexAutoLock lock(mutex);
++  if (!mNSSInitialized)
++      return NS_ERROR_NOT_INITIALIZED;
++  out = mDefaultCERTValInParamLocalOnly;
++  return NS_OK;
++}
++
+ //---------------------------------------------
+ // Implementing nsICryptoHash
+ //---------------------------------------------
+ 
+ nsCryptoHash::nsCryptoHash()
+   : mHashContext(nsnull)
+   , mInitialized(PR_FALSE)
+ {
+diff --git a/security/manager/ssl/src/nsNSSComponent.h b/security/manager/ssl/src/nsNSSComponent.h
+--- a/security/manager/ssl/src/nsNSSComponent.h
++++ b/security/manager/ssl/src/nsNSSComponent.h
+@@ -66,16 +66,17 @@
+ #include "nsICryptoHash.h"
+ #include "nsICryptoHMAC.h"
+ #include "hasht.h"
+ #include "nsNSSCallbacks.h"
+ #include "nsNSSShutDown.h"
+ 
+ #include "nsNSSHelper.h"
+ #include "nsClientAuthRemember.h"
++#include "nsCERTValInParamWrapper.h"
+ 
+ #define NS_NSSCOMPONENT_CID \
+ {0xa277189c, 0x1dd1, 0x11b2, {0xa8, 0xc9, 0xe4, 0xe8, 0xbf, 0xb1, 0x33, 0x8e}}
+ 
+ #define PSM_COMPONENT_CONTRACTID "@mozilla.org/psm;1"
+ #define PSM_COMPONENT_CLASSNAME "Mozilla PSM Component"
+ 
+ //Define an interface that we can use to look up from the
+@@ -136,16 +137,18 @@ protected:
+   PRInt32 mBufferSize;
+   PRUint32 mType;
+   PRBool mDoSilentDownload;
+   nsString mCrlAutoDownloadKey;
+   nsCOMPtr<nsIURI> mURI;
+   nsresult handleContentDownloadError(nsresult errCode);
+ };
+ 
++class nsNSSComponent;
++
+ class NS_NO_VTABLE nsINSSComponent : public nsISupports {
+  public:
+   NS_DECLARE_STATIC_IID_ACCESSOR(NS_INSSCOMPONENT_IID)
+ 
+   NS_IMETHOD GetPIPNSSBundleString(const char *name,
+                                    nsAString &outString) = 0;
+   NS_IMETHOD PIPBundleFormatStringFromName(const char *name,
+                                            const PRUnichar **params,
+@@ -185,16 +188,19 @@ class NS_NO_VTABLE nsINSSComponent : pub
+ 
+   NS_IMETHOD DispatchEvent(const nsAString &eventType, const nsAString &token) = 0;
+   
+   NS_IMETHOD GetClientAuthRememberService(nsClientAuthRememberService **cars) = 0;
+ 
+   NS_IMETHOD EnsureIdentityInfoLoaded() = 0;
+ 
+   NS_IMETHOD IsNSSInitialized(PRBool *initialized) = 0;
++
++  NS_IMETHOD GetDefaultCERTValInParam(nsRefPtr<nsCERTValInParamWrapper> &out) = 0;
++  NS_IMETHOD GetDefaultCERTValInParamLocalOnly(nsRefPtr<nsCERTValInParamWrapper> &out) = 0;
+ };
+ 
+ NS_DEFINE_STATIC_IID_ACCESSOR(nsINSSComponent, NS_INSSCOMPONENT_IID)
+ 
+ class nsCryptoHash : public nsICryptoHash, public nsNSSShutDownObject
+ {
+ public:
+   NS_DECL_ISUPPORTS
+@@ -282,16 +288,18 @@ public:
+   NS_IMETHOD LaunchSmartCardThread(SECMODModule *module);
+   NS_IMETHOD ShutdownSmartCardThread(SECMODModule *module);
+   NS_IMETHOD PostEvent(const nsAString &eventType, const nsAString &token);
+   NS_IMETHOD DispatchEvent(const nsAString &eventType, const nsAString &token);
+   NS_IMETHOD GetClientAuthRememberService(nsClientAuthRememberService **cars);
+   NS_IMETHOD EnsureIdentityInfoLoaded();
+   NS_IMETHOD IsNSSInitialized(PRBool *initialized);
+ 
++  NS_IMETHOD GetDefaultCERTValInParam(nsRefPtr<nsCERTValInParamWrapper> &out);
++  NS_IMETHOD GetDefaultCERTValInParamLocalOnly(nsRefPtr<nsCERTValInParamWrapper> &out);
+ private:
+ 
+   nsresult InitializeNSS(PRBool showWarningBox);
+   nsresult ShutdownNSS();
+ 
+ #ifdef XP_MACOSX
+   void TryCFM2MachOMigration(nsIFile *cfmPath, nsIFile *machoPath);
+ #endif
+@@ -304,16 +312,17 @@ private:
+   };
+   
+   void ShowAlert(AlertIdentifier ai);
+   void InstallLoadableRoots();
+   void UnloadLoadableRoots();
+   void LaunchSmartCardThreads();
+   void ShutdownSmartCardThreads();
+   void CleanupIdentityInfo();
++  void setValidationOptions(nsIPrefBranch * pref);
+   nsresult InitializePIPNSSBundle();
+   nsresult ConfigureInternalPKCS11Token();
+   nsresult RegisterPSMContentListener();
+   nsresult RegisterObservers();
+   nsresult DeregisterObservers();
+   nsresult DownloadCrlSilently();
+   nsresult PostCRLImportEvent(const nsCSubstring &urlString, nsIStreamListener *psmDownloader);
+   nsresult getParamsForNextCrlToDownload(nsAutoString *url, PRTime *time, nsAutoString *key);
+@@ -347,19 +356,24 @@ private:
+   static int mInstanceCount;
+   nsNSSShutDownList *mShutdownObjectList;
+   SmartCardThreadList *mThreadList;
+   PRBool mIsNetworkDown;
+   nsSSLThread *mSSLThread;
+   nsCertVerificationThread *mCertVerificationThread;
+   nsNSSHttpInterface mHttpForNSS;
+   nsRefPtr<nsClientAuthRememberService> mClientAuthRememberService;
++  nsRefPtr<nsCERTValInParamWrapper> mDefaultCERTValInParam;
++  nsRefPtr<nsCERTValInParamWrapper> mDefaultCERTValInParamLocalOnly;
+ 
+   static PRStatus PR_CALLBACK IdentityInfoInit(void);
+   PRCallOnceType mIdentityInfoCallOnce;
++
++public:
++  static PRBool globalConstFlagUsePKIXVerification;
+ };
+ 
+ class PSMContentListener : public nsIURIContentListener,
+                             public nsSupportsWeakReference {
+ public:
+   PSMContentListener();
+   virtual ~PSMContentListener();
+   nsresult init();
+diff --git a/security/manager/ssl/src/nsNSSIOLayer.cpp b/security/manager/ssl/src/nsNSSIOLayer.cpp
+--- a/security/manager/ssl/src/nsNSSIOLayer.cpp
++++ b/security/manager/ssl/src/nsNSSIOLayer.cpp
+@@ -111,16 +111,18 @@ using namespace mozilla;
+                        //we always write out to our own
+                        //file.
+ 
+ NSSCleanupAutoPtrClass(CERTCertificate, CERT_DestroyCertificate)
+ NSSCleanupAutoPtrClass(char, PL_strfree)
+ NSSCleanupAutoPtrClass(void, PR_FREEIF)
+ NSSCleanupAutoPtrClass_WithParam(PRArenaPool, PORT_FreeArena, FalseParam, PR_FALSE)
+ 
++static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID);
++
+ /* SSM_UserCertChoice: enum for cert choice info */
+ typedef enum {ASK, AUTO} SSM_UserCertChoice;
+ 
+ 
+ static SECStatus PR_CALLBACK
+ nsNSS_SSLGetClientAuthData(void *arg, PRFileDesc *socket,
+ 						   CERTDistNames *caNames,
+ 						   CERTCertificate **pRetCert,
+@@ -3365,16 +3367,24 @@ nsNSSBadCertHandler(void *arg, PRFileDes
+   nsresult nsrv;
+   PRUint32 collected_errors = 0;
+   PRUint32 remaining_display_errors = 0;
+ 
+   PRErrorCode errorCodeTrust = SECSuccess;
+   PRErrorCode errorCodeMismatch = SECSuccess;
+   PRErrorCode errorCodeExpired = SECSuccess;
+ 
++  nsCOMPtr<nsINSSComponent> inss = do_GetService(kNSSComponentCID, &nsrv);
++  if (!inss)
++    return cancel_and_failure(infoObject);
++  nsRefPtr<nsCERTValInParamWrapper> survivingParams;
++  nsrv = inss->GetDefaultCERTValInParam(survivingParams);
++  if (NS_FAILED(nsrv))
++    return cancel_and_failure(infoObject);
++  
+   char *hostname = SSL_RevealURL(sslSocket);
+   if (!hostname)
+     return cancel_and_failure(infoObject);
+ 
+   charCleaner hostnameCleaner(hostname); 
+   nsDependentCString hostString(hostname);
+ 
+   PRInt32 port;
+@@ -3403,20 +3413,32 @@ nsNSSBadCertHandler(void *arg, PRFileDes
+     CERTVerifyLog *verify_log = PORT_ArenaZNew(log_arena, CERTVerifyLog);
+     if (!verify_log)
+       return cancel_and_failure(infoObject);
+ 
+     CERTVerifyLogContentsCleaner verify_log_cleaner(verify_log);
+ 
+     verify_log->arena = log_arena;
+ 
++if (!nsNSSComponent::globalConstFlagUsePKIXVerification) {
+     srv = CERT_VerifyCertificate(CERT_GetDefaultCertDB(), peerCert,
+                                  PR_TRUE, certificateUsageSSLServer,
+                                  PR_Now(), (void*)infoObject, 
+                                  verify_log, NULL);
++}
++else {
++    CERTValOutParam cvout[2];
++    cvout[0].type = cert_po_errorLog;
++    cvout[0].value.pointer.log = verify_log;
++    cvout[1].type = cert_po_end;
++
++    srv = CERT_PKIXVerifyCert(peerCert, certificateUsageSSLServer,
++                              survivingParams->GetRawPointerForNSS(),
++                              cvout, (void*)infoObject);
++}
+ 
+     // We ignore the result code of the cert verification.
+     // Either it is a failure, which is expected, and we'll process the
+     //                         verify log below.
+     // Or it is a success, then a domain mismatch is the only 
+     //                     possible failure. 
+ 
+     CERTVerifyLogNode *i_node;
+diff --git a/security/manager/ssl/src/nsUsageArrayHelper.cpp b/security/manager/ssl/src/nsUsageArrayHelper.cpp
+--- a/security/manager/ssl/src/nsUsageArrayHelper.cpp
++++ b/security/manager/ssl/src/nsUsageArrayHelper.cpp
+@@ -147,57 +147,92 @@ nsUsageArrayHelper::verifyFailed(PRUint3
+     // this means, no verification result has ever been received
+   default:
+     *_verified = nsNSSCertificate::NOT_VERIFIED_UNKNOWN; break;
+   }
+ }
+ 
+ nsresult
+ nsUsageArrayHelper::GetUsagesArray(const char *suffix,
+-                      PRBool ignoreOcsp,
++                      PRBool localOnly,
+                       PRUint32 outArraySize,
+                       PRUint32 *_verified,
+                       PRUint32 *_count,
+                       PRUnichar **outUsages)
+ {
+   nsNSSShutDownPreventionLock locker;
+   if (NS_FAILED(m_rv))
+     return m_rv;
+ 
+   if (outArraySize < max_returned_out_array_size)
+     return NS_ERROR_FAILURE;
+ 
+   nsCOMPtr<nsINSSComponent> nssComponent;
+ 
+-  if (ignoreOcsp) {
++  if (!nsNSSComponent::globalConstFlagUsePKIXVerification && localOnly) {
+     nsresult rv;
+     nssComponent = do_GetService(kNSSComponentCID, &rv);
+     if (NS_FAILED(rv))
+       return rv;
+     
+     if (nssComponent) {
+       nssComponent->SkipOcsp();
+     }
+   }
+-
++  
+   PRUint32 &count = *_count;
+   count = 0;
+-  SECCertificateUsage usages;
+-  
+-  CERT_VerifyCertificateNow(defaultcertdb, mCert, PR_TRUE, 
++  SECCertificateUsage usages = 0;
++  SECStatus verifyResult;
++
++if (!nsNSSComponent::globalConstFlagUsePKIXVerification) {
++  verifyResult =
++  CERT_VerifyCertificateNow(defaultcertdb, mCert, PR_TRUE,
+ 			    certificateUsageSSLClient |
+ 			    certificateUsageSSLServer |
+ 			    certificateUsageSSLServerWithStepUp |
+ 			    certificateUsageEmailSigner |
+ 			    certificateUsageEmailRecipient |
+ 			    certificateUsageObjectSigner |
+ 			    certificateUsageSSLCA |
+ 			    certificateUsageStatusResponder,
+ 			    NULL, &usages);
+-  int err = PR_GetError();
++}
++else {
++  nsresult nsrv;
++  nsCOMPtr<nsINSSComponent> inss = do_GetService(kNSSComponentCID, &nsrv);
++  if (!inss)
++    return nsrv;
++  nsRefPtr<nsCERTValInParamWrapper> survivingParams;
++  if (localOnly)
++    nsrv = inss->GetDefaultCERTValInParamLocalOnly(survivingParams);
++  else
++    nsrv = inss->GetDefaultCERTValInParam(survivingParams);
++  
++  if (NS_FAILED(nsrv))
++    return nsrv;
++
++  CERTValOutParam cvout[2];
++  cvout[0].type = cert_po_usages;
++  cvout[0].value.scalar.usages = 0;
++  cvout[1].type = cert_po_end;
++  
++  verifyResult =
++  CERT_PKIXVerifyCert(mCert, certificateUsageCheckAllUsages,
++		      survivingParams->GetRawPointerForNSS(),
++		      cvout, NULL);
++
++  usages = cvout[0].value.scalar.usages;
++}
++
++  if (verifyResult != SECSuccess) {
++    int err = PR_GetError();
++    verifyFailed(_verified, err);
++    return NS_OK;
++  }
+ 
+   // The following list of checks must be < max_returned_out_array_size
+   
+   check(suffix, usages & certificateUsageSSLClient, count, outUsages);
+   check(suffix, usages & certificateUsageSSLServer, count, outUsages);
+   check(suffix, usages & certificateUsageSSLServerWithStepUp, count, outUsages);
+   check(suffix, usages & certificateUsageEmailSigner, count, outUsages);
+   check(suffix, usages & certificateUsageEmailRecipient, count, outUsages);
+@@ -210,19 +245,15 @@ nsUsageArrayHelper::GetUsagesArray(const
+ #if 0
+   check(suffix, usages & certificateUsageVerifyCA, count, outUsages);
+ #endif
+   check(suffix, usages & certificateUsageStatusResponder, count, outUsages);
+ #if 0
+   check(suffix, usages & certificateUsageAnyCA, count, outUsages);
+ #endif
+ 
+-  if (ignoreOcsp && nssComponent) {
++  if (!nsNSSComponent::globalConstFlagUsePKIXVerification && localOnly && nssComponent) {
+     nssComponent->SkipOcspOff();
+   }
+ 
+-  if (count == 0) {
+-    verifyFailed(_verified, err);
+-  } else {
+-    *_verified = nsNSSCertificate::VERIFIED_OK;
+-  }
++  *_verified = nsNSSCertificate::VERIFIED_OK;
+   return NS_OK;
+ }
+diff --git a/security/manager/ssl/src/nsUsageArrayHelper.h b/security/manager/ssl/src/nsUsageArrayHelper.h
+--- a/security/manager/ssl/src/nsUsageArrayHelper.h
++++ b/security/manager/ssl/src/nsUsageArrayHelper.h
+@@ -43,17 +43,17 @@
+ #include "nsNSSComponent.h"
+ 
+ class nsUsageArrayHelper
+ {
+ public:
+   nsUsageArrayHelper(CERTCertificate *aCert);
+ 
+   nsresult GetUsagesArray(const char *suffix,
+-               PRBool ignoreOcsp,
++               PRBool localOnly,
+                PRUint32 outArraySize,
+                PRUint32 *_verified,
+                PRUint32 *_count,
+                PRUnichar **tmpUsages);
+ 
+   enum { max_returned_out_array_size = 12 };
+ 
+ private:

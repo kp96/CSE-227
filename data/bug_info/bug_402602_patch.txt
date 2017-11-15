@@ -1,0 +1,39 @@
+Index: mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp,v
+retrieving revision 1.140
+diff -u -8 -p -r1.140 nsNSSIOLayer.cpp
+--- mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp	3 Nov 2007 18:49:50 -0000	1.140
++++ mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp	5 Nov 2007 22:53:10 -0000
+@@ -2697,30 +2697,30 @@ nsNSSBadCertHandler(void *arg, PRFileDes
+   PRErrorCode errorCodeToReport = SECSuccess;
+   if (remaining_display_errors & nsICertOverrideService::ERROR_UNTRUSTED)
+     errorCodeToReport = errorCodeTrust;
+   else if (remaining_display_errors & nsICertOverrideService::ERROR_MISMATCH)
+     errorCodeToReport = errorCodeMismatch;
+   else if (remaining_display_errors & nsICertOverrideService::ERROR_TIME)
+     errorCodeToReport = errorCodeExpired;
+ 
+-  PR_SetError(errorCodeToReport, 0);
+   if (!suppressMessage) {
+     nsHandleInvalidCertError(infoObject,
+                              remaining_display_errors,
+                              hostString,
+                              hostWithPortString,
+                              port,
+                              errorCodeToReport,
+                              errorCodeTrust,
+                              errorCodeMismatch,
+                              errorCodeExpired,
+                              ix509);
+   }
+ 
++  PR_SetError(errorCodeToReport, 0);
+   return cancel_and_failure(infoObject);
+ }
+ 
+ static PRFileDesc*
+ nsSSLIOLayerImportFD(PRFileDesc *fd,
+                      nsNSSSocketInfo *infoObject,
+                      const char *host)
+ {

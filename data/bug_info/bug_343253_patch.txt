@@ -1,0 +1,190 @@
+Index: security/manager/locales/en-US/chrome/pippki/newserver.dtd
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/locales/en-US/chrome/pippki/newserver.dtd,v
+retrieving revision 1.1
+diff -u -p -8 -r1.1 newserver.dtd
+--- security/manager/locales/en-US/chrome/pippki/newserver.dtd	14 Mar 2005 10:00:55 -0000	1.1
++++ security/manager/locales/en-US/chrome/pippki/newserver.dtd	18 Jul 2006 13:12:53 -0000
+@@ -37,12 +37,11 @@
+    - ***** END LICENSE BLOCK ***** -->
+ 
+ <!-- Values for newserver.xul -->
+ <!ENTITY newserver.title    "Website Certified by an Unknown Authority">
+ <!ENTITY newserver.reasons  "Possible reasons for this error:">
+ <!ENTITY newserver.reason1  "- Your browser does not recognize the Certificate Authority that issued the site's certificate.">
+ <!ENTITY newserver.reason2  "- The site's certificate is incomplete due to a server misconfiguration.">
+ <!ENTITY newserver.notify   "Please notify the site's webmaster about this problem.">
+-<!ENTITY newserver.examine  "Examine Certificate...">
++<!ENTITY newserver.examine  "View Certificate...">
+ <!ENTITY newserver.remember "Accept this certificate permanently">
+ <!ENTITY newserver.session  "Accept this certificate temporarily for this session">
+-<!ENTITY newserver.refuse   "Do not accept this certificate and do not connect to this Web site">
+Index: security/manager/pki/resources/jar.mn
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/jar.mn,v
+retrieving revision 1.51
+diff -u -p -8 -r1.51 jar.mn
+--- security/manager/pki/resources/jar.mn	13 Jul 2006 18:59:36 -0000	1.51
++++ security/manager/pki/resources/jar.mn	18 Jul 2006 13:12:53 -0000
+@@ -9,17 +9,17 @@ pippki.jar:
+     content/pippki/password.js               (content/password.js)
+     content/pippki/resetpassword.xul         (content/resetpassword.xul)
+     content/pippki/resetpassword.js          (content/resetpassword.js)
+     content/pippki/PrefOverlay.xul           (content/PrefOverlay.xul)
+     content/pippki/pref-security.js          (content/pref-security.js)
+     content/pippki/pref-ssl.xul              (content/pref-ssl.xul)
+     content/pippki/pref-certs.xul            (content/pref-certs.xul)
+     content/pippki/PageInfoOverlay.xul       (content/PageInfoOverlay.xul)
+-*   content/pippki/newserver.js              (content/newserver.js)
++    content/pippki/newserver.js              (content/newserver.js)
+     content/pippki/newserver.xul             (content/newserver.xul)
+     content/pippki/downloadcert.js           (content/downloadcert.js)
+     content/pippki/downloadcert.xul          (content/downloadcert.xul)
+     content/pippki/cacertexists.xul          (content/cacertexists.xul)
+     content/pippki/certManager.js            (content/certManager.js)
+     content/pippki/certManager.xul           (content/certManager.xul)
+     content/pippki/CAOverlay.xul             (content/CAOverlay.xul)
+     content/pippki/WebSitesOverlay.xul       (content/WebSitesOverlay.xul)
+Index: security/manager/pki/resources/content/newserver.js
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/newserver.js,v
+retrieving revision 1.23
+diff -u -p -8 -r1.23 newserver.js
+--- security/manager/pki/resources/content/newserver.js	30 Jun 2006 08:43:53 -0000	1.23
++++ security/manager/pki/resources/content/newserver.js	18 Jul 2006 13:12:53 -0000
+@@ -64,47 +64,23 @@ function onLoad()
+     "newserver.reason3", [cert.commonName]);
+ 
+   var question = bundle.getFormattedString(
+     "newserver.question", [cert.commonName]);
+ 
+   setText("intro", intro);
+   setText("reason3", reason3);
+   setText("question", question);
+-  
+-  // Focus the accept button explicitly, because the dialog onLoad handler
+-  // focuses the first focusable element in the dialog, which is the "View
+-  // Certificate" button.
+-  // Never explicitly focus buttons on OS X, as this breaks default focus
+-  // handling, outlined in dialog.xml
+-#ifndef XP_MACOSX
+-  document.documentElement.getButton("accept").focus();
+-#endif
+ }
+ 
+ function doOK()
+ {
+-  var selectedID = document.getElementById("whatnow").selectedItem.id;
+-
+-  if (selectedID == "refuse") {
+-    dialogParams.SetInt(1,0);
+-  }
+-  else {
+-    dialogParams.SetInt(1,1);
+-
+-    // 0 = accept perm, 1 = accept for this session
+-    var userchoice = 1;
+-    
+-    if (selectedID == "remember") {
+-      userchoice = 0;
+-    }
+-
+-    dialogParams.SetInt(2, userchoice);
+-  }
+-
++  dialogParams.SetInt(1, 1);
++  var selectedItem = document.getElementById("whatnow").selectedItem;
++  dialogParams.SetInt(2, parseInt(selectedItem.value));
+   return true;
+ }
+ 
+ function doCancel()
+ {
+   dialogParams.SetInt(1,0);
+   return true;
+ }
+Index: security/manager/pki/resources/content/newserver.xul
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/newserver.xul,v
+retrieving revision 1.25
+diff -u -p -8 -r1.25 newserver.xul
+--- security/manager/pki/resources/content/newserver.xul	13 Jul 2006 18:59:37 -0000	1.25
++++ security/manager/pki/resources/content/newserver.xul	18 Jul 2006 13:12:54 -0000
+@@ -46,19 +46,22 @@
+ <!ENTITY % pippkiDTD SYSTEM "chrome://pippki/locale/pippki.dtd" >
+ %pippkiDTD;
+ ]>
+ 
+ <dialog id="newServerDialog" title="&newserver.title;"
+   xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+   style="width: 47em;"
+   onload="onLoad();"
+-  buttons="accept,cancel"
++  buttons="accept,cancel,extra2"
++  defaultButton="cancel"
++  buttonlabelextra2="&newserver.examine;"
+   ondialogaccept="return doOK();"
+-  ondialogcancel="return doCancel();">
++  ondialogcancel="return doCancel();"
++  ondialogextra2="viewCert();">
+ 
+ <script type="application/x-javascript" src="chrome://global/content/strres.js"/>
+ <script type="application/x-javascript" src="chrome://pippki/content/pippki.js"/>
+ <script type="application/x-javascript" src="chrome://pippki/content/newserver.js"/>
+ 
+ <stringbundle id="newserver_bundle" src="chrome://pippki/locale/newserver.properties"/>
+ 
+ <hbox valign="top" align="center">
+@@ -72,22 +75,17 @@
+     <description>&newserver.reason1;</description>
+     <description>&newserver.reason2;</description>
+     <description id="reason3"/>
+     <separator class="thin"/>
+     <description>&newserver.notify;</description>
+     <separator/>
+     <description id="question"/>
+     <separator class="thin"/>
+-    <hbox>
+-      <button id="examineCert-button" label="&newserver.examine;"
+-              oncommand="viewCert();"/> 
+-    </hbox>
+-    <separator class="thin"/>
+     <radiogroup id="whatnow">
+-      <radio label="&newserver.remember;" id="remember"/>
+-      <radio label="&newserver.session;" id="session" selected="true"/>
+-      <radio label="&newserver.refuse;" id="refuse"/>
++      <radio label="&newserver.remember;" id="remember" value="0"/>
++      <radio label="&newserver.session;" id="session"
++             value="1" selected="true"/>
+     </radiogroup>
+   </vbox>
+ </hbox>
+ 
+ </dialog>
+Index: extensions/help/resources/content/helpSecurityOverlay.xul
+===================================================================
+RCS file: /cvsroot/mozilla/extensions/help/resources/content/helpSecurityOverlay.xul,v
+retrieving revision 1.1
+diff -u -p -8 -r1.1 helpSecurityOverlay.xul
+--- extensions/help/resources/content/helpSecurityOverlay.xul	13 Jul 2006 18:59:37 -0000	1.1
++++ extensions/help/resources/content/helpSecurityOverlay.xul	18 Jul 2006 13:12:55 -0000
+@@ -140,17 +140,18 @@
+           buttons="accept,cancel,help"
+           ondialoghelp="openHelp('my_certs');"/>
+ 
+   <dialog id="setp12password"
+           buttons="accept,cancel,help"
+           ondialoghelp="openHelp('cert_backup_pwd');"/>
+ 
+   <dialog id="newServerDialog"
+-          buttons="accept,cancel,help"
++          spacerflex="1"
++          buttons="accept,cancel,help,extra2"
+           ondialoghelp="openHelp('new_web_cert');"/>
+ 
+   <dialog id="crlUpdatePref"
+           buttons="accept,cancel,help"
+           ondialoghelp="openHelp('validation-crl-auto-update-prefs');"/>
+ 
+   <dialog id="serverCertExpired"
+           spacerflex="1"

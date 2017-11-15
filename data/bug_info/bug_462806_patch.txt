@@ -1,0 +1,98 @@
+diff --git a/modules/libjar/nsJAR.cpp b/modules/libjar/nsJAR.cpp
+--- a/modules/libjar/nsJAR.cpp
++++ b/modules/libjar/nsJAR.cpp
+@@ -370,25 +370,18 @@ NS_IMETHODIMP
+ NS_IMETHODIMP
+ nsJAR::GetCertificatePrincipal(const char* aFilename, nsIPrincipal** aPrincipal)
+ {
+   //-- Parameter check
+   if (!aPrincipal)
+     return NS_ERROR_NULL_POINTER;
+   *aPrincipal = nsnull;
+ 
+-  //-- Get the signature verifier service
+-  nsresult rv;
+-  nsCOMPtr<nsISignatureVerifier> verifier = 
+-           do_GetService(SIGNATURE_VERIFIER_CONTRACTID, &rv);
+-  if (NS_FAILED(rv)) // No signature verifier available
+-    return NS_OK;
+-
+   //-- Parse the manifest
+-  rv = ParseManifest(verifier);
++  nsresult rv = ParseManifest();
+   if (NS_FAILED(rv)) return rv;
+   if (mGlobalStatus == JAR_NO_MANIFEST)
+     return NS_OK;
+ 
+   PRInt16 requestedStatus;
+   if (aFilename)
+   {
+     //-- Find the item
+@@ -519,17 +512,17 @@ nsJAR::ReadLine(const char** src)
+ #define JAR_MF 1
+ #define JAR_SF 2
+ #define JAR_MF_SEARCH_STRING "(M|/M)ETA-INF/(M|m)(ANIFEST|anifest).(MF|mf)$"
+ #define JAR_SF_SEARCH_STRING "(M|/M)ETA-INF/*.(SF|sf)$"
+ #define JAR_MF_HEADER (const char*)"Manifest-Version: 1.0"
+ #define JAR_SF_HEADER (const char*)"Signature-Version: 1.0"
+ 
+ nsresult
+-nsJAR::ParseManifest(nsISignatureVerifier* verifier)
++nsJAR::ParseManifest()
+ {
+   //-- Verification Step 1
+   if (mParsedManifest)
+     return NS_OK;
+   //-- (1)Manifest (MF) file
+   nsCOMPtr<nsIUTF8StringEnumerator> files;
+   nsresult rv = FindEntries(JAR_MF_SEARCH_STRING, getter_AddRefs(files));
+   if (!files) rv = NS_ERROR_FAILURE;
+@@ -600,16 +593,26 @@ nsJAR::ParseManifest(nsISignatureVerifie
+     rv = LoadEntry(tempFilename.get(), getter_Copies(sigBuffer), &sigLen);
+   }
+   if (NS_FAILED(rv))
+   {
+     nsCAutoString tempFilename(sigFilename); tempFilename.Append("RSA", 3);
+     rv = LoadEntry(tempFilename.get(), getter_Copies(sigBuffer), &sigLen);
+   }
+   if (NS_FAILED(rv))
++  {
++    mGlobalStatus = JAR_NO_MANIFEST;
++    mParsedManifest = PR_TRUE;
++    return NS_OK;
++  }
++
++  //-- Get the signature verifier service
++  nsCOMPtr<nsISignatureVerifier> verifier = 
++           do_GetService(SIGNATURE_VERIFIER_CONTRACTID, &rv);
++  if (NS_FAILED(rv)) // No signature verifier available
+   {
+     mGlobalStatus = JAR_NO_MANIFEST;
+     mParsedManifest = PR_TRUE;
+     return NS_OK;
+   }
+ 
+   //-- Verify that the signature file is a valid signature of the SF file
+   PRInt32 verifyError;
+diff --git a/modules/libjar/nsJAR.h b/modules/libjar/nsJAR.h
+--- a/modules/libjar/nsJAR.h
++++ b/modules/libjar/nsJAR.h
+@@ -149,17 +149,17 @@ class nsJAR : public nsIZipReader, publi
+     nsZipReaderCache*        mCache;          // if cached, this points to the cache it's contained in
+     PRLock*                  mLock;	
+     PRInt64                  mMtime;
+     PRInt32                  mTotalItemsInManifest;
+     
+     //-- Private functions
+     PRFileDesc* OpenFile();
+ 
+-    nsresult ParseManifest(nsISignatureVerifier* verifier);
++    nsresult ParseManifest();
+     void     ReportError(const char* aFilename, PRInt16 errorCode);
+     nsresult LoadEntry(const char* aFilename, char** aBuf, 
+                        PRUint32* aBufLen = nsnull);
+     PRInt32  ReadLine(const char** src); 
+     nsresult ParseOneFile(const char* filebuf, PRInt16 aFileType);
+     nsresult VerifyEntry(nsJARManifestItem* aEntry, const char* aEntryData, 
+                          PRUint32 aLen);
+ 

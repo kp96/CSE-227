@@ -1,0 +1,49 @@
+Index: security/manager/boot/src/nsSecureBrowserUIImpl.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/boot/src/nsSecureBrowserUIImpl.cpp,v
+retrieving revision 1.51
+diff -u -p -8 -r1.51 nsSecureBrowserUIImpl.cpp
+--- security/manager/boot/src/nsSecureBrowserUIImpl.cpp	21 Oct 2005 18:33:26 -0000	1.51
++++ security/manager/boot/src/nsSecureBrowserUIImpl.cpp	13 Nov 2005 02:26:49 -0000
+@@ -263,17 +263,22 @@ nsSecureBrowserUIImpl::GetState(PRUint32
+   }
+   
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsSecureBrowserUIImpl::GetTooltipText(nsAString& aText)
+ {
+-  if (!mInfoTooltip.IsEmpty())
++  if (mPreviousSecurityState == lis_mixed_security)
++  {
++    GetBundleString(NS_LITERAL_STRING("SecurityButtonMixedContentTooltipText").get(),
++                    aText);
++  }
++  else if (!mInfoTooltip.IsEmpty())
+   {
+     aText = mInfoTooltip;
+   }
+   else
+   {
+     GetBundleString(NS_LITERAL_STRING("SecurityButtonTooltipText").get(),
+                     aText);
+   }
+Index: security/manager/locales/en-US/chrome/pipnss/security.properties
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/locales/en-US/chrome/pipnss/security.properties,v
+retrieving revision 1.1
+diff -u -p -8 -r1.1 security.properties
+--- security/manager/locales/en-US/chrome/pipnss/security.properties	14 Mar 2005 10:00:54 -0000	1.1
++++ security/manager/locales/en-US/chrome/pipnss/security.properties	13 Nov 2005 02:26:49 -0000
+@@ -44,9 +44,10 @@ WeakSecureMessage=You have requested a p
+ PostToInsecureFromSecureMessage=Although this page is encrypted, the information you have entered is to be sent over an unencrypted connection and could easily be read by a third party.##Are you sure you want to continue sending this information?##
+ PostToInsecureFromInsecureMessage=The information you have entered is to be sent over an unencrypted connection and could easily be read by a third party.##Are you sure you want to continue sending this information?##
+ MixedContentShowAgain=Alert me whenever I'm about to view an encrypted page that contains some unencrypted information.
+ LeaveSecureShowAgain=Alert me whenever I leave an encrypted page for one that isn't encrypted. 
+ EnterSecureShowAgain=Alert me whenever I am about to view an encrypted page.
+ WeakSecureShowAgain=Alert me whenever I am about to view a page that uses low-grade encryption.
+ PostToInsecureFromInsecureShowAgain=Alert me whenever I submit information that's not encrypted.
+ SecurityButtonTooltipText=Displays security information about the current page
++SecurityButtonMixedContentTooltipText=Warning: Contains unauthenticated content
+ Continue=Continue

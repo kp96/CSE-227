@@ -1,0 +1,95 @@
+# HG changeset patch
+# Parent 3c9ae5153271de77e0585e9ef1e23392687c3a20
+# User Honza Bambas <honzab.moz@firemni.cz>
+Bug 712363, Part 1: Make SyncRunnableBase work without deadlocking when run on the main thread, r=bsmith
+
+diff --git a/security/manager/ssl/src/PSMRunnable.cpp b/security/manager/ssl/src/PSMRunnable.cpp
+--- a/security/manager/ssl/src/PSMRunnable.cpp
++++ b/security/manager/ssl/src/PSMRunnable.cpp
+@@ -41,24 +41,28 @@ namespace mozilla { namespace psm {
+ SyncRunnableBase::SyncRunnableBase()
+   : monitor("SyncRunnableBase::monitor")
+ {
+ }
+ 
+ nsresult
+ SyncRunnableBase::DispatchToMainThreadAndWait()
+ {
+-  NS_ASSERTION(!NS_IsMainThread(),
+-               "DispatchToMainThreadAndWait called on the main thread.");
++  nsresult rv;
++  if (NS_IsMainThread()) {
++    RunOnTargetThread();
++    rv = NS_OK;
++  } else {
++    mozilla::MonitorAutoLock lock(monitor);
++    rv = NS_DispatchToMainThread(this);
++    if (NS_SUCCEEDED(rv)) {
++      lock.Wait();
++    }
++  }
+ 
+-  mozilla::MonitorAutoLock lock(monitor);
+-  nsresult rv = NS_DispatchToMainThread(this);
+-  if (NS_SUCCEEDED(rv)) {
+-    lock.Wait();
+-  }
+   return rv;
+ }
+ 
+ NS_IMETHODIMP
+ SyncRunnableBase::Run()
+ {
+   RunOnTargetThread();
+   mozilla::MonitorAutoLock(monitor).Notify();
+diff --git a/security/manager/ssl/src/nsNSSCallbacks.cpp b/security/manager/ssl/src/nsNSSCallbacks.cpp
+--- a/security/manager/ssl/src/nsNSSCallbacks.cpp
++++ b/security/manager/ssl/src/nsNSSCallbacks.cpp
+@@ -810,21 +810,17 @@ void PK11PasswordPromptRunnable::RunOnTa
+ }
+ 
+ char* PR_CALLBACK
+ PK11PasswordPrompt(PK11SlotInfo* slot, PRBool retry, void* arg)
+ {
+   nsRefPtr<PK11PasswordPromptRunnable> runnable = 
+     new PK11PasswordPromptRunnable(slot,
+                                    static_cast<nsIInterfaceRequestor*>(arg));
+-  if (NS_IsMainThread()) {
+-    runnable->RunOnTargetThread();
+-  } else {
+-    runnable->DispatchToMainThreadAndWait();
+-  }
++  runnable->DispatchToMainThreadAndWait();
+   return runnable->mResult;
+ }
+ 
+ void PR_CALLBACK HandshakeCallback(PRFileDesc* fd, void* client_data) {
+   nsNSSShutDownPreventionLock locker;
+   PRInt32 sslStatus;
+   char* signer = nsnull;
+   char* cipherName = nsnull;
+diff --git a/security/manager/ssl/src/nsNSSIOLayer.cpp b/security/manager/ssl/src/nsNSSIOLayer.cpp
+--- a/security/manager/ssl/src/nsNSSIOLayer.cpp
++++ b/security/manager/ssl/src/nsNSSIOLayer.cpp
+@@ -935,21 +935,16 @@ private:
+   nsCOMPtr<nsIInterfaceRequestor> mCallbacks; // in
+ };
+ 
+ void nsNSSSocketInfo::GetPreviousCert(nsIX509Cert** _result)
+ {
+   NS_ASSERTION(_result, "_result parameter to GetPreviousCert is null");
+   *_result = nsnull;
+ 
+-  if (NS_IsMainThread()) {
+-    NS_ERROR("nsNSSSocketInfo::GetPreviousCert called on the main thread");
+-    return;
+-  }
+-
+   nsRefPtr<PreviousCertRunnable> runnable = new PreviousCertRunnable(mCallbacks);
+   nsresult rv = runnable->DispatchToMainThreadAndWait();
+   NS_ASSERTION(NS_SUCCEEDED(rv), "runnable->DispatchToMainThreadAndWait() failed");
+   runnable->mPreviousCert.forget(_result);
+ }
+ 
+ void
+ nsNSSSocketInfo::SetCertVerificationWaiting()

@@ -1,0 +1,76 @@
+Index: mozilla/security/manager/ssl/src/nsCMSSecureMessage.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsCMSSecureMessage.cpp,v
+retrieving revision 1.9
+diff -u -p -w -r1.9 nsCMSSecureMessage.cpp
+--- mozilla/security/manager/ssl/src/nsCMSSecureMessage.cpp	7 Sep 2004 18:54:02 -0000	1.9
++++ mozilla/security/manager/ssl/src/nsCMSSecureMessage.cpp	16 Jun 2006 22:36:18 -0000
+@@ -177,6 +177,7 @@ SendMessage(const char *msg, const char 
+   SECItem output;
+   PLArenaPool *arena = PORT_NewArena(1024);
+   SECStatus s;
++  nsCOMPtr<nsIInterfaceRequestor> ctx = new PipUIContext();
+ 
+   /* Step 0. Create a CMS Message */
+   cmsMsg = NSS_CMSMessage_Create(NULL);
+@@ -254,7 +255,7 @@ SendMessage(const char *msg, const char 
+ 
+   output.data = 0; output.len = 0;
+   ecx = NSS_CMSEncoder_Start(cmsMsg, 0, 0, &output, arena,
+-            0, 0, 0, 0, 0, 0);
++            0, ctx, 0, 0, 0, 0);
+   if (!ecx) {
+     PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSSecureMessage::SendMessage - can't start cms encoder\n"));
+     rv = NS_ERROR_FAILURE;
+Index: mozilla/security/manager/ssl/src/nsNSSCallbacks.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSCallbacks.cpp,v
+retrieving revision 1.43
+diff -u -p -w -r1.43 nsNSSCallbacks.cpp
+--- mozilla/security/manager/ssl/src/nsNSSCallbacks.cpp	10 May 2006 17:29:56 -0000	1.43
++++ mozilla/security/manager/ssl/src/nsNSSCallbacks.cpp	16 Jun 2006 22:36:20 -0000
+@@ -624,16 +624,32 @@ PK11PasswordPrompt(PK11SlotInfo* slot, P
+   nsIInterfaceRequestor *ir = NS_STATIC_CAST(nsIInterfaceRequestor*, arg);
+   nsCOMPtr<nsIPrompt> proxyPrompt;
+ 
+-  // If no context is provided, no prompt is possible.
+-  if (!ir)
+-    return nsnull;
+-
+   /* TODO: Retry should generate a different dialog message */
+ /*
+   if (retry)
+     return nsnull;
+ */
+ 
++  if (!ir)
++  {
++    nsCOMPtr<nsIWindowWatcher> wwatch(do_GetService(NS_WINDOWWATCHER_CONTRACTID));
++    if (!wwatch)
++      return nsnull;
++
++    nsCOMPtr<nsIPrompt> prompter;
++    wwatch->GetNewPrompter(0, getter_AddRefs(prompter));
++    if (!prompter)
++      return nsnull;
++
++    NS_GetProxyForObject(NS_PROXY_TO_MAIN_THREAD,
++                         NS_GET_IID(nsIPrompt),
++                         prompter, NS_PROXY_SYNC,
++                         getter_AddRefs(proxyPrompt));
++    if (!proxyPrompt)
++      return nsnull;
++  }
++  else
++  {
+   // The interface requestor object may not be safe, so
+   // proxy the call to get the nsIPrompt.
+ 
+@@ -657,6 +673,7 @@ PK11PasswordPrompt(PK11SlotInfo* slot, P
+                        prompt,
+                        NS_PROXY_SYNC,
+                        getter_AddRefs(proxyPrompt));
++  }
+ 
+   nsAutoString promptString;
+   nsCOMPtr<nsINSSComponent> nssComponent(do_GetService(kNSSComponentCID, &rv));

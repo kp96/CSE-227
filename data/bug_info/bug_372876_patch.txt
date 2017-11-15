@@ -1,0 +1,27 @@
+Index: mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp,v
+retrieving revision 1.151
+diff -u -u -8 -p -r1.151 nsNSSIOLayer.cpp
+--- mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp	22 Jan 2008 23:47:55 -0000	1.151
++++ mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp	18 Feb 2008 20:08:59 -0000
+@@ -170,16 +170,19 @@ nsSSLSocketThreadData::nsSSLSocketThread
+ }
+ 
+ nsSSLSocketThreadData::~nsSSLSocketThreadData()
+ {
+   NS_ASSERTION(mSSLState != ssl_pending_write
+                &&
+                mSSLState != ssl_pending_read, 
+                "oops??? ssl socket is not idle at the time it is being destroyed");
++  if (mSSLDataBuffer) {
++    nsMemory::Free(mSSLDataBuffer);
++  }
+ }
+ 
+ PRBool nsSSLSocketThreadData::ensure_buffer_size(PRInt32 amount)
+ {
+   if (amount > mSSLDataBufferAllocatedSize) {
+     if (mSSLDataBuffer) {
+       mSSLDataBuffer = (char*)nsMemory::Realloc(mSSLDataBuffer, amount);
+     }

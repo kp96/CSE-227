@@ -1,0 +1,71 @@
+Index: security/manager/ssl/src/nsNSSCertificateDB.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSCertificateDB.cpp,v
+retrieving revision 1.14
+diff -upN -r1.14 security/manager/ssl/src/nsNSSCertificateDB.cpp
+--- security/manager/ssl/src/nsNSSCertificateDB.cpp
++++ security/manager/ssl/src/nsNSSCertificateDB.cpp
+@@ -1056,9 +1056,9 @@ nsNSSCertificateDB::ImportPKCS12File(nsI
+ {
+   NS_ENSURE_ARG(aFile);
+   nsPKCS12Blob blob;
+-  if (aToken) {
+-    nsCOMPtr<nsIPK11Token> t = do_QueryInterface(aToken);
+-    blob.SetToken(t);
++  nsCOMPtr<nsIPK11Token> token = do_QueryInterface(aToken);
++  if (token) {
++    blob.SetToken(token);
+   }
+   return blob.ImportFromFile(aFile);
+ }
+Index: security/manager/ssl/src/nsPKCS12Blob.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsPKCS12Blob.cpp,v
+retrieving revision 1.41
+diff -upN -r1.41 security/manager/ssl/src/nsPKCS12Blob.cpp
+--- security/manager/ssl/src/nsPKCS12Blob.cpp
++++ security/manager/ssl/src/nsPKCS12Blob.cpp
+@@ -172,8 +172,6 @@ nsPKCS12Blob::ImportFromFileHelper(nsILo
+ 
+   PK11SlotInfo *slot=nsnull;
+   nsXPIDLString tokenName;
+-  nsXPIDLCString tokenNameCString;
+-  const char *tokNameRef;
+   
+   aWantRetry = PR_FALSE;
+ 
+@@ -187,12 +185,10 @@ nsPKCS12Blob::ImportFromFileHelper(nsILo
+   }
+ 
+   mToken->GetTokenName(getter_Copies(tokenName));
+-  tokenNameCString.Adopt(ToNewUTF8String(tokenName));
+-  tokNameRef = tokenNameCString; //I do this here so that the
+-                                 //NS_CONST_CAST below doesn't
+-                                 //break the build on Win32
+-
+-  slot = PK11_FindSlotByName(NS_CONST_CAST(char*,tokNameRef));
++  {
++    NS_ConvertUTF16toUTF8 tokenNameCString(tokenName);
++    slot = PK11_FindSlotByName(tokenNameCString.BeginWriting());
++  }
+   if (!slot) {
+     srv = SECFailure;
+     goto finish;
+@@ -606,6 +602,7 @@ nsPKCS12Blob::digest_open(void *arg, PRB
+     nsCAutoString pathBuf;
+     tmpFile->GetNativePath(pathBuf);
+     cx->mTmpFilePath = ToNewCString(pathBuf);
++    if (!cx->mTmpFilePath) return SECFailure;
+ #ifdef XP_MAC
+     char *unixPath = nsnull;
+     ConvertMacPathToUnixPath(cx->mTmpFilePath, &unixPath);
+@@ -672,8 +669,7 @@ nsPKCS12Blob::nickname_collision(SECItem
+   nsCString nickname;
+   nsAutoString nickFromProp;
+   nssComponent->GetPIPNSSBundleString("P12DefaultNickname", nickFromProp);
+-  nsXPIDLCString nickFromPropC;
+-  nickFromPropC.Adopt(ToNewUTF8String(nickFromProp));
++  NS_ConvertUTF16toUTF8 nickFromPropC(nickFromProp);
+   // The user is trying to import a PKCS#12 file that doesn't have the
+   // attribute we use to set the nickname.  So in order to reduce the
+   // number of interactions we require with the user, we'll build a nickname

@@ -1,0 +1,286 @@
+Index: mozilla/security/manager/ssl/src/nsNSSComponent.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSComponent.cpp,v
+retrieving revision 1.149
+diff -u -1 -0 -p -r1.149 nsNSSComponent.cpp
+--- mozilla/security/manager/ssl/src/nsNSSComponent.cpp	11 Jun 2007 01:42:36 -0000	1.149
++++ mozilla/security/manager/ssl/src/nsNSSComponent.cpp	26 Jun 2007 12:55:13 -0000
+@@ -131,20 +131,21 @@ PRLogModuleInfo* gPIPNSSLog = nsnull;
+ #define NS_CRYPTO_HASH_BUFFER_SIZE 4096
+ 
+ static NS_DEFINE_CID(kNSSComponentCID, NS_NSSCOMPONENT_CID);
+ int nsNSSComponent::mInstanceCount = 0;
+ 
+ // XXX tmp callback for slot password
+ extern char * PR_CALLBACK 
+ pk11PasswordPrompt(PK11SlotInfo *slot, PRBool retry, void *arg);
+ 
+ #define PIPNSS_STRBUNDLE_URL "chrome://pipnss/locale/pipnss.properties"
++#define NSSERR_STRBUNDLE_URL "chrome://pipnss/locale/nsserrors.properties"
+ 
+ 
+ static PLHashNumber PR_CALLBACK certHashtable_keyHash(const void *key)
+ {
+   if (!key)
+     return 0;
+   
+   SECItem *certKey = (SECItem*)key;
+   
+   // lazy hash function, sum up all char values of SECItem
+@@ -538,20 +539,60 @@ nsNSSComponent::GetPIPNSSBundleString(co
+                                           getter_Copies(result));
+     if (NS_SUCCEEDED(rv)) {
+       outString = result;
+       rv = NS_OK;
+     }
+   }
+ 
+   return rv;
+ }
+ 
++NS_IMETHODIMP
++nsNSSComponent::NSSBundleFormatStringFromName(const char *name,
++                                              const PRUnichar **params,
++                                              PRUint32 numParams,
++                                              nsAString &outString)
++{
++  nsresult rv = NS_ERROR_FAILURE;
++
++  if (mNSSErrorsBundle && name) {
++    nsXPIDLString result;
++    rv = mNSSErrorsBundle->FormatStringFromName(NS_ConvertASCIItoUTF16(name).get(),
++                                                params, numParams,
++                                                getter_Copies(result));
++    if (NS_SUCCEEDED(rv)) {
++      outString = result;
++    }
++  }
++  return rv;
++}
++
++NS_IMETHODIMP
++nsNSSComponent::GetNSSBundleString(const char *name,
++                                   nsAString &outString)
++{
++  nsresult rv = NS_ERROR_FAILURE;
++
++  outString.SetLength(0);
++  if (mNSSErrorsBundle && name) {
++    nsXPIDLString result;
++    rv = mNSSErrorsBundle->GetStringFromName(NS_ConvertASCIItoUTF16(name).get(),
++                                             getter_Copies(result));
++    if (NS_SUCCEEDED(rv)) {
++      outString = result;
++      rv = NS_OK;
++    }
++  }
++
++  return rv;
++}
++
+ 
+ NS_IMETHODIMP
+ nsNSSComponent::SkipOcsp()
+ {
+   nsNSSShutDownPreventionLock locker;
+   CERTCertDBHandle *certdb = CERT_GetDefaultCertDB();
+ 
+   SECStatus rv = CERT_DisableOCSPChecking(certdb);
+   return (rv == SECSuccess) ? NS_OK : NS_ERROR_FAILURE;
+ }
+@@ -851,20 +892,25 @@ nsNSSComponent::InitializePIPNSSBundle()
+   nsresult rv;
+   nsCOMPtr<nsIStringBundleService> bundleService(do_GetService(NS_STRINGBUNDLE_CONTRACTID, &rv));
+   if (NS_FAILED(rv) || !bundleService) 
+     return NS_ERROR_FAILURE;
+   
+   bundleService->CreateBundle(PIPNSS_STRBUNDLE_URL,
+                               getter_AddRefs(mPIPNSSBundle));
+   if (!mPIPNSSBundle)
+     rv = NS_ERROR_FAILURE;
+ 
++  bundleService->CreateBundle(NSSERR_STRBUNDLE_URL,
++                              getter_AddRefs(mNSSErrorsBundle));
++  if (!mNSSErrorsBundle)
++    rv = NS_ERROR_FAILURE;
++
+   return rv;
+ }
+ 
+ nsresult
+ nsNSSComponent::RegisterPSMContentListener()
+ {
+   // Called during init only, no mutex required.
+ 
+   nsresult rv = NS_OK;
+   if (!mPSMContentListener) {
+@@ -2170,32 +2216,35 @@ nsNSSComponent::GetErrorMessage(nsresult
+ {
+   if (NS_ERROR_GET_MODULE(aXPCOMErrorCode) != NS_ERROR_MODULE_SECURITY
+       || NS_ERROR_GET_SEVERITY(aXPCOMErrorCode) != NS_ERROR_SEVERITY_ERROR)
+     return NS_ERROR_FAILURE;
+   
+   PRInt32 aNSPRCode = -1 * NS_ERROR_GET_CODE(aXPCOMErrorCode);
+ 
+   if (!IS_SEC_ERROR(aNSPRCode) && !IS_SSL_ERROR(aNSPRCode))
+     return NS_ERROR_FAILURE;
+ 
++  nsCOMPtr<nsIStringBundle> theBundle = mPIPNSSBundle;
+   const char *id_str = nsNSSErrors::getOverrideErrorStringName(aNSPRCode);
+ 
+-  if (!id_str)
++  if (!id_str) {
+     id_str = nsNSSErrors::getDefaultErrorStringName(aNSPRCode);
++    theBundle = mNSSErrorsBundle;
++  }
+ 
+-  if (!id_str || !mPIPNSSBundle)
++  if (!id_str || !theBundle)
+     return NS_ERROR_FAILURE;
+ 
+   nsAutoString msg;
+   nsresult rv =
+-    mPIPNSSBundle->GetStringFromName(NS_ConvertASCIItoUTF16(id_str).get(),
+-                                     getter_Copies(msg));
++    theBundle->GetStringFromName(NS_ConvertASCIItoUTF16(id_str).get(),
++                                 getter_Copies(msg));
+   if (NS_SUCCEEDED(rv)) {
+     aErrorMessage = msg;
+   }
+   return rv;
+ }
+ 
+ void
+ nsNSSComponent::DoProfileApproveChange(nsISupports* aSubject)
+ {
+   if (mShutdownObjectList->isUIActive()) {
+Index: mozilla/security/manager/ssl/src/nsNSSComponent.h
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSComponent.h,v
+retrieving revision 1.48
+diff -u -1 -0 -p -r1.48 nsNSSComponent.h
+--- mozilla/security/manager/ssl/src/nsNSSComponent.h	14 May 2007 21:09:58 -0000	1.48
++++ mozilla/security/manager/ssl/src/nsNSSComponent.h	26 Jun 2007 12:55:13 -0000
+@@ -127,20 +127,27 @@ class NS_NO_VTABLE nsINSSComponent : pub
+  public:
+   NS_DECLARE_STATIC_IID_ACCESSOR(NS_INSSCOMPONENT_IID)
+ 
+   NS_IMETHOD GetPIPNSSBundleString(const char *name,
+                                    nsAString &outString) = 0;
+   NS_IMETHOD PIPBundleFormatStringFromName(const char *name,
+                                            const PRUnichar **params,
+                                            PRUint32 numParams,
+                                            nsAString &outString) = 0;
+ 
++  NS_IMETHOD GetNSSBundleString(const char *name,
++                                nsAString &outString) = 0;
++  NS_IMETHOD NSSBundleFormatStringFromName(const char *name,
++                                           const PRUnichar **params,
++                                           PRUint32 numParams,
++                                           nsAString &outString) = 0;
++
+   // This method will just disable OCSP in NSS, it will not
+   // alter the respective pref values.
+   NS_IMETHOD SkipOcsp() = 0;
+ 
+   // This method will set the OCSP value according to the 
+   // values in the preferences.
+   NS_IMETHOD SkipOcspOff() = 0;
+ 
+   NS_IMETHOD RememberCert(CERTCertificate *cert) = 0;
+ 
+@@ -205,20 +212,26 @@ public:
+   NS_DECL_NSINSSERRORSSERVICE
+ 
+   NS_METHOD Init();
+ 
+   NS_IMETHOD GetPIPNSSBundleString(const char *name,
+                                    nsAString &outString);
+   NS_IMETHOD PIPBundleFormatStringFromName(const char *name,
+                                            const PRUnichar **params,
+                                            PRUint32 numParams,
+                                            nsAString &outString);
++  NS_IMETHOD GetNSSBundleString(const char *name,
++                               nsAString &outString);
++  NS_IMETHOD NSSBundleFormatStringFromName(const char *name,
++                                           const PRUnichar **params,
++                                           PRUint32 numParams,
++                                           nsAString &outString);
+   NS_IMETHOD SkipOcsp();
+   NS_IMETHOD SkipOcspOff();
+   nsresult InitializeCRLUpdateTimer();
+   nsresult StopCRLUpdateTimer();
+   NS_IMETHOD RemoveCrlFromList(nsAutoString);
+   NS_IMETHOD DefineNextTimer();
+   NS_IMETHOD LogoutAuthenticatedPK11();
+   NS_IMETHOD DownloadCRLDirectly(nsAutoString, nsAutoString);
+   NS_IMETHOD RememberCert(CERTCertificate *cert);
+   static nsresult GetNSSCipherIDFromPrefString(const nsACString &aPrefString, PRUint16 &aCipherId);
+@@ -263,20 +276,21 @@ private:
+   void DoProfileApproveChange(nsISupports* aSubject);
+   void DoProfileChangeNetTeardown();
+   void DoProfileChangeTeardown(nsISupports* aSubject);
+   void DoProfileBeforeChange(nsISupports* aSubject);
+   void DoProfileChangeNetRestore();
+   
+   PRLock *mutex;
+   
+   nsCOMPtr<nsIScriptSecurityManager> mScriptSecurityManager;
+   nsCOMPtr<nsIStringBundle> mPIPNSSBundle;
++  nsCOMPtr<nsIStringBundle> mNSSErrorsBundle;
+   nsCOMPtr<nsIURIContentListener> mPSMContentListener;
+   nsCOMPtr<nsIPrefBranch> mPrefBranch;
+   nsCOMPtr<nsITimer> mTimer;
+   PRBool mNSSInitialized;
+   PRBool mObserversRegistered;
+   PLHashTable *hashTableCerts;
+   nsAutoString mDownloadURL;
+   nsAutoString mCrlUpdateKey;
+   PRLock *mCrlTimerLock;
+   nsHashtable *crlsScheduledForDownload;
+Index: mozilla/security/manager/ssl/src/nsNSSErrors.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSErrors.cpp,v
+retrieving revision 1.2
+diff -u -1 -0 -p -r1.2 nsNSSErrors.cpp
+--- mozilla/security/manager/ssl/src/nsNSSErrors.cpp	13 Jun 2007 02:48:41 -0000	1.2
++++ mozilla/security/manager/ssl/src/nsNSSErrors.cpp	26 Jun 2007 12:55:13 -0000
+@@ -341,27 +341,33 @@ nsresult
+ nsNSSErrors::getErrorMessageFromCode(PRInt32 err,
+                                      nsINSSComponent *component,
+                                      nsString &returnedMessage)
+ {
+   NS_ENSURE_ARG_POINTER(component);
+   returnedMessage.Truncate();
+ 
+   const char *nss_error_id_str = getDefaultErrorStringName(err);
+   const char *id_str = getOverrideErrorStringName(err);
+ 
+-  if (!id_str)
+-    id_str = nss_error_id_str;
+-
+-  if (id_str)
++  if (id_str || nss_error_id_str)
+   {
+     nsString defMsg;
+-    nsresult rv = component->GetPIPNSSBundleString(id_str, defMsg);
++    nsresult rv;
++    if (id_str)
++    {
++      rv = component->GetPIPNSSBundleString(id_str, defMsg);
++    }
++    else
++    {
++      rv = component->GetNSSBundleString(nss_error_id_str, defMsg);
++    }
++
+     if (NS_SUCCEEDED(rv))
+     {
+       returnedMessage.Append(defMsg);
+       returnedMessage.Append(NS_LITERAL_STRING(" "));
+     }
+ 
+     nsCString error_id(nss_error_id_str);
+     ToLowerCase(error_id);
+     NS_ConvertASCIItoUTF16 idU(error_id);
+ 

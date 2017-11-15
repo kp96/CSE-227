@@ -1,0 +1,131 @@
+Index: caps/idl/nsIScriptSecurityManager.idl
+===================================================================
+RCS file: /cvsroot/mozilla/caps/idl/nsIScriptSecurityManager.idl,v
+retrieving revision 1.58
+diff -p -u -8 -r1.58 nsIScriptSecurityManager.idl
+--- caps/idl/nsIScriptSecurityManager.idl	22 Aug 2003 03:05:48 -0000	1.58
++++ caps/idl/nsIScriptSecurityManager.idl	27 Sep 2003 22:56:55 -0000
+@@ -229,14 +229,22 @@ interface nsIScriptSecurityManager : nsI
+                                              in nsIPrincipal aTargetPrincipal);
+ 
+     /**
+      * Returns the principal of the global object of the given context, or null
+      * if no global or no principal.
+      */
+     [noscript] nsIPrincipal getPrincipalFromContext(in JSContextPtr cx);
+ 
++    /**
++     * Utility method for comparing two URIs.  For security purposes, two URIs
++     * are equivalent if their schemes, hosts, and ports (if any) match.  This
++     * method returns true if aSubjectURI and aObjectURI have the same origin,
++     * false otherwise.
++     */
++    [noscript] boolean securityCompareURIs(in nsIURI aSubjectURI,
++                                           in nsIURI aObjectURI);
+ };
+ 
+ %{C++
+ #define NS_SCRIPTSECURITYMANAGER_CONTRACTID "@mozilla.org/scriptsecuritymanager;1"
+ #define NS_SCRIPTSECURITYMANAGER_CLASSNAME "scriptsecuritymanager"
+ %}
+Index: caps/include/nsScriptSecurityManager.h
+===================================================================
+RCS file: /cvsroot/mozilla/caps/include/nsScriptSecurityManager.h,v
+retrieving revision 1.74
+diff -p -u -8 -r1.74 nsScriptSecurityManager.h
+--- caps/include/nsScriptSecurityManager.h	22 Aug 2003 03:05:51 -0000	1.74
++++ caps/include/nsScriptSecurityManager.h	27 Sep 2003 22:56:55 -0000
+@@ -280,21 +280,16 @@ public:
+ 
+     static nsSystemPrincipal*
+     SystemPrincipalSingletonConstructor();
+ 
+     JSContext* GetCurrentJSContext();
+ 
+     JSContext* GetSafeJSContext();
+ 
+-    static nsresult
+-    SecurityCompareURIs(nsIURI* aSourceURI,
+-                        nsIURI* aTargetURI,
+-                        PRBool* result);
+-
+ private:
+ 
+     // GetScriptSecurityManager is the only call that can make one
+     nsScriptSecurityManager();
+     virtual ~nsScriptSecurityManager();
+ 
+     static JSBool JS_DLL_CALLBACK
+     CheckObjectAccess(JSContext *cx, JSObject *obj,
+Index: caps/src/nsScriptSecurityManager.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/caps/src/nsScriptSecurityManager.cpp,v
+retrieving revision 1.218
+diff -p -u -8 -r1.218 nsScriptSecurityManager.cpp
+--- caps/src/nsScriptSecurityManager.cpp	13 Sep 2003 19:35:43 -0000	1.218
++++ caps/src/nsScriptSecurityManager.cpp	27 Sep 2003 22:56:57 -0000
+@@ -209,20 +209,17 @@ nsScriptSecurityManager::GetSafeJSContex
+     }
+ 
+     JSContext *cx;
+     if (NS_FAILED(mJSContextStack->GetSafeJSContext(&cx)))
+         return nsnull;
+     return cx;
+ }
+ 
+-/* Static function for comparing two URIs - for security purposes,
+- * two URIs are equivalent if their scheme, host, and port are equal.
+- */
+-/*static*/ nsresult
++NS_IMETHODIMP
+ nsScriptSecurityManager::SecurityCompareURIs(nsIURI* aSourceURI,
+                                              nsIURI* aTargetURI,
+                                              PRBool* result)
+ {
+     nsresult rv;
+     *result = PR_FALSE;
+ 
+     if (aSourceURI == aTargetURI)
+Index: dom/src/base/nsGlobalWindow.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/dom/src/base/nsGlobalWindow.cpp,v
+retrieving revision 1.619
+diff -p -u -8 -r1.619 nsGlobalWindow.cpp
+--- dom/src/base/nsGlobalWindow.cpp	27 Sep 2003 04:18:14 -0000	1.619
++++ dom/src/base/nsGlobalWindow.cpp	27 Sep 2003 22:56:59 -0000
+@@ -523,31 +523,30 @@ GlobalWindowImpl::SetNewDocument(nsIDOMD
+ 
+       if (treeItem) {
+         PRInt32 itemType = nsIDocShellTreeItem::typeContent;
+         treeItem->GetItemType(&itemType);
+ 
+         isContentWindow = itemType != nsIDocShellTreeItem::typeChrome;
+       }
+ 
+-      PRBool isAboutBlank = PR_FALSE;
+       nsCAutoString url;
+       docURL->GetSpec(url);
+-      isAboutBlank = url.Equals(NS_LITERAL_CSTRING("about:blank"));
++      PRBool isAboutBlank = url.Equals(NS_LITERAL_CSTRING("about:blank"));
+ 
+       PRBool isSameOrigin = PR_FALSE;
+       if (isAboutBlank && mOpenerScriptURL) {
+         nsCOMPtr<nsIWebNavigation> webNav(do_QueryInterface(mDocShell));
+         if (webNav) {
+           nsCOMPtr<nsIURI> newDocURL;
+           webNav->GetCurrentURI(getter_AddRefs(newDocURL));
+           if (newDocURL && sSecMan) {
+-            isSameOrigin =
+-              NS_SUCCEEDED(sSecMan->CheckSameOriginURI(mOpenerScriptURL,
+-                                                       newDocURL));
++            sSecMan->SecurityCompareURIs(mOpenerScriptURL,
++                                         newDocURL,
++                                         &isSameOrigin);
+           }
+         }
+       }
+ 
+       if (!isAboutBlank ||
+           (isContentWindow && aClearScopeHint && !isSameOrigin)) {
+         // the current document is *not* about:blank,
+         // or aClearScopeHint is true and the new document

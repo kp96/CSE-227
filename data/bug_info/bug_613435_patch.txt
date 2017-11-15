@@ -1,0 +1,22 @@
+From: Serge Gautherie <sgautherie.bz@free.fr>
+
+Bug 613435 - msgCompSMIMEOverlay.xul: 1 s/observes/command/;
+(Av1) Just substitute it.
+
+diff --git a/mail/extensions/smime/content/msgCompSMIMEOverlay.xul b/mail/extensions/smime/content/msgCompSMIMEOverlay.xul
+--- a/mail/extensions/smime/content/msgCompSMIMEOverlay.xul
++++ b/mail/extensions/smime/content/msgCompSMIMEOverlay.xul
+@@ -105,12 +105,12 @@
+ 
+   <commandset id="composeCommands">
+     <command id="cmd_viewSecurityStatus" oncommand="showMessageComposeSecurityStatus();"/>
+   </commandset>
+ 
+   <menupopup id="menu_View_Popup">
+     <menuseparator id="viewMenuBeforeSecurityStatusSeparator"/>
+     <menuitem id="menu_viewSecurityStatus" label="&menu_viewSecurityStatus.label;"
+-      accesskey="&menu_viewSecurityStatus.accesskey;" observes="cmd_viewSecurityStatus"/>
++      accesskey="&menu_viewSecurityStatus.accesskey;" command="cmd_viewSecurityStatus"/>
+   </menupopup>
+ 
+ </overlay>

@@ -1,0 +1,1919 @@
+Index: netwerk/base/public/nsIProtocolHandler.idl
+===================================================================
+RCS file: /cvsroot/mozilla/netwerk/base/public/nsIProtocolHandler.idl,v
+retrieving revision 1.25
+diff -u -p -d -8 -r1.25 nsIProtocolHandler.idl
+--- netwerk/base/public/nsIProtocolHandler.idl	2 May 2006 18:53:44 -0000	1.25
++++ netwerk/base/public/nsIProtocolHandler.idl	20 Oct 2006 04:11:59 -0000
+@@ -130,23 +130,91 @@ interface nsIProtocolHandler : nsISuppor
+     const unsigned long URI_NORELATIVE = (1<<0);
+ 
+     /**
+      * no authority component (file, ...)
+      */
+     const unsigned long URI_NOAUTH = (1<<1);
+ 
+     /**
+-     * The URIs for this protocol have no inherent security context.  That is,
+-     * it's not possible to decide what a document loaded from one of these
+-     * URIs should be allowed to do.
++     * The URIs for this protocol have no inherent security context, so
++     * documents loaded via this protocol should inherit the security context
++     * from the document that loads them.
+      */
+-    const unsigned long URI_HAS_NO_SECURITY_CONTEXT = (1<<4);
++    const unsigned long URI_INHERITS_SECURITY_CONTEXT = (1<<4);
++
++    /**
++     * "Automatic" loads that would replace the document (e.g. <meta> refresh,
++     * certain types of XLinks, possibly other loads that the application
++     * decides are not user triggered) are not allowed if the originating (NOT
++     * the target) URI has this protocol flag.  Note that the decision as to
++     * what constitutes an "automatic" load is made externally, by the caller
++     * of nsIScriptSecurityManager::CheckLoadURI.  See documentation for that
++     * method for more information.
++     *
++     * A typical protocol that might want to set this flag is a protocol that
++     * shows highly untrusted content in a viewing area that the user expects
++     * to have a lot of control over, such as an e-mail reader.
++     */
++    const unsigned long URI_FORBIDS_AUTOMATIC_DOCUMENT_REPLACEMENT = (1<<5);
++
++    /**
++     * +-------------------------------------------------------------------+
++     * |                                                                   |
++     * |  ALL PROTOCOL HANDLERS MUST SET ONE OF THE FOLLOWING FOUR FLAGS.  |
++     * |                                                                   |
++     * +-------------------------------------------------------------------+
++     *
++     * These flags are used to determine who is allowed to load URIs for this
++     * protocol.  Note that if a URI is nested, only the flags for the
++     * innermost URI matter.  See nsINestedURI.
++     *
++     * If none of these four flags are set, the URI must be treated as if it
++     * had the URI_LOADABLE_BY_ANYONE flag set, for compatibility with protocol
++     * handlers written against Gecko 1.8 or earlier.  In this case, there may
++     * be run-time warning messages indicating that a "default insecure"
++     * assumption is being made.  At some point in the futures (Mozilla 2.0,
++     * most likely), these warnings will become errors.
++     */
++
++    /**
++     * The URIs for this protocol can be loaded by anyone.  For example, any
++     * website should be allowed to trigger a load of a URI for this protocol.
++     * Web-safe protocols like "http" should set this flag.
++     */
++    const unsigned long URI_LOADABLE_BY_ANYONE = (1<<6);
++    
++    /**
++     * The URIs for this protocol are UNSAFE if loaded by untrusted (web)
++     * content and may only be loaded by privileged code (for example, code
++     * which has the system principal).  Various internal protocols should set
++     * this flag.
++     */
++    const unsigned long URI_DANGEROUS_TO_LOAD = (1<<7);
++    
++    /**
++     * The URIs for this protocol point to resources that are part of the
++     * application's user interface.  There are cases when such resources may
++     * be made accessible to untrusted content such as web pages, so this is
++     * less restrictive than URI_DANGEROUS_TO_LOAD but more restrictive than
++     * URI_LOADABLE_BY_ANYONE.  See the documentation for
++     * nsIScriptSecurityManager::CheckLoadURI.
++     */
++    const unsigned long URI_IS_UI_RESOURCE = (1<<8);
+ 
+     /**
++     * Loading of URIs for this protocol from other origins should only be
++     * allowed if those origins should have access to the local filesystem.
++     * It's up to the application to decide what origins should have such
++     * access.  Protocols like "file" that point to local data should set this
++     * flag.
++     */
++    const unsigned long URI_IS_LOCAL_FILE = (1<<9);
++    
++    /**
+      * This protocol handler can be proxied via a proxy (socks or http)
+      * (e.g., irc, smtp, http, etc.).  If the protocol supports transparent
+      * proxying, the handler should implement nsIProxiedProtocolHandler.
+      *
+      * If it supports only HTTP proxying, then it need not support
+      * nsIProxiedProtocolHandler, but should instead set the ALLOWS_PROXY_HTTP
+      * flag (see below).
+      *
+Index: caps/idl/nsIScriptSecurityManager.idl
+===================================================================
+RCS file: /cvsroot/mozilla/caps/idl/nsIScriptSecurityManager.idl,v
+retrieving revision 1.70
+diff -u -p -d -8 -r1.70 nsIScriptSecurityManager.idl
+--- caps/idl/nsIScriptSecurityManager.idl	21 Aug 2006 22:15:20 -0000	1.70
++++ caps/idl/nsIScriptSecurityManager.idl	20 Oct 2006 04:03:13 -0000
+@@ -36,17 +36,17 @@
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "nsISupports.idl"
+ #include "nsIPrincipal.idl"
+ #include "nsIXPCSecurityManager.idl"
+ interface nsIURI;
+ 
+ 
+-[scriptable, uuid(5a46e611-cf4a-4407-a5b4-002fcf051120)]
++[scriptable, uuid(5ed0b9b8-e7f4-4b55-9805-7ab857b335a1)]
+ interface nsIScriptSecurityManager : nsIXPCSecurityManager
+ {
+     ///////////////// Security Checks //////////////////
+     /**
+      * Checks whether the running script is allowed to access aProperty.
+      */
+     [noscript] void checkPropertyAccess(in JSContextPtr aJSContext,
+                                         in JSObjectPtr aJSObject,
+@@ -74,28 +74,45 @@ interface nsIScriptSecurityManager : nsI
+     [noscript] void checkLoadURIFromScript(in JSContextPtr cx, in nsIURI uri);
+ 
+     /**
+      * Default CheckLoadURI permissions
+      */
+     // Default permissions
+     const unsigned long STANDARD = 0;
+ 
+-    // If the source is mail, disallow the load
+-    const unsigned long DISALLOW_FROM_MAIL = 1 << 0;
++    // Indicate that the load is a load of a new document that is not
++    // user-triggered.  Here "user-triggered" could be broadly interpreted --
++    // for example, scripted sets of window.location.href might be treated as
++    // "user-triggered" in some circumstances.  A typical example of a load
++    // that is not user-triggered is a <meta> refresh load.  If this flag is
++    // set, the load will be denied if the originating principal's URI has the
++    // nsIProtocolHandler::URI_FORBIDS_AUTOMATIC_DOCUMENT_REPLACEMENT flag set.
++    const unsigned long LOAD_IS_AUTOMATIC_DOCUMENT_REPLACEMENT = 1 << 0;
+ 
+-    // Allow the loading of chrome URLs by non-chrome URLs
++    // Allow the loading of chrome URLs by non-chrome URLs.  Use with great
++    // care!  This will actually allow the loading of any URI which has the
++    // nsIProtocolHandler::URI_IS_UI_RESOURCE protocol handler flag set.  Ths
++    // probably means at least chrome: and resource:.
+     const unsigned long ALLOW_CHROME = 1 << 1;
+ 
+-    // Don't allow javascript: and data: URLs to load
+-    const unsigned long DISALLOW_SCRIPT_OR_DATA = 1 << 2;
++    // Don't allow URLs which would inherit the caller's principal (such as
++    // javascript: or data:) to load.  See
++    // nsIProtocolHandler::URI_INHERITS_SECURITY_CONTEXT.
++    const unsigned long DISALLOW_INHERIT_PRINCIPAL = 1 << 2;
++
++    // Alias for DISALLOW_INHERIT_PRINCIPAL for backwards compat with
++    // JS-implemented extensions.
++    const unsigned long DISALLOW_SCRIPT_OR_DATA = DISALLOW_INHERIT_PRINCIPAL;
+ 
+     // Don't allow javascript: URLs to load
+     //   WARNING: Support for this value was added in Mozilla 1.7.8 and
+     //   Firefox 1.0.4.  Use in prior versions WILL BE IGNORED.
++    // When using this, make sure that you actually want DISALLOW_SCRIPT, not
++    // DISALLOW_INHERIT_PRINCIPAL
+     const unsigned long DISALLOW_SCRIPT = 1 << 3;
+ 
+     /**
+      * Check that content with principal aPrincipal can load "uri".
+      *
+      * Will return error code NS_ERROR_DOM_BAD_URI if the load request 
+      * should be denied.
+      *
+Index: caps/include/nsScriptSecurityManager.h
+===================================================================
+RCS file: /cvsroot/mozilla/caps/include/nsScriptSecurityManager.h,v
+retrieving revision 1.99
+diff -u -p -d -8 -r1.99 nsScriptSecurityManager.h
+--- caps/include/nsScriptSecurityManager.h	4 May 2006 15:23:42 -0000	1.99
++++ caps/include/nsScriptSecurityManager.h	20 Oct 2006 04:03:13 -0000
+@@ -419,19 +419,16 @@ private:
+     doGetObjectPrincipal(JSContext *cx, JSObject *obj,
+                          PRBool aAllowShortCircuit = PR_FALSE);
+ 
+     // Returns null if a principal cannot be found.  Note that rv can be NS_OK
+     // when this happens -- this means that there was no JS running.
+     nsIPrincipal*
+     doGetSubjectPrincipal(nsresult* rv);
+     
+-    static nsresult
+-    GetBaseURIScheme(nsIURI* aURI, nsCString& aScheme);
+-
+     static nsresult 
+     ReportError(JSContext* cx, const nsAString& messageTag,
+                 nsIURI* aSource, nsIURI* aTarget);
+ 
+     nsresult
+     CheckPropertyAccessImpl(PRUint32 aAction,
+                             nsIXPCNativeCallContext* aCallContext,
+                             JSContext* cx, JSObject* aJSObject,
+Index: caps/src/nsScriptSecurityManager.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/caps/src/nsScriptSecurityManager.cpp,v
+retrieving revision 1.310
+diff -u -p -d -8 -r1.310 nsScriptSecurityManager.cpp
+--- caps/src/nsScriptSecurityManager.cpp	21 Aug 2006 22:15:20 -0000	1.310
++++ caps/src/nsScriptSecurityManager.cpp	20 Oct 2006 04:14:49 -0000
+@@ -1159,36 +1159,16 @@ nsScriptSecurityManager::CheckLoadURIFro
+     // Report error.
+     nsCAutoString spec;
+     if (NS_FAILED(aURI->GetAsciiSpec(spec)))
+         return NS_ERROR_FAILURE;
+     JS_ReportError(cx, "Access to '%s' from script denied", spec.get());
+     return NS_ERROR_DOM_BAD_URI;
+ }
+ 
+-// static
+-nsresult
+-nsScriptSecurityManager::GetBaseURIScheme(nsIURI* aURI,
+-                                          nsCString& aScheme)
+-{
+-    if (!aURI)
+-       return NS_ERROR_FAILURE;
+-
+-    nsresult rv;
+-
+-    // Get the innermost URI
+-    nsCOMPtr<nsIURI> uri = NS_GetInnermostURI(aURI);
+-
+-    //-- get the source scheme
+-    rv = uri->GetScheme(aScheme);
+-    if (NS_FAILED(rv)) return rv;
+-
+-    return NS_OK;
+-}
+-
+ NS_IMETHODIMP
+ nsScriptSecurityManager::CheckLoadURI(nsIURI *aSourceURI, nsIURI *aTargetURI,
+                                       PRUint32 aFlags)
+ {
+     // FIXME: bug 327244 -- this function should really die...  Really truly.
+     NS_PRECONDITION(aSourceURI, "CheckLoadURI called with null source URI");
+     NS_ENSURE_ARG_POINTER(aSourceURI);
+ 
+@@ -1198,181 +1178,222 @@ nsScriptSecurityManager::CheckLoadURI(ns
+     // really needs to go away....
+     nsCOMPtr<nsIPrincipal> sourcePrincipal;
+     nsresult rv = CreateCodebasePrincipal(aSourceURI,
+                                           getter_AddRefs(sourcePrincipal));
+     NS_ENSURE_SUCCESS(rv, rv);
+     return CheckLoadURIWithPrincipal(sourcePrincipal, aTargetURI, aFlags);
+ }
+ 
++/**
++ * Helper method to handle cases where a flag passed to
++ * CheckLoadURIWithPrincipal means denying loading if the given URI has certain
++ * nsIProtocolHandler flags set.
++ * @return if success, access is allowed. Otherwise, deny access
++ */
++static nsresult
++DenyAccessIfURIHasFlags(nsIURI* aURI, PRUint32 aURIFlags)
++{
++    NS_PRECONDITION(aURI, "Must have URI!");
++    
++    PRBool uriHasFlags;
++    nsresult rv =
++        NS_URIChainHasFlags(aURI, aURIFlags, &uriHasFlags);
++    NS_ENSURE_SUCCESS(rv, rv);
++
++    if (uriHasFlags) {
++        return NS_ERROR_DOM_BAD_URI;
++    }
++
++    return NS_OK;
++}
++
+ NS_IMETHODIMP
+ nsScriptSecurityManager::CheckLoadURIWithPrincipal(nsIPrincipal* aPrincipal,
+                                                    nsIURI *aTargetURI,
+                                                    PRUint32 aFlags)
+ {
+     NS_PRECONDITION(aPrincipal, "CheckLoadURIWithPrincipal must have a principal");
+     // If someone passes a flag that we don't understand, we should
+     // fail, because they may need a security check that we don't
+     // provide.
+-    NS_ENSURE_FALSE(aFlags & ~(nsIScriptSecurityManager::DISALLOW_FROM_MAIL |
++    NS_ENSURE_FALSE(aFlags & ~(nsIScriptSecurityManager::LOAD_IS_AUTOMATIC_DOCUMENT_REPLACEMENT |
+                                nsIScriptSecurityManager::ALLOW_CHROME |
+                                nsIScriptSecurityManager::DISALLOW_SCRIPT |
+-                               nsIScriptSecurityManager::DISALLOW_SCRIPT_OR_DATA),
++                               nsIScriptSecurityManager::DISALLOW_INHERIT_PRINCIPAL),
+                     NS_ERROR_UNEXPECTED);
+     NS_ENSURE_ARG_POINTER(aPrincipal);
+ 
+     if (aPrincipal == mSystemPrincipal) {
+         // Allow access
+         return NS_OK;
+     }
+     
+     nsCOMPtr<nsIURI> sourceURI;
+     aPrincipal->GetURI(getter_AddRefs(sourceURI));
+ 
+     NS_ASSERTION(sourceURI, "Non-system principals passed to CheckLoadURIWithPrincipal must have a URI!");
+     
+-    //-- get the source scheme
+-    nsCAutoString sourceScheme;
+-    nsresult rv = GetBaseURIScheme(sourceURI, sourceScheme);
+-    if (NS_FAILED(rv)) return rv;
++    // Automatic loads are not allowed from certain protocols.
++    if (aFlags & nsIScriptSecurityManager::LOAD_IS_AUTOMATIC_DOCUMENT_REPLACEMENT) {
++        nsresult rv =
++            DenyAccessIfURIHasFlags(sourceURI,
++                                    nsIProtocolHandler::URI_FORBIDS_AUTOMATIC_DOCUMENT_REPLACEMENT);
++        NS_ENSURE_SUCCESS(rv, rv);
++    }
+ 
+-    // Some loads are not allowed from mail/news messages
+-    if ((aFlags & nsIScriptSecurityManager::DISALLOW_FROM_MAIL) &&
+-        (sourceScheme.LowerCaseEqualsLiteral("mailbox") ||
+-         sourceScheme.LowerCaseEqualsLiteral("imap")    ||
+-         sourceScheme.LowerCaseEqualsLiteral("news")))
+-    {
+-        return NS_ERROR_DOM_BAD_URI;
++    // If DISALLOW_INHERIT_PRINCIPAL is set, we prevent loading of URIs which
++    // would do such inheriting.  That would be URIs that do not have their own
++    // security context.
++    if (aFlags & nsIScriptSecurityManager::DISALLOW_INHERIT_PRINCIPAL) {
++        nsresult rv =
++            DenyAccessIfURIHasFlags(aTargetURI,
++                                    nsIProtocolHandler::URI_INHERITS_SECURITY_CONTEXT);
++        NS_ENSURE_SUCCESS(rv, rv);
+     }
+ 
++    // If either URI is a nested URI, get the base URI
++    nsCOMPtr<nsIURI> sourceBaseURI = NS_GetInnermostURI(sourceURI);
++    nsCOMPtr<nsIURI> targetBaseURI = NS_GetInnermostURI(aTargetURI);
++
+     //-- get the target scheme
+     nsCAutoString targetScheme;
+-    rv = GetBaseURIScheme(aTargetURI, targetScheme);
++    nsresult rv = targetBaseURI->GetScheme(targetScheme);
+     if (NS_FAILED(rv)) return rv;
+ 
+-    //-- Some callers do not allow loading javascript: or data: URLs
+-    if (((aFlags & (nsIScriptSecurityManager::DISALLOW_SCRIPT |
+-                    nsIScriptSecurityManager::DISALLOW_SCRIPT_OR_DATA)) &&
+-         targetScheme.Equals("javascript")) ||
+-        ((aFlags & nsIScriptSecurityManager::DISALLOW_SCRIPT_OR_DATA) &&
+-         targetScheme.Equals("data")))
++    //-- Some callers do not allow loading javascript:
++    if ((aFlags & nsIScriptSecurityManager::DISALLOW_SCRIPT) &&
++         targetScheme.EqualsLiteral("javascript"))
+     {
+        return NS_ERROR_DOM_BAD_URI;
+     }
+ 
++    //-- get the source scheme
++    nsCAutoString sourceScheme;
++    rv = sourceURI->GetScheme(sourceScheme);
++    if (NS_FAILED(rv)) return rv;
++
+     if (targetScheme.Equals(sourceScheme,
+                             nsCaseInsensitiveCStringComparator()) &&
+         !sourceScheme.LowerCaseEqualsLiteral(NS_NULLPRINCIPAL_SCHEME))
+     {
+         // every scheme can access another URI from the same scheme,
+         // as long as they don't represent null principals.
+         return NS_OK;
+     }
+ 
+-    //-- If the schemes don't match, the policy is specified in this table.
+-    enum Action { AllowProtocol, DenyProtocol, PrefControlled, ChromeProtocol};
+-    static const struct
+-    {
+-        const char *name;
+-        Action action;
+-    } protocolList[] =
+-    {
+-        //-- Keep the most commonly used protocols at the top of the list
+-        //   to increase performance
+-        { "http",            AllowProtocol  },
+-        { "chrome",          ChromeProtocol },
+-        { "file",            PrefControlled },
+-        { "https",           AllowProtocol  },
+-        { "moz-anno",        DenyProtocol   },
+-        { "mailbox",         DenyProtocol   },
+-        { "pop",             AllowProtocol  },
+-        { "imap",            DenyProtocol   },
+-        { "pop3",            DenyProtocol   },
+-        { "news",            AllowProtocol  },
+-        { "javascript",      AllowProtocol  },
+-        { "ftp",             AllowProtocol  },
+-        { "moz-safe-about",  AllowProtocol  },
+-        { "about",           DenyProtocol   },
+-        { "mailto",          AllowProtocol  },
+-        { "aim",             AllowProtocol  },
+-        { "data",            AllowProtocol  },
+-        { "keyword",         DenyProtocol   },
+-        { "resource",        ChromeProtocol },
+-        { "gopher",          AllowProtocol  },
+-        { "datetime",        DenyProtocol   },
+-        { "finger",          AllowProtocol  },
+-        { "res",             DenyProtocol   },
+-        { "x-jsd",           ChromeProtocol },
++    NS_NAMED_LITERAL_STRING(errorTag, "CheckLoadURIError");
++    
++    // If the schemes don't match, the policy is specified by the protocol
++    // flags on the target URI.  Note that the order of policy checks here is
++    // very important!  We start from most restrictive and work our way down.
++    // Note that since we're working with the innermost URI, we can just use
++    // the methods that work on chains of nested URIs and they will only look
++    // at the flags for our one URI.
+ 
+-        // Don't allow random people to load null-principal URIs.  Not like it
+-        // matters _that_ much, since we won't have a useful handler for them,
+-        // but...
+-        { NS_NULLPRINCIPAL_SCHEME, DenyProtocol }
+-    };
++    // Check for system target URI
++    rv = DenyAccessIfURIHasFlags(targetBaseURI,
++                                 nsIProtocolHandler::URI_DANGEROUS_TO_LOAD);
++    if (NS_FAILED(rv)) {
++        // Deny access, since the origin principal is not system
++        ReportError(nsnull, errorTag, sourceURI, aTargetURI);
++        return rv;
++    }
+ 
+-    NS_NAMED_LITERAL_STRING(errorTag, "CheckLoadURIError");
+-    for (unsigned i=0; i < sizeof(protocolList)/sizeof(protocolList[0]); i++)
+-    {
+-        if (targetScheme.LowerCaseEqualsASCII(protocolList[i].name))
+-        {
+-            switch (protocolList[i].action)
+-            {
+-            case AllowProtocol:
+-                // everyone can access these schemes.
+-                return NS_OK;
+-            case PrefControlled:
+-                {
+-                    // resource: and chrome: are equivalent, securitywise
+-                    // That's bogus!!  Fix this.  But watch out for
+-                    // the view-source stylesheet?
+-                    if (sourceScheme.EqualsLiteral("chrome") ||
+-                        sourceScheme.EqualsLiteral("resource"))
+-                        return NS_OK;
++    // Check for chrome target URI
++    PRBool hasFlags;
++    rv = NS_URIChainHasFlags(targetBaseURI,
++                             nsIProtocolHandler::URI_IS_UI_RESOURCE,
++                             &hasFlags);
++    NS_ENSURE_SUCCESS(rv, rv);
++    if (hasFlags) {
++        if (aFlags & nsIScriptSecurityManager::ALLOW_CHROME) {
++            return NS_OK;
++        }
+ 
+-                    // Now check capability policies
+-                    static const char loadURIPrefGroup[] = "checkloaduri";
+-                    ClassInfoData nameData(nsnull, loadURIPrefGroup);
++        // resource: and chrome: are equivalent, securitywise
++        // That's bogus!!  Fix this.  But watch out for
++        // the view-source stylesheet?
++        PRBool sourceIsChrome;
++        rv = NS_URIChainHasFlags(sourceBaseURI,
++                                 nsIProtocolHandler::URI_IS_UI_RESOURCE,
++                                 &sourceIsChrome);
++        NS_ENSURE_SUCCESS(rv, rv);
++        if (sourceIsChrome) {
++            return NS_OK;
++        }
++        ReportError(nsnull, errorTag, sourceURI, aTargetURI);
++        return NS_ERROR_DOM_BAD_URI;
++    }
+ 
+-                    SecurityLevel secLevel;
+-                    rv = LookupPolicy(aPrincipal, nameData, sEnabledID,
+-                                      nsIXPCSecurityManager::ACCESS_GET_PROPERTY, 
+-                                      nsnull, &secLevel);
+-                    if (NS_SUCCEEDED(rv) && secLevel.level == SCRIPT_SECURITY_ALL_ACCESS)
+-                    {
+-                        // OK for this site!
+-                        return NS_OK;
+-                    }
++    // Check for target URI pointing to a file
++    rv = NS_URIChainHasFlags(targetBaseURI,
++                             nsIProtocolHandler::URI_IS_LOCAL_FILE,
++                             &hasFlags);
++    NS_ENSURE_SUCCESS(rv, rv);
++    if (hasFlags) {
++        // resource: and chrome: are equivalent, securitywise
++        // That's bogus!!  Fix this.  But watch out for
++        // the view-source stylesheet?
++        PRBool sourceIsChrome;
++        rv = NS_URIChainHasFlags(sourceURI,
++                                 nsIProtocolHandler::URI_IS_UI_RESOURCE,
++                                 &sourceIsChrome);
++        NS_ENSURE_SUCCESS(rv, rv);
++        if (sourceIsChrome) {
++            return NS_OK;
++        }
+ 
+-                    ReportError(nsnull, errorTag, sourceURI, aTargetURI);
+-                    return NS_ERROR_DOM_BAD_URI;
+-                }
+-            case ChromeProtocol:
+-                if (aFlags & nsIScriptSecurityManager::ALLOW_CHROME)
+-                    return NS_OK;
+-                // resource: and chrome: are equivalent, securitywise
+-                // That's bogus!!  Fix this.  But watch out for
+-                // the view-source stylesheet?
+-                if (sourceScheme.EqualsLiteral("chrome") ||
+-                    sourceScheme.EqualsLiteral("resource"))
+-                    return NS_OK;
+-                ReportError(nsnull, errorTag, sourceURI, aTargetURI);
+-                return NS_ERROR_DOM_BAD_URI;
+-            case DenyProtocol:
+-                // Deny access
+-                ReportError(nsnull, errorTag, sourceURI, aTargetURI);
+-                return NS_ERROR_DOM_BAD_URI;
+-            }
++        // Now check capability policies
++        static const char loadURIPrefGroup[] = "checkloaduri";
++        ClassInfoData nameData(nsnull, loadURIPrefGroup);
++
++        SecurityLevel secLevel;
++        rv = LookupPolicy(aPrincipal, nameData, sEnabledID,
++                          nsIXPCSecurityManager::ACCESS_GET_PROPERTY, 
++                          nsnull, &secLevel);
++        if (NS_SUCCEEDED(rv) && secLevel.level == SCRIPT_SECURITY_ALL_ACCESS)
++        {
++            // OK for this site!
++            return NS_OK;
+         }
++
++        ReportError(nsnull, errorTag, sourceURI, aTargetURI);
++        return NS_ERROR_DOM_BAD_URI;
+     }
+ 
+-    // If we reach here, we have an unknown protocol. Warn, but allow.
+-    // This is risky from a security standpoint, but allows flexibility
+-    // in installing new protocol handlers after initial ship.
+-    NS_WARNING("unknown protocol in nsScriptSecurityManager::CheckLoadURI");
++    // OK, everyone is allowed to load this, since unflagged handlers are
++    // deprecated but treated as URI_LOADABLE_BY_ANYONE.  But check whether we
++    // need to warn.  At some point we'll want to make this warning into an
++    // error and treat unflagged handlers as URI_DANGEROUS_TO_LOAD.
++    rv = NS_URIChainHasFlags(targetBaseURI,
++                             nsIProtocolHandler::URI_LOADABLE_BY_ANYONE,
++                             &hasFlags);
++    NS_ENSURE_SUCCESS(rv, rv);
++    if (!hasFlags) {
++        nsXPIDLString message;
++        NS_ConvertASCIItoUTF16 ucsTargetScheme(targetScheme);
++        const PRUnichar* formatStrings[] = { ucsTargetScheme.get() };
++        rv = sStrBundle->
++            FormatStringFromName(NS_LITERAL_STRING("ProtocolFlagError").get(),
++                                 formatStrings,
++                                 NS_ARRAY_LENGTH(formatStrings),
++                                 getter_Copies(message));
++        if (NS_SUCCEEDED(rv)) {
++            nsCOMPtr<nsIConsoleService> console(
++              do_GetService("@mozilla.org/consoleservice;1"));
++            NS_ENSURE_TRUE(console, NS_ERROR_FAILURE);
+ 
++            console->LogStringMessage(message.get());
++#ifdef DEBUG
++            fprintf(stderr, "%s\n", NS_ConvertUTF16toUTF8(message).get());
++#endif
++        }
++    }
++    
+     return NS_OK;
+ }
+ 
+ nsresult
+ nsScriptSecurityManager::ReportError(JSContext* cx, const nsAString& messageTag,
+                                      nsIURI* aSource, nsIURI* aTarget)
+ {
+     nsresult rv;
+@@ -1868,22 +1889,22 @@ nsScriptSecurityManager::CreateCodebaseP
+ 
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsScriptSecurityManager::GetCodebasePrincipal(nsIURI *aURI,
+                                               nsIPrincipal **result)
+ {
+-    PRBool noContext;
++    PRBool inheritsPrincipal;
+     nsresult rv =
+         NS_URIChainHasFlags(aURI,
+-                            nsIProtocolHandler::URI_HAS_NO_SECURITY_CONTEXT,
+-                            &noContext);
+-    if (NS_FAILED(rv) || noContext) {
++                            nsIProtocolHandler::URI_INHERITS_SECURITY_CONTEXT,
++                            &inheritsPrincipal);
++    if (NS_FAILED(rv) || inheritsPrincipal) {
+         return CallCreateInstance(NS_NULLPRINCIPAL_CONTRACTID, result);
+     }
+     
+     nsCOMPtr<nsIPrincipal> principal;
+     rv = CreateCodebasePrincipal(aURI, getter_AddRefs(principal));
+     if (NS_FAILED(rv)) return rv;
+ 
+     if (mPrincipals.Count() > 0)
+@@ -2946,18 +2967,19 @@ nsScriptSecurityManager::OnChannelRedire
+                                            PRUint32 redirFlags)
+ {
+     nsCOMPtr<nsIURI> oldURI, newURI;
+     oldChannel->GetURI(getter_AddRefs(oldURI));
+     newChannel->GetURI(getter_AddRefs(newURI));
+ 
+     NS_ENSURE_STATE(oldURI && newURI);
+ 
+-    const PRUint32 flags = nsIScriptSecurityManager::DISALLOW_FROM_MAIL |
+-                           nsIScriptSecurityManager::DISALLOW_SCRIPT;
++    const PRUint32 flags =
++        nsIScriptSecurityManager::LOAD_IS_AUTOMATIC_DOCUMENT_REPLACEMENT |
++        nsIScriptSecurityManager::DISALLOW_SCRIPT;
+     return CheckLoadURI(oldURI, newURI, flags);
+ }
+ 
+ 
+ /////////////////////////////////////
+ // Method implementing nsIObserver //
+ /////////////////////////////////////
+ static const char sPrincipalPrefix[] = "capability.principal";
+Index: dom/locales/en-US/chrome/security/caps.properties
+===================================================================
+RCS file: /cvsroot/mozilla/dom/locales/en-US/chrome/security/caps.properties,v
+retrieving revision 1.1
+diff -u -p -d -8 -r1.1 caps.properties
+--- dom/locales/en-US/chrome/security/caps.properties	8 Mar 2005 17:21:34 -0000	1.1
++++ dom/locales/en-US/chrome/security/caps.properties	20 Oct 2006 04:16:24 -0000
+@@ -43,16 +43,17 @@ EnableCapabilityQuery = A script from "%
+ EnableCapabilityDenied = A script from "%S" was denied %S privileges.
+ CheckLoadURIError = Security Error: Content at %S may not load or link to %S.
+ CheckSameOriginError = Security Error: Content at %S may not load data from %S.
+ GetPropertyDenied = Permission denied to get property %S.%S
+ SetPropertyDenied = Permission denied to set property %S.%S
+ CallMethodDenied = Permission denied to call method %S.%S
+ CreateWrapperDenied = Permission denied to create wrapper for object of class %S
+ ExtensionCapability = Unknown: %S
++ProtocolFlagError = Warning: Protocol handler for '%S' doesn't advertise a security policy.  While loads of such protocols are allowed for now, this is deprecated.  Please see the documentation in nsIProtocolHandler.idl.
+ #
+ # The following descriptions are shown in the EnableCapabilityQuery dialog
+ #
+ capdesc.UniversalBrowserRead = Read private data from any site or window
+ capdesc.UniversalBrowserWrite = Modify any open window
+ capdesc.UniversalXPConnect = Run or install software on your machine
+ capdesc.UniversalFileRead = Read and upload local files
+ capdesc.CapabilityPreferencesAccess = By-pass core security settings
+Index: content/base/src/nsGenericElement.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/content/base/src/nsGenericElement.cpp,v
+retrieving revision 3.508
+diff -u -p -d -8 -r3.508 nsGenericElement.cpp
+--- content/base/src/nsGenericElement.cpp	21 Oct 2006 01:30:54 -0000	3.508
++++ content/base/src/nsGenericElement.cpp	21 Oct 2006 03:46:49 -0000
+@@ -3057,19 +3057,20 @@ nsGenericElement::TriggerLink(nsPresCont
+   if (!handler) return NS_OK;
+ 
+   if (aClick) {
+     nsresult proceed = NS_OK;
+     // Check that this page is allowed to load this URI.
+     nsCOMPtr<nsIScriptSecurityManager> securityManager = 
+              do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID, &rv);
+     if (NS_SUCCEEDED(rv)) {
+-      PRUint32 flag = aIsUserTriggered ?
+-                      (PRUint32) nsIScriptSecurityManager::STANDARD :
+-                      (PRUint32) nsIScriptSecurityManager::DISALLOW_FROM_MAIL;
++      PRUint32 flag =
++        aIsUserTriggered ?
++        (PRUint32) nsIScriptSecurityManager::STANDARD :
++        (PRUint32) nsIScriptSecurityManager::LOAD_IS_AUTOMATIC_DOCUMENT_REPLACEMENT;
+       proceed =
+         securityManager->CheckLoadURIWithPrincipal(NodePrincipal(), aLinkURI,
+                                                    flag);
+     }
+ 
+     // Only pass off the click event if the script security manager
+     // says it's ok.
+     if (NS_SUCCEEDED(proceed))
+Index: docshell/base/nsDocShell.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/docshell/base/nsDocShell.cpp,v
+retrieving revision 1.817
+diff -u -p -d -8 -r1.817 nsDocShell.cpp
+--- docshell/base/nsDocShell.cpp	8 Oct 2006 15:54:28 -0000	1.817
++++ docshell/base/nsDocShell.cpp	20 Oct 2006 04:03:13 -0000
+@@ -4350,19 +4350,20 @@ nsDocShell::SetupRefreshURIFromHeader(ns
+         return NS_ERROR_FAILURE;
+     }
+ 
+     if (NS_SUCCEEDED(rv)) {
+         nsCOMPtr<nsIScriptSecurityManager>
+             securityManager(do_GetService
+                             (NS_SCRIPTSECURITYMANAGER_CONTRACTID, &rv));
+         if (NS_SUCCEEDED(rv)) {
+-            rv = securityManager->CheckLoadURI(aBaseURI, uri,
+-                                               nsIScriptSecurityManager::
+-                                               DISALLOW_FROM_MAIL);
++            rv = securityManager->
++                CheckLoadURI(aBaseURI, uri,
++                             nsIScriptSecurityManager::
++                             LOAD_IS_AUTOMATIC_DOCUMENT_REPLACEMENT);
+             if (NS_SUCCEEDED(rv)) {
+                 // Since we can't travel back in time yet, just pretend
+                 // negative numbers do nothing at all.
+                 if (seconds < 0)
+                     return NS_ERROR_FAILURE;
+ 
+                 rv = RefreshURI(uri, seconds * 1000, PR_FALSE, PR_TRUE);
+             }
+@@ -8780,17 +8781,17 @@ nsDocShell::Observe(nsISupports *aSubjec
+ 
+ /* static */
+ nsresult
+ nsDocShell::URIInheritsSecurityContext(nsIURI* aURI, PRBool* aResult)
+ {
+     // Note: about:blank URIs do NOT inherit the security context from the
+     // current document, which is what this function tests for...
+     return NS_URIChainHasFlags(aURI,
+-                               nsIProtocolHandler::URI_HAS_NO_SECURITY_CONTEXT,
++                               nsIProtocolHandler::URI_INHERITS_SECURITY_CONTEXT,
+                                aResult);
+ }
+ 
+ /* static */
+ PRBool
+ nsDocShell::IsAboutBlank(nsIURI* aURI)
+ {
+     NS_PRECONDITION(aURI, "Must have URI");
+Index: browser/base/content/browser.js
+===================================================================
+RCS file: /cvsroot/mozilla/browser/base/content/browser.js,v
+retrieving revision 1.723
+diff -u -p -d -8 -r1.723 browser.js
+--- browser/base/content/browser.js	20 Oct 2006 16:26:53 -0000	1.723
++++ browser/base/content/browser.js	21 Oct 2006 03:45:33 -0000
+@@ -2422,17 +2422,17 @@ var urlbarObserver = {
+       // so we can get away with treating text/x-moz-url flavours as text/unicode.
+       if (url) {
+         getBrowser().dragDropSecurityCheck(aEvent, aDragSession, url);
+ 
+         try {
+           gURLBar.value = url;
+           const nsIScriptSecMan = Components.interfaces.nsIScriptSecurityManager;
+           urlSecurityCheck(gURLBar.value, gBrowser.currentURI.spec,
+-                           nsIScriptSecMan.DISALLOW_SCRIPT_OR_DATA);
++                           nsIScriptSecMan.DISALLOW_INHERIT_PRINCIPAL);
+           handleURLBarCommand();
+         } catch (ex) {}
+       }
+     },
+   getSupportedFlavours: function ()
+     {
+       var flavourSet = new FlavourSet();
+ 
+@@ -2840,17 +2840,17 @@ var goButtonObserver = {
+       var draggedText = xferData[0] || xferData[1];
+       var postData = {};
+       var url = getShortcutOrURI(draggedText, postData);
+       try {
+         getBrowser().dragDropSecurityCheck(aEvent, aDragSession, url);
+ 
+         const nsIScriptSecMan = Components.interfaces.nsIScriptSecurityManager;
+         urlSecurityCheck(url, gBrowser.currentURI.spec,
+-                         nsIScriptSecMan.DISALLOW_SCRIPT_OR_DATA);
++                         nsIScriptSecMan.DISALLOW_INHERIT_PRINCIPAL);
+         loadURI(url, null, postData.value, true);
+       } catch (ex) {}
+     },
+   getSupportedFlavours: function ()
+     {
+       var flavourSet = new FlavourSet();
+       flavourSet.appendFlavour("text/unicode");
+       flavourSet.appendFlavour("text/x-moz-url");
+Index: browser/components/bookmarks/src/nsBookmarksFeedHandler.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/browser/components/bookmarks/src/nsBookmarksFeedHandler.cpp,v
+retrieving revision 1.18
+diff -u -p -d -8 -r1.18 nsBookmarksFeedHandler.cpp
+--- browser/components/bookmarks/src/nsBookmarksFeedHandler.cpp	17 Oct 2006 16:54:39 -0000	1.18
++++ browser/components/bookmarks/src/nsBookmarksFeedHandler.cpp	21 Oct 2006 03:45:37 -0000
+@@ -906,18 +906,17 @@ nsFeedLoadListener::IsLinkValid(const PR
+     if (NS_FAILED(rv))
+         return PR_FALSE;
+ 
+     // Er, where'd our security manager go?
+     if (!mSecMan)
+         return PR_FALSE;
+ 
+     rv = mSecMan->CheckLoadURI(mURI, linkuri,
+-                               nsIScriptSecurityManager::DISALLOW_FROM_MAIL |
+-                               nsIScriptSecurityManager::DISALLOW_SCRIPT_OR_DATA);
++                               nsIScriptSecurityManager::DISALLOW_INHERIT_PRINCIPAL);
+     if (NS_FAILED(rv))
+         return PR_FALSE;
+ 
+     return PR_TRUE;
+ }
+ 
+ 
+ ///////////////////////////////////////////////////////////////////////////
+Index: browser/components/feeds/src/FeedWriter.js
+===================================================================
+RCS file: /cvsroot/mozilla/browser/components/feeds/src/FeedWriter.js,v
+retrieving revision 1.23
+diff -u -p -d -8 -r1.23 FeedWriter.js
+--- browser/components/feeds/src/FeedWriter.js	29 Sep 2006 16:32:45 -0000	1.23
++++ browser/components/feeds/src/FeedWriter.js	20 Oct 2006 04:03:13 -0000
+@@ -111,17 +111,17 @@ FeedWriter.prototype = {
+    * @param   uri
+    *          The URI spec to set as the href
+    */
+   _safeSetURIAttribute: 
+   function FW__safeSetURIAttribute(element, attribute, uri) {
+     var secman = 
+         Cc["@mozilla.org/scriptsecuritymanager;1"].
+         getService(Ci.nsIScriptSecurityManager);    
+-    const flags = Ci.nsIScriptSecurityManager.DISALLOW_SCRIPT_OR_DATA;
++    const flags = Ci.nsIScriptSecurityManager.DISALLOW_INHERIT_PRINCIPAL;
+     try {
+       secman.checkLoadURIStr(this._window.location.href, uri, flags);
+       // checkLoadURIStr will throw if the link URI should not be loaded per 
+       // the rules specified in |flags|, so we'll never "linkify" the link...
+       element.setAttribute(attribute, uri);
+     }
+     catch (e) {
+       // Not allowed to load this link because secman.checkLoadURIStr threw
+Index: calendar/lightning/components/calItipProtocolHandler.js
+===================================================================
+RCS file: /cvsroot/mozilla/calendar/lightning/components/calItipProtocolHandler.js,v
+retrieving revision 1.2
+diff -u -p -d -8 -r1.2 calItipProtocolHandler.js
+--- calendar/lightning/components/calItipProtocolHandler.js	21 Aug 2006 17:46:24 -0000	1.2
++++ calendar/lightning/components/calItipProtocolHandler.js	20 Oct 2006 04:03:13 -0000
+@@ -122,17 +122,17 @@ ItipProtocolHandler.prototype = {
+     QueryInterface: function (aIID) {
+         if (!aIID.equals(CI.nsISupports) &&
+             !aIID.equals(CI.nsIProtocolHandler))
+             throw Components.results.NS_ERROR_NO_INTERFACE;
+ 
+         return this;
+     },
+     
+-    protocolFlags: CI.nsIProtocolHandler.URI_NORELATIVE,
++    protocolFlags: CI.nsIProtocolHandler.URI_NORELATIVE | CI.nsIProtocolHandler.URI_DANGEROUS_TO_LOAD,
+     allowPort: function () { return false; },
+     isSecure: false,
+     newURI: function (spec, charSet, baseURI)
+     {
+         var cls = Components.classes["@mozilla.org/network/standard-url;1"];
+         var url = cls.createInstance(CI.nsIStandardURL);
+         url.init(CI.nsIStandardURL.URLTYPE_STANDARD, 0, spec, charSet, baseURI);
+         dump("Creating new URI for " + spec + "\n");
+Index: chrome/src/nsChromeProtocolHandler.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/chrome/src/nsChromeProtocolHandler.cpp,v
+retrieving revision 1.120
+diff -u -p -d -8 -r1.120 nsChromeProtocolHandler.cpp
+--- chrome/src/nsChromeProtocolHandler.cpp	10 May 2006 22:49:04 -0000	1.120
++++ chrome/src/nsChromeProtocolHandler.cpp	20 Oct 2006 04:03:13 -0000
+@@ -401,17 +401,17 @@ nsChromeProtocolHandler::AllowPort(PRInt
+     // don't override anything.
+     *_retval = PR_FALSE;
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsChromeProtocolHandler::GetProtocolFlags(PRUint32 *result)
+ {
+-    *result = URI_STD;
++    *result = URI_STD | URI_IS_UI_RESOURCE;
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsChromeProtocolHandler::NewURI(const nsACString &aSpec,
+                                 const char *aCharset,
+                                 nsIURI *aBaseURI,
+                                 nsIURI **result)
+Index: content/html/document/src/nsHTMLFragmentContentSink.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/content/html/document/src/nsHTMLFragmentContentSink.cpp,v
+retrieving revision 1.120
+diff -u -p -d -8 -r1.120 nsHTMLFragmentContentSink.cpp
+--- content/html/document/src/nsHTMLFragmentContentSink.cpp	13 Oct 2006 22:54:12 -0000	1.120
++++ content/html/document/src/nsHTMLFragmentContentSink.cpp	21 Oct 2006 03:46:59 -0000
+@@ -1036,19 +1036,20 @@ nsHTMLParanoidFragmentSink::AddAttribute
+     // check the attributes we allow that contain URIs
+     if (IsAttrURI(keyAtom)) {
+       if (!baseURI) {
+         baseURI = aContent->GetBaseURI();
+       }
+       nsCOMPtr<nsIURI> attrURI;
+       rv = NS_NewURI(getter_AddRefs(attrURI), v, nsnull, baseURI);
+       if (NS_SUCCEEDED(rv)) {
+-        rv = secMan->CheckLoadURIWithPrincipal(mTargetDocument->NodePrincipal(),
+-                                               attrURI,
+-                                               nsIScriptSecurityManager::DISALLOW_SCRIPT_OR_DATA);
++        rv = secMan->
++          CheckLoadURIWithPrincipal(mTargetDocument->NodePrincipal(),
++                attrURI,
++                nsIScriptSecurityManager::DISALLOW_INHERIT_PRINCIPAL);
+       }
+     }
+     
+     // skip to the next attribute if we encountered issues with the
+     // current value
+     if (NS_FAILED(rv)) {
+       continue;
+     }
+Index: content/html/document/src/nsWyciwygProtocolHandler.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/content/html/document/src/nsWyciwygProtocolHandler.cpp,v
+retrieving revision 1.9
+diff -u -p -d -8 -r1.9 nsWyciwygProtocolHandler.cpp
+--- content/html/document/src/nsWyciwygProtocolHandler.cpp	18 Jun 2006 21:18:17 -0000	1.9
++++ content/html/document/src/nsWyciwygProtocolHandler.cpp	20 Oct 2006 04:03:13 -0000
+@@ -122,11 +122,13 @@ nsWyciwygProtocolHandler::NewChannel(nsI
+ 
+   *result = channel;
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsWyciwygProtocolHandler::GetProtocolFlags(PRUint32 *result) 
+ {
+-  *result = URI_NORELATIVE | URI_NOAUTH;
++  // Should this be an an nsINestedURI?  We don't really want random
++  // webpages loading these URIs...
++  *result = URI_NORELATIVE | URI_NOAUTH | URI_DANGEROUS_TO_LOAD;
+   return NS_OK;
+ }
+Index: content/xml/document/src/nsXMLFragmentContentSink.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/content/xml/document/src/nsXMLFragmentContentSink.cpp,v
+retrieving revision 1.17
+diff -u -p -d -8 -r1.17 nsXMLFragmentContentSink.cpp
+--- content/xml/document/src/nsXMLFragmentContentSink.cpp	25 Aug 2006 16:34:57 -0000	1.17
++++ content/xml/document/src/nsXMLFragmentContentSink.cpp	20 Oct 2006 04:03:13 -0000
+@@ -577,17 +577,17 @@ nsresult
+ nsXHTMLParanoidFragmentSink::AddAttributes(const PRUnichar** aAtts,
+                                            nsIContent* aContent)
+ {
+   nsresult rv;
+ 
+   // use this to check for safe URIs in the few attributes that allow them
+   nsIScriptSecurityManager* secMan = nsContentUtils::GetSecurityManager();
+   nsCOMPtr<nsIURI> baseURI;
+-  PRUint32 flags = nsIScriptSecurityManager::DISALLOW_SCRIPT_OR_DATA;
++  PRUint32 flags = nsIScriptSecurityManager::DISALLOW_INHERIT_PRINCIPAL;
+ 
+   // scrub URI attributes that point at dangerous content
+   // We have to do this here, because this is where we have a base URI,
+   // but we can't do all the scrubbing here, because other parts of the
+   // code get the attributes before this method is called.
+   nsTArray<const PRUnichar *> allowedAttrs;
+   PRInt32 nameSpaceID;
+   nsCOMPtr<nsIAtom> prefix, localName;
+Index: directory/xpcom/base/src/nsLDAPProtocolHandler.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/directory/xpcom/base/src/nsLDAPProtocolHandler.cpp,v
+retrieving revision 1.17
+diff -u -p -d -8 -r1.17 nsLDAPProtocolHandler.cpp
+--- directory/xpcom/base/src/nsLDAPProtocolHandler.cpp	18 Dec 2005 01:50:38 -0000	1.17
++++ directory/xpcom/base/src/nsLDAPProtocolHandler.cpp	20 Oct 2006 04:03:13 -0000
+@@ -78,17 +78,17 @@ nsLDAPProtocolHandler::GetDefaultPort(PR
+   return NS_OK;
+ }
+ 
+ // getter method for protocol flags attribute
+ //
+ NS_IMETHODIMP
+ nsLDAPProtocolHandler::GetProtocolFlags(PRUint32 *result)
+ {
+-  *result = URI_NORELATIVE;
++  *result = URI_NORELATIVE | URI_DANGEROUS_TO_LOAD;
+   return NS_OK;
+ }
+ 
+ // construct an appropriate URI
+ //
+ NS_IMETHODIMP
+ nsLDAPProtocolHandler::NewURI(const nsACString &aSpec,
+                               const char *aOriginCharset, // ignored
+Index: dom/src/jsurl/nsJSProtocolHandler.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/dom/src/jsurl/nsJSProtocolHandler.cpp,v
+retrieving revision 1.135
+diff -u -p -d -8 -r1.135 nsJSProtocolHandler.cpp
+--- dom/src/jsurl/nsJSProtocolHandler.cpp	19 Oct 2006 00:49:12 -0000	1.135
++++ dom/src/jsurl/nsJSProtocolHandler.cpp	21 Oct 2006 03:47:44 -0000
+@@ -957,17 +957,18 @@ nsJSProtocolHandler::GetDefaultPort(PRIn
+ {
+     *result = -1;        // no port for javascript: URLs
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsJSProtocolHandler::GetProtocolFlags(PRUint32 *result)
+ {
+-    *result = URI_NORELATIVE | URI_NOAUTH | URI_HAS_NO_SECURITY_CONTEXT;
++    *result = URI_NORELATIVE | URI_NOAUTH | URI_INHERITS_SECURITY_CONTEXT |
++        URI_LOADABLE_BY_ANYONE;
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsJSProtocolHandler::NewURI(const nsACString &aSpec,
+                             const char *aCharset, // ignore charset info
+                             nsIURI *aBaseURI,
+                             nsIURI **result)
+Index: embedding/minimo/chromelite/nsSimpleChromeHandler.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/embedding/minimo/chromelite/nsSimpleChromeHandler.cpp,v
+retrieving revision 1.2
+diff -u -p -d -8 -r1.2 nsSimpleChromeHandler.cpp
+--- embedding/minimo/chromelite/nsSimpleChromeHandler.cpp	27 Jan 2004 01:46:05 -0000	1.2
++++ embedding/minimo/chromelite/nsSimpleChromeHandler.cpp	20 Oct 2006 04:03:13 -0000
+@@ -162,17 +162,17 @@ nsSimpleChromeHandler::GetDefaultPort(PR
+ {
+     *result = -1;        
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsSimpleChromeHandler::GetProtocolFlags(PRUint32 *result)
+ {
+-    *result = URI_STD;
++    *result = URI_STD | URI_IS_UI_RESOURCE;
+     return NS_OK;
+ }
+ 
+ static NS_DEFINE_CID(kStandardURLCID, NS_STANDARDURL_CID);
+ 
+ NS_IMETHODIMP
+ nsSimpleChromeHandler::NewURI(const nsACString &aSpec,
+                              const char *aCharset,
+Index: embedding/tests/wxEmbed/GeckoProtocolHandler.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/embedding/tests/wxEmbed/GeckoProtocolHandler.cpp,v
+retrieving revision 1.12
+diff -u -p -d -8 -r1.12 GeckoProtocolHandler.cpp
+--- embedding/tests/wxEmbed/GeckoProtocolHandler.cpp	18 Jun 2006 21:18:17 -0000	1.12
++++ embedding/tests/wxEmbed/GeckoProtocolHandler.cpp	20 Oct 2006 04:03:13 -0000
+@@ -213,16 +213,19 @@ NS_IMETHODIMP GeckoProtocolHandlerImpl::
+ {
+     *aDefaultPort = -1;
+     return NS_OK;
+ }
+ 
+ /* readonly attribute unsigned long protocolFlags; */
+ NS_IMETHODIMP GeckoProtocolHandlerImpl::GetProtocolFlags(PRUint32 *aProtocolFlags)
+ {
++    // XXXbz Not setting any of the protocol security flags for now, because I
++    // have no idea what this is used for.  Whoever uses it should set the
++    // flags.
+     *aProtocolFlags = URI_NORELATIVE | URI_NOAUTH;
+     return NS_OK;
+ }
+ 
+ /* nsIURI newURI (in AUTF8String aSpec, in string aOriginCharset, in nsIURI aBaseURI); */
+ NS_IMETHODIMP GeckoProtocolHandlerImpl::NewURI(const nsACString & aSpec, const char *aOriginCharset, nsIURI *aBaseURI, nsIURI **_retval)
+ {
+     nsresult rv;
+Index: extensions/datetime/nsDateTimeHandler.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/extensions/datetime/nsDateTimeHandler.cpp,v
+retrieving revision 1.18
+diff -u -p -d -8 -r1.18 nsDateTimeHandler.cpp
+--- extensions/datetime/nsDateTimeHandler.cpp	18 Jun 2006 21:18:17 -0000	1.18
++++ extensions/datetime/nsDateTimeHandler.cpp	20 Oct 2006 04:03:13 -0000
+@@ -83,17 +83,17 @@ nsDateTimeHandler::GetScheme(nsACString 
+ NS_IMETHODIMP
+ nsDateTimeHandler::GetDefaultPort(PRInt32 *result) {
+     *result = DATETIME_PORT;
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsDateTimeHandler::GetProtocolFlags(PRUint32 *result) {
+-    *result = URI_NORELATIVE | URI_NOAUTH | ALLOWS_PROXY;
++    *result = URI_NORELATIVE | URI_NOAUTH | ALLOWS_PROXY | URI_DANGEROUS_TO_LOAD;
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsDateTimeHandler::NewURI(const nsACString &aSpec,
+                           const char *aCharset, // ignore charset info
+                           nsIURI *aBaseURI,
+                           nsIURI **result) {
+Index: extensions/finger/nsFingerHandler.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/extensions/finger/nsFingerHandler.cpp,v
+retrieving revision 1.20
+diff -u -p -d -8 -r1.20 nsFingerHandler.cpp
+--- extensions/finger/nsFingerHandler.cpp	18 Jun 2006 21:18:18 -0000	1.20
++++ extensions/finger/nsFingerHandler.cpp	20 Oct 2006 04:03:13 -0000
+@@ -85,17 +85,18 @@ nsFingerHandler::GetScheme(nsACString &r
+ NS_IMETHODIMP
+ nsFingerHandler::GetDefaultPort(PRInt32 *result) {
+     *result = FINGER_PORT;
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsFingerHandler::GetProtocolFlags(PRUint32 *result) {
+-    *result = URI_NORELATIVE | URI_NOAUTH | ALLOWS_PROXY;
++    *result = URI_NORELATIVE | URI_NOAUTH | ALLOWS_PROXY |
++        URI_LOADABLE_BY_ANYONE;
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsFingerHandler::NewURI(const nsACString &aSpec,
+                         const char *aCharset, // ignore charset info
+                         nsIURI *aBaseURI,
+                         nsIURI **result) {
+Index: extensions/gnomevfs/nsGnomeVFSProtocolHandler.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/extensions/gnomevfs/nsGnomeVFSProtocolHandler.cpp,v
+retrieving revision 1.13
+diff -u -p -d -8 -r1.13 nsGnomeVFSProtocolHandler.cpp
+--- extensions/gnomevfs/nsGnomeVFSProtocolHandler.cpp	28 Sep 2006 20:11:32 -0000	1.13
++++ extensions/gnomevfs/nsGnomeVFSProtocolHandler.cpp	20 Oct 2006 04:16:57 -0000
+@@ -855,18 +855,18 @@ nsGnomeVFSProtocolHandler::GetDefaultPor
+ {
+   *aDefaultPort = -1;
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsGnomeVFSProtocolHandler::GetProtocolFlags(PRUint32 *aProtocolFlags)
+ {
+-  // Is this true of all GnomeVFS URI types?
+-  *aProtocolFlags = URI_STD;
++  // Is URI_STD true of all GnomeVFS URI types?
++  *aProtocolFlags = URI_STD | URI_DANGEROUS_TO_LOAD;
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsGnomeVFSProtocolHandler::NewURI(const nsACString &aSpec,
+                                   const char *aOriginCharset,
+                                   nsIURI *aBaseURI,
+                                   nsIURI **aResult)
+Index: extensions/irc/js/lib/chatzilla-service.js
+===================================================================
+RCS file: /cvsroot/mozilla/extensions/irc/js/lib/chatzilla-service.js,v
+retrieving revision 1.40
+diff -u -p -d -8 -r1.40 chatzilla-service.js
+--- extensions/irc/js/lib/chatzilla-service.js	4 Mar 2006 20:21:53 -0000	1.40
++++ extensions/irc/js/lib/chatzilla-service.js	20 Oct 2006 04:03:13 -0000
+@@ -250,16 +250,20 @@ function (outer, iid)
+ function IRCProtocolHandler(isSecure)
+ {
+     this.isSecure = isSecure;
+ }
+ 
+ IRCProtocolHandler.prototype.protocolFlags =
+                    nsIProtocolHandler.URI_NORELATIVE |
+                    nsIProtocolHandler.ALLOWS_PROXY;
++if ("URI_DANGEROUS_TO_LOAD" in nsIProtocolHandler) {
++  IRCProtocolHandler.prototype.protocolFlags |=
++      nsIProtocolHandler.URI_LOADABLE_BY_ANYONE;
++}
+ 
+ IRCProtocolHandler.prototype.allowPort =
+ function ircph_allowPort(port, scheme)
+ {
+     return false;
+ }
+ 
+ IRCProtocolHandler.prototype.newURI =
+Index: extensions/venkman/js/venkman-service.js
+===================================================================
+RCS file: /cvsroot/mozilla/extensions/venkman/js/venkman-service.js,v
+retrieving revision 1.15
+diff -u -p -d -8 -r1.15 venkman-service.js
+--- extensions/venkman/js/venkman-service.js	16 May 2006 19:28:32 -0000	1.15
++++ extensions/venkman/js/venkman-service.js	20 Oct 2006 04:03:13 -0000
+@@ -272,18 +272,22 @@ function jsduri_resolve(path)
+ 
+ function JSDProtocolHandler()
+ {
+     /* nothing here */
+ }
+ 
+ JSDProtocolHandler.prototype.scheme = "x-jsd";
+ JSDProtocolHandler.prototype.defaultPort = JSD_DEFAULT_PORT;
+-JSDProtocolHandler.prototype.protocolFlags = nsIProtocolHandler.URI_NORELATIVE ||
++JSDProtocolHandler.prototype.protocolFlags = nsIProtocolHandler.URI_NORELATIVE |
+                                              nsIProtocolHandler.URI_NOAUTH;
++if ("URI_DANGEROUS_TO_LOAD" in nsIProtocolHandler) {
++  JSDProtocolHandler.prototype.protocolFlags |=
++      nsIProtocolHandler.URI_DANGEROUS_TO_LOAD;
++}
+ 
+ JSDProtocolHandler.prototype.allowPort =
+ function jsdph_allowport (aPort, aScheme)
+ {
+     return false;
+ }
+ 
+ JSDProtocolHandler.prototype.newURI =
+Index: mailnews/addrbook/src/nsAddbookProtocolHandler.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/mailnews/addrbook/src/nsAddbookProtocolHandler.cpp,v
+retrieving revision 1.52
+diff -u -p -d -8 -r1.52 nsAddbookProtocolHandler.cpp
+--- mailnews/addrbook/src/nsAddbookProtocolHandler.cpp	3 Feb 2006 14:18:09 -0000	1.52
++++ mailnews/addrbook/src/nsAddbookProtocolHandler.cpp	20 Oct 2006 04:03:13 -0000
+@@ -80,17 +80,17 @@ NS_IMETHODIMP nsAddbookProtocolHandler::
+ 
+ NS_IMETHODIMP nsAddbookProtocolHandler::GetDefaultPort(PRInt32 *aDefaultPort)
+ {
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP nsAddbookProtocolHandler::GetProtocolFlags(PRUint32 *aUritype)
+ {
+-  *aUritype = URI_STD;
++  *aUritype = URI_STD | URI_LOADABLE_BY_ANYONE;
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP nsAddbookProtocolHandler::NewURI(const nsACString &aSpec,
+                                                const char *aOriginCharset, // ignored
+                                                nsIURI *aBaseURI,
+                                                nsIURI **_retval)
+ {
+Index: mailnews/base/src/nsCidProtocolHandler.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/mailnews/base/src/nsCidProtocolHandler.cpp,v
+retrieving revision 1.2
+diff -u -p -d -8 -r1.2 nsCidProtocolHandler.cpp
+--- mailnews/base/src/nsCidProtocolHandler.cpp	17 Apr 2004 18:32:19 -0000	1.2
++++ mailnews/base/src/nsCidProtocolHandler.cpp	20 Oct 2006 04:03:13 -0000
+@@ -59,16 +59,17 @@ NS_IMETHODIMP nsCidProtocolHandler::GetS
+ 
+ NS_IMETHODIMP nsCidProtocolHandler::GetDefaultPort(PRInt32 *aDefaultPort)
+ {
+   return NS_ERROR_NOT_IMPLEMENTED;
+ }
+ 
+ NS_IMETHODIMP nsCidProtocolHandler::GetProtocolFlags(PRUint32 *aProtocolFlags)
+ {
++  // XXXbz so why does this protocol handler exist, exactly?
+   return NS_ERROR_NOT_IMPLEMENTED;
+ }
+ 
+ NS_IMETHODIMP nsCidProtocolHandler::NewURI(const nsACString & aSpec, const char *aOriginCharset, nsIURI *aBaseURI, nsIURI **_retval)
+ {
+   nsresult rv;
+   nsCOMPtr <nsIURI> url = do_CreateInstance(NS_SIMPLEURI_CONTRACTID, &rv);
+   NS_ENSURE_SUCCESS(rv,rv);
+Index: mailnews/compose/src/nsSmtpService.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/mailnews/compose/src/nsSmtpService.cpp,v
+retrieving revision 1.137
+diff -u -p -d -8 -r1.137 nsSmtpService.cpp
+--- mailnews/compose/src/nsSmtpService.cpp	18 Dec 2005 01:50:39 -0000	1.137
++++ mailnews/compose/src/nsSmtpService.cpp	20 Oct 2006 04:03:13 -0000
+@@ -301,17 +301,17 @@ nsSmtpService::AllowPort(PRInt32 port, c
+ {
+     // allow smtp to run on any port
+     *_retval = PR_TRUE;
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP nsSmtpService::GetProtocolFlags(PRUint32 *result)
+ {
+-    *result = URI_NORELATIVE | ALLOWS_PROXY;
++    *result = URI_NORELATIVE | ALLOWS_PROXY | URI_LOADABLE_BY_ANYONE;
+     return NS_OK; 	
+ }
+ 
+ // the smtp service is also the protocol handler for mailto urls....
+ 
+ NS_IMETHODIMP nsSmtpService::NewURI(const nsACString &aSpec,
+                                     const char *aOriginCharset,
+                                     nsIURI *aBaseURI,
+Index: mailnews/imap/src/nsImapService.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/mailnews/imap/src/nsImapService.cpp,v
+retrieving revision 1.316
+diff -u -p -d -8 -r1.316 nsImapService.cpp
+--- mailnews/imap/src/nsImapService.cpp	22 Jul 2006 01:17:22 -0000	1.316
++++ mailnews/imap/src/nsImapService.cpp	20 Oct 2006 04:03:13 -0000
+@@ -2381,17 +2381,18 @@ NS_IMETHODIMP nsImapService::GetDefaultP
+     NS_ENSURE_ARG_POINTER(aDefaultPort);
+     *aDefaultPort = IMAP_PORT;
+ 
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP nsImapService::GetProtocolFlags(PRUint32 *result)
+ {
+-    *result = URI_STD | ALLOWS_PROXY;
++    *result = URI_STD | URI_FORBIDS_AUTOMATIC_DOCUMENT_REPLACEMENT |
++        URI_DANGEROUS_TO_LOAD | ALLOWS_PROXY;
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP nsImapService::AllowPort(PRInt32 port, const char *scheme, PRBool *_retval)
+ {
+     // allow imap to run on any port
+     *_retval = PR_TRUE;
+     return NS_OK;
+Index: mailnews/local/src/nsMailboxService.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/mailnews/local/src/nsMailboxService.cpp,v
+retrieving revision 1.123
+diff -u -p -d -8 -r1.123 nsMailboxService.cpp
+--- mailnews/local/src/nsMailboxService.cpp	11 Aug 2006 16:40:50 -0000	1.123
++++ mailnews/local/src/nsMailboxService.cpp	20 Oct 2006 04:03:13 -0000
+@@ -511,17 +511,18 @@ NS_IMETHODIMP nsMailboxService::AllowPor
+ {
+     // don't override anything.  
+     *_retval = PR_FALSE;
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP nsMailboxService::GetProtocolFlags(PRUint32 *result)
+ {
+-    *result = URI_STD;
++    *result = URI_STD | URI_FORBIDS_AUTOMATIC_DOCUMENT_REPLACEMENT |
++        URI_DANGEROUS_TO_LOAD;
+     return NS_OK; 	
+ }
+ 
+ NS_IMETHODIMP nsMailboxService::NewURI(const nsACString &aSpec,
+                                        const char *aOriginCharset,
+                                        nsIURI *aBaseURI,
+                                        nsIURI **_retval)
+ {
+Index: mailnews/local/src/nsPop3Service.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/mailnews/local/src/nsPop3Service.cpp,v
+retrieving revision 1.110
+diff -u -p -d -8 -r1.110 nsPop3Service.cpp
+--- mailnews/local/src/nsPop3Service.cpp	18 Dec 2005 01:50:39 -0000	1.110
++++ mailnews/local/src/nsPop3Service.cpp	20 Oct 2006 04:03:13 -0000
+@@ -282,17 +282,17 @@ NS_IMETHODIMP nsPop3Service::GetDefaultD
+     // by default, do biff for POP3 servers
+     *aDoBiff = PR_TRUE;
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP nsPop3Service::GetProtocolFlags(PRUint32 *result)
+ {
+     NS_ENSURE_ARG_POINTER(result);
+-    *result = URI_NORELATIVE | ALLOWS_PROXY;
++    *result = URI_NORELATIVE | URI_DANGEROUS_TO_LOAD | ALLOWS_PROXY;
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP nsPop3Service::NewURI(const nsACString &aSpec,
+                                     const char *aOriginCharset, // ignored
+                                     nsIURI *aBaseURI,
+                                     nsIURI **_retval)
+ {
+Index: mailnews/news/src/nsNntpService.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/mailnews/news/src/nsNntpService.cpp,v
+retrieving revision 1.256
+diff -u -p -d -8 -r1.256 nsNntpService.cpp
+--- mailnews/news/src/nsNntpService.cpp	31 Aug 2006 20:50:22 -0000	1.256
++++ mailnews/news/src/nsNntpService.cpp	20 Oct 2006 04:03:13 -0000
+@@ -1377,17 +1377,18 @@ nsNntpService::GetDefaultServerPort(PRBo
+         rv = GetDefaultPort(aDefaultPort);
+  
+     return rv;
+ }
+ 
+ NS_IMETHODIMP nsNntpService::GetProtocolFlags(PRUint32 *aUritype)
+ {
+     NS_ENSURE_ARG_POINTER(aUritype);
+-    *aUritype = URI_NORELATIVE | ALLOWS_PROXY;
++    *aUritype = URI_NORELATIVE | URI_FORBIDS_AUTOMATIC_DOCUMENT_REPLACEMENT |
++      URI_LOADABLE_BY_ANYONE | ALLOWS_PROXY;
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP nsNntpService::NewURI(const nsACString &aSpec,
+                                     const char *aCharset, // ignored
+                                     nsIURI *aBaseURI,
+                                     nsIURI **_retval)
+ {
+Index: modules/libjar/nsJARProtocolHandler.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/modules/libjar/nsJARProtocolHandler.cpp,v
+retrieving revision 1.35
+diff -u -p -d -8 -r1.35 nsJARProtocolHandler.cpp
+--- modules/libjar/nsJARProtocolHandler.cpp	16 Sep 2005 07:09:35 -0000	1.35
++++ modules/libjar/nsJARProtocolHandler.cpp	20 Oct 2006 04:03:13 -0000
+@@ -135,17 +135,19 @@ nsJARProtocolHandler::GetDefaultPort(PRI
+ {
+     *result = -1;        // no port for JAR: URLs
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsJARProtocolHandler::GetProtocolFlags(PRUint32 *result)
+ {
+-    *result = URI_NORELATIVE | URI_NOAUTH;
++    // URI_LOADABLE_BY_ANYONE, since it's our inner URI that will matter
++    // anyway.
++    *result = URI_NORELATIVE | URI_NOAUTH | URI_LOADABLE_BY_ANYONE;
+     /* Although jar uris have their own concept of relative urls
+        it is very different from the standard behaviour, so we
+        have to say norelative here! */
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsJARProtocolHandler::NewURI(const nsACString &aSpec,
+Index: modules/libpr0n/decoders/icon/nsIconProtocolHandler.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/modules/libpr0n/decoders/icon/nsIconProtocolHandler.cpp,v
+retrieving revision 1.16
+diff -u -p -d -8 -r1.16 nsIconProtocolHandler.cpp
+--- modules/libpr0n/decoders/icon/nsIconProtocolHandler.cpp	18 Dec 2005 01:50:40 -0000	1.16
++++ modules/libpr0n/decoders/icon/nsIconProtocolHandler.cpp	20 Oct 2006 04:03:13 -0000
+@@ -78,17 +78,17 @@ NS_IMETHODIMP nsIconProtocolHandler::All
+ {
+     // don't override anything.  
+     *_retval = PR_FALSE;
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP nsIconProtocolHandler::GetProtocolFlags(PRUint32 *result) 
+ {
+-  *result = URI_NORELATIVE | URI_NOAUTH;
++  *result = URI_NORELATIVE | URI_NOAUTH | URI_IS_UI_RESOURCE;
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP nsIconProtocolHandler::NewURI(const nsACString &aSpec,
+                                             const char *aOriginCharset, // ignored
+                                             nsIURI *aBaseURI,
+                                             nsIURI **result) 
+ {
+Index: netwerk/protocol/about/src/nsAboutProtocolHandler.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/netwerk/protocol/about/src/nsAboutProtocolHandler.cpp,v
+retrieving revision 1.45
+diff -u -p -d -8 -r1.45 nsAboutProtocolHandler.cpp
+--- netwerk/protocol/about/src/nsAboutProtocolHandler.cpp	22 Jun 2006 02:21:06 -0000	1.45
++++ netwerk/protocol/about/src/nsAboutProtocolHandler.cpp	20 Oct 2006 04:03:13 -0000
+@@ -72,17 +72,17 @@ nsAboutProtocolHandler::GetDefaultPort(P
+ {
+     *result = -1;        // no port for about: URLs
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsAboutProtocolHandler::GetProtocolFlags(PRUint32 *result)
+ {
+-    *result = URI_NORELATIVE | URI_NOAUTH;
++    *result = URI_NORELATIVE | URI_NOAUTH | URI_DANGEROUS_TO_LOAD;
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsAboutProtocolHandler::NewURI(const nsACString &aSpec,
+                                const char *aCharset, // ignore charset info
+                                nsIURI *aBaseURI,
+                                nsIURI **result)
+@@ -199,17 +199,17 @@ nsSafeAboutProtocolHandler::GetDefaultPo
+ {
+     *result = -1;        // no port for moz-safe-about: URLs
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsSafeAboutProtocolHandler::GetProtocolFlags(PRUint32 *result)
+ {
+-    *result = URI_NORELATIVE | URI_NOAUTH;
++    *result = URI_NORELATIVE | URI_NOAUTH | URI_LOADABLE_BY_ANYONE;
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsSafeAboutProtocolHandler::NewURI(const nsACString &aSpec,
+                                    const char *aCharset, // ignore charset info
+                                    nsIURI *aBaseURI,
+                                    nsIURI **result)
+Index: netwerk/protocol/data/src/nsDataHandler.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/netwerk/protocol/data/src/nsDataHandler.cpp,v
+retrieving revision 1.29
+diff -u -p -d -8 -r1.29 nsDataHandler.cpp
+--- netwerk/protocol/data/src/nsDataHandler.cpp	2 May 2006 18:54:05 -0000	1.29
++++ netwerk/protocol/data/src/nsDataHandler.cpp	20 Oct 2006 04:03:13 -0000
+@@ -84,17 +84,18 @@ NS_IMETHODIMP
+ nsDataHandler::GetDefaultPort(PRInt32 *result) {
+     // no ports for data protocol
+     *result = -1;
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsDataHandler::GetProtocolFlags(PRUint32 *result) {
+-    *result = URI_NORELATIVE | URI_NOAUTH | URI_HAS_NO_SECURITY_CONTEXT;
++    *result = URI_NORELATIVE | URI_NOAUTH | URI_INHERITS_SECURITY_CONTEXT |
++        URI_LOADABLE_BY_ANYONE;
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsDataHandler::NewURI(const nsACString &aSpec,
+                       const char *aCharset, // ignore charset info
+                       nsIURI *aBaseURI,
+                       nsIURI **result) {
+Index: netwerk/protocol/file/src/nsFileProtocolHandler.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/netwerk/protocol/file/src/nsFileProtocolHandler.cpp,v
+retrieving revision 1.70
+diff -u -p -d -8 -r1.70 nsFileProtocolHandler.cpp
+--- netwerk/protocol/file/src/nsFileProtocolHandler.cpp	29 Mar 2006 04:53:21 -0000	1.70
++++ netwerk/protocol/file/src/nsFileProtocolHandler.cpp	20 Oct 2006 04:03:13 -0000
+@@ -242,17 +242,17 @@ nsFileProtocolHandler::GetDefaultPort(PR
+ {
+     *result = -1;        // no port for file: URLs
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsFileProtocolHandler::GetProtocolFlags(PRUint32 *result)
+ {
+-    *result = URI_NOAUTH;
++    *result = URI_NOAUTH | URI_IS_LOCAL_FILE;
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsFileProtocolHandler::NewURI(const nsACString &spec,
+                               const char *charset,
+                               nsIURI *baseURI,
+                               nsIURI **result)
+Index: netwerk/protocol/ftp/src/nsFtpProtocolHandler.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/netwerk/protocol/ftp/src/nsFtpProtocolHandler.cpp,v
+retrieving revision 1.90
+diff -u -p -d -8 -r1.90 nsFtpProtocolHandler.cpp
+--- netwerk/protocol/ftp/src/nsFtpProtocolHandler.cpp	3 Mar 2006 16:27:26 -0000	1.90
++++ netwerk/protocol/ftp/src/nsFtpProtocolHandler.cpp	20 Oct 2006 04:03:13 -0000
+@@ -165,17 +165,18 @@ nsFtpProtocolHandler::GetDefaultPort(PRI
+ {
+     *result = 21; 
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsFtpProtocolHandler::GetProtocolFlags(PRUint32 *result)
+ {
+-    *result = URI_STD | ALLOWS_PROXY | ALLOWS_PROXY_HTTP; 
++    *result = URI_STD | ALLOWS_PROXY | ALLOWS_PROXY_HTTP |
++        URI_LOADABLE_BY_ANYONE; 
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsFtpProtocolHandler::NewURI(const nsACString &aSpec,
+                              const char *aCharset,
+                              nsIURI *aBaseURI,
+                              nsIURI **result)
+Index: netwerk/protocol/gopher/src/nsGopherHandler.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/netwerk/protocol/gopher/src/nsGopherHandler.cpp,v
+retrieving revision 1.21
+diff -u -p -d -8 -r1.21 nsGopherHandler.cpp
+--- netwerk/protocol/gopher/src/nsGopherHandler.cpp	18 Dec 2005 01:50:49 -0000	1.21
++++ netwerk/protocol/gopher/src/nsGopherHandler.cpp	20 Oct 2006 04:03:13 -0000
+@@ -67,17 +67,18 @@ nsGopherHandler::GetDefaultPort(PRInt32 
+ {
+     *result = GOPHER_PORT;
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsGopherHandler::GetProtocolFlags(PRUint32 *result)
+ {
+-    *result = URI_NORELATIVE | ALLOWS_PROXY | ALLOWS_PROXY_HTTP;
++    *result = URI_NORELATIVE | ALLOWS_PROXY | ALLOWS_PROXY_HTTP |
++      URI_LOADABLE_BY_ANYONE;
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsGopherHandler::NewURI(const nsACString &spec, const char *originCharset,
+                         nsIURI *baseURI, nsIURI **result)
+ {
+     nsStandardURL *url = new nsStandardURL();
+Index: netwerk/protocol/http/src/nsHttpHandler.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/netwerk/protocol/http/src/nsHttpHandler.cpp,v
+retrieving revision 1.122
+diff -u -p -d -8 -r1.122 nsHttpHandler.cpp
+--- netwerk/protocol/http/src/nsHttpHandler.cpp	11 May 2006 17:22:54 -0000	1.122
++++ netwerk/protocol/http/src/nsHttpHandler.cpp	20 Oct 2006 04:03:13 -0000
+@@ -1403,17 +1403,18 @@ nsHttpHandler::GetDefaultPort(PRInt32 *r
+ {
+     *result = NS_HTTP_DEFAULT_PORT;
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsHttpHandler::GetProtocolFlags(PRUint32 *result)
+ {
+-    *result = URI_STD | ALLOWS_PROXY | ALLOWS_PROXY_HTTP;
++    *result = URI_STD | ALLOWS_PROXY | ALLOWS_PROXY_HTTP |
++        URI_LOADABLE_BY_ANYONE;
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsHttpHandler::NewURI(const nsACString &aSpec,
+                       const char *aCharset,
+                       nsIURI *aBaseURI,
+                       nsIURI **aURI)
+Index: netwerk/protocol/res/src/nsResProtocolHandler.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/netwerk/protocol/res/src/nsResProtocolHandler.cpp,v
+retrieving revision 1.67
+diff -u -p -d -8 -r1.67 nsResProtocolHandler.cpp
+--- netwerk/protocol/res/src/nsResProtocolHandler.cpp	11 Sep 2006 15:51:01 -0000	1.67
++++ netwerk/protocol/res/src/nsResProtocolHandler.cpp	20 Oct 2006 04:03:13 -0000
+@@ -203,17 +203,19 @@ nsResProtocolHandler::GetDefaultPort(PRI
+ {
+     *result = -1;        // no port for res: URLs
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsResProtocolHandler::GetProtocolFlags(PRUint32 *result)
+ {
+-    *result = URI_STD;
++    // XXXbz Is this really true for all resource: URIs?  Could we
++    // somehow give different flags to some of them?
++    *result = URI_STD | URI_IS_UI_RESOURCE;
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsResProtocolHandler::NewURI(const nsACString &aSpec,
+                              const char *aCharset,
+                              nsIURI *aBaseURI,
+                              nsIURI **result)
+Index: netwerk/protocol/viewsource/src/nsViewSourceHandler.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/netwerk/protocol/viewsource/src/nsViewSourceHandler.cpp,v
+retrieving revision 1.15
+diff -u -p -d -8 -r1.15 nsViewSourceHandler.cpp
+--- netwerk/protocol/viewsource/src/nsViewSourceHandler.cpp	19 Jun 2006 21:02:12 -0000	1.15
++++ netwerk/protocol/viewsource/src/nsViewSourceHandler.cpp	20 Oct 2006 04:03:13 -0000
+@@ -64,17 +64,17 @@ nsViewSourceHandler::GetDefaultPort(PRIn
+ {
+     *result = -1;
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsViewSourceHandler::GetProtocolFlags(PRUint32 *result)
+ {
+-    *result = URI_NORELATIVE | URI_NOAUTH;
++    *result = URI_NORELATIVE | URI_NOAUTH | URI_LOADABLE_BY_ANYONE;
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsViewSourceHandler::NewURI(const nsACString &aSpec,
+                             const char *aCharset,
+                             nsIURI *aBaseURI,
+                             nsIURI **aResult)
+Index: netwerk/test/unit/test_protocolproxyservice.js
+===================================================================
+RCS file: /cvsroot/mozilla/netwerk/test/unit/test_protocolproxyservice.js,v
+retrieving revision 1.5
+diff -u -p -d -8 -r1.5 test_protocolproxyservice.js
+--- netwerk/test/unit/test_protocolproxyservice.js	30 Mar 2006 17:31:15 -0000	1.5
++++ netwerk/test/unit/test_protocolproxyservice.js	20 Oct 2006 04:03:13 -0000
+@@ -55,17 +55,18 @@ TestProtocolHandler.prototype = {
+         iid.equals(Components.interfaces.nsISupports))
+       return this;
+     throw Components.results.NS_ERROR_NO_INTERFACE;
+   },
+   scheme: "moz-test",
+   defaultPort: -1,
+   protocolFlags: Components.interfaces.nsIProtocolHandler.URI_NOAUTH |
+                  Components.interfaces.nsIProtocolHandler.URI_NORELATIVE |
+-                 Components.interfaces.nsIProtocolHandler.ALLOWS_PROXY,
++                 Components.interfaces.nsIProtocolHandler.ALLOWS_PROXY |
++                 Components.interfaces.nsIProtocolHandler.URI_DANGEROUS_TO_LOAD,
+   newURI: function(spec, originCharset, baseURI) {
+     var uri = Components.classes["@mozilla.org/network/simple-uri;1"]
+                         .createInstance(Components.interfaces.nsIURI);
+     uri.spec = spec;
+     return uri;
+   },
+   newChannel: function(uri) {
+     throw Components.results.NS_ERROR_NOT_IMPLEMENTED;
+Index: rdf/chrome/src/nsChromeProtocolHandler.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/rdf/chrome/src/nsChromeProtocolHandler.cpp,v
+retrieving revision 1.112
+diff -u -p -d -8 -r1.112 nsChromeProtocolHandler.cpp
+--- rdf/chrome/src/nsChromeProtocolHandler.cpp	18 Jun 2006 21:18:21 -0000	1.112
++++ rdf/chrome/src/nsChromeProtocolHandler.cpp	20 Oct 2006 04:03:13 -0000
+@@ -514,17 +514,20 @@ nsChromeProtocolHandler::AllowPort(PRInt
+     // don't override anything.
+     *_retval = PR_FALSE;
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsChromeProtocolHandler::GetProtocolFlags(PRUint32 *result)
+ {
+-    *result = URI_STD;
++    // XXXbz we should probably have different flags for different package
++    // types and put the things that ARE OK for random crap to load into a
++    // separate package type!
++    *result = URI_STD | URI_IS_UI_RESOURCE;
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsChromeProtocolHandler::NewURI(const nsACString &aSpec,
+                                 const char *aCharset,
+                                 nsIURI *aBaseURI,
+                                 nsIURI **result)
+Index: toolkit/components/places/src/nsAnnoProtocolHandler.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/toolkit/components/places/src/nsAnnoProtocolHandler.cpp,v
+retrieving revision 1.3
+diff -u -p -d -8 -r1.3 nsAnnoProtocolHandler.cpp
+--- toolkit/components/places/src/nsAnnoProtocolHandler.cpp	18 Jul 2006 16:54:55 -0000	1.3
++++ toolkit/components/places/src/nsAnnoProtocolHandler.cpp	20 Oct 2006 04:03:13 -0000
+@@ -78,23 +78,21 @@ NS_IMETHODIMP
+ nsAnnoProtocolHandler::GetDefaultPort(PRInt32 *aDefaultPort)
+ {
+   *aDefaultPort = -1;
+   return NS_OK;
+ }
+ 
+ 
+ // nsAnnoProtocolHandler::GetProtocolFlags
+-//
+-//    No special protocol flags.
+ 
+ NS_IMETHODIMP
+ nsAnnoProtocolHandler::GetProtocolFlags(PRUint32 *aProtocolFlags)
+ {
+-  *aProtocolFlags = (URI_NORELATIVE | URI_NOAUTH);
++  *aProtocolFlags = (URI_NORELATIVE | URI_NOAUTH | URI_DANGEROUS_TO_LOAD);
+   return NS_OK;
+ }
+ 
+ 
+ // nsAnnoProtocolHandler::NewURI
+ 
+ NS_IMETHODIMP
+ nsAnnoProtocolHandler::NewURI(const nsACString& aSpec,
+Index: toolkit/components/places/src/nsLivemarkService.js
+===================================================================
+RCS file: /cvsroot/mozilla/toolkit/components/places/src/nsLivemarkService.js,v
+retrieving revision 1.3
+diff -u -p -d -8 -r1.3 nsLivemarkService.js
+--- toolkit/components/places/src/nsLivemarkService.js	19 Oct 2006 08:53:18 -0000	1.3
++++ toolkit/components/places/src/nsLivemarkService.js	25 Oct 2006 17:53:21 -0000
+@@ -74,17 +74,17 @@ const AS_CONTRACTID = "@mozilla.org/brow
+ const OS_CONTRACTID = "@mozilla.org/observer-service;1";
+ const SB_CONTRACTID = "@mozilla.org/intl/stringbundle;1";
+ const IO_CONTRACTID = "@mozilla.org/network/io-service;1";
+ const BMS_CONTRACTID = "@mozilla.org/browser/nav-bookmarks-service;1";
+ const FAV_CONTRACTID = "@mozilla.org/browser/favicon-service;1";
+ const LG_CONTRACTID = "@mozilla.org/network/load-group;1";
+ const FP_CONTRACTID = "@mozilla.org/feed-processor;1";
+ const SEC_CONTRACTID = "@mozilla.org/scriptsecuritymanager;1";
+-const SEC_FLAGS = Ci.nsIScriptSecurityManager.DISALLOW_SCRIPT_OR_DATA;
++const SEC_FLAGS = Ci.nsIScriptSecurityManager.DISALLOW_INHERIT_PRINCIPAL;
+ 
+ // Check every hour
+ const EXPIRATION = 3600000;
+ // Check every 10 minutes on error
+ const ERROR_EXPIRATION = 600000;
+ 
+ var gIoService = Cc[IO_CONTRACTID].getService(Ci.nsIIOService);
+ var gStringBundle;
+Index: toolkit/content/widgets/text.xml
+===================================================================
+RCS file: /cvsroot/mozilla/toolkit/content/widgets/text.xml,v
+retrieving revision 1.31
+diff -u -p -d -8 -r1.31 text.xml
+--- toolkit/content/widgets/text.xml	24 Jul 2006 23:03:24 -0000	1.31
++++ toolkit/content/widgets/text.xml	20 Oct 2006 04:03:13 -0000
+@@ -311,17 +311,18 @@
+             const ioService =
+                      Components.classes["@mozilla.org/network/io-service;1"]
+                                .getService(Components.interfaces.nsIIOService);
+ 
+             uri = ioService.newURI(href, null, null);
+             var safeURI = ioService.newURI("about:blank", null, null);
+ 
+             try {
+-              secMan.checkLoadURI(safeURI, uri, nsISSM.DISALLOW_SCRIPT_OR_DATA)
++              secMan.checkLoadURI(safeURI, uri,
++                                  nsISSM.DISALLOW_INHERIT_PRINCIPAL)
+             } catch (ex) {
+               var msg = "Error: Cannot open a " + uri.scheme + ": link using \
+                          the text-link binding.";
+               Components.utils.reportError(msg);
+               return;
+             }
+ 
+             const cID = "@mozilla.org/uriloader/external-protocol-service;1";
+Index: toolkit/mozapps/plugins/content/pluginInstallerWizard.js
+===================================================================
+RCS file: /cvsroot/mozilla/toolkit/mozapps/plugins/content/pluginInstallerWizard.js,v
+retrieving revision 1.17
+diff -u -p -d -8 -r1.17 pluginInstallerWizard.js
+--- toolkit/mozapps/plugins/content/pluginInstallerWizard.js	25 May 2006 20:03:51 -0000	1.17
++++ toolkit/mozapps/plugins/content/pluginInstallerWizard.js	20 Oct 2006 04:03:13 -0000
+@@ -560,27 +560,29 @@ nsPluginInstallerWizard.prototype.showPl
+ 
+   this.canAdvance(true);
+   this.canRewind(false);
+   this.canCancel(false);
+ }
+ 
+ nsPluginInstallerWizard.prototype.loadURL = function (aUrl){
+   // Check if the page where the plugin came from can load aUrl before
+-  // loading it, and do *not* allow loading javascript: or data: URIs.
++  // loading it, and do *not* allow loading URIs that would inherit our
++  // principal.
++  
+   var pluginPage = window.opener.content.location.href;
+ 
+   const nsIScriptSecurityManager =
+     Components.interfaces.nsIScriptSecurityManager;
+   var secMan =
+     Components.classes["@mozilla.org/scriptsecuritymanager;1"]
+     .getService(nsIScriptSecurityManager);
+ 
+   secMan.checkLoadURIStr(pluginPage, aUrl,
+-                         nsIScriptSecurityManager.DISALLOW_SCRIPT_OR_DATA);
++                         nsIScriptSecurityManager.DISALLOW_INHERIT_PRINCIPAL);
+ 
+   window.opener.open(aUrl);
+ }
+ 
+ nsPluginInstallerWizard.prototype.getString = function (aName){
+   return document.getElementById("pluginWizardString").getString(aName);
+ }
+ 
+Index: uriloader/exthandler/nsExternalProtocolHandler.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/uriloader/exthandler/nsExternalProtocolHandler.cpp,v
+retrieving revision 1.34
+diff -u -p -d -8 -r1.34 nsExternalProtocolHandler.cpp
+--- uriloader/exthandler/nsExternalProtocolHandler.cpp	18 Jun 2006 21:18:22 -0000	1.34
++++ uriloader/exthandler/nsExternalProtocolHandler.cpp	20 Oct 2006 04:03:13 -0000
+@@ -350,17 +350,17 @@ PRBool nsExternalProtocolHandler::HavePr
+   }
+ 
+   return haveHandler;
+ }
+ 
+ NS_IMETHODIMP nsExternalProtocolHandler::GetProtocolFlags(PRUint32 *aUritype)
+ {
+     // Make it norelative since it is a simple uri
+-    *aUritype = URI_NORELATIVE | URI_NOAUTH | URI_HAS_NO_SECURITY_CONTEXT;
++    *aUritype = URI_NORELATIVE | URI_NOAUTH | URI_LOADABLE_BY_ANYONE;
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP nsExternalProtocolHandler::NewURI(const nsACString &aSpec,
+                                                 const char *aCharset, // ignore charset info
+                                                 nsIURI *aBaseURI,
+                                                 nsIURI **_retval)
+ {
+Index: xpinstall/src/nsJSInstallTriggerGlobal.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/xpinstall/src/nsJSInstallTriggerGlobal.cpp,v
+retrieving revision 1.57
+diff -u -p -d -8 -r1.57 nsJSInstallTriggerGlobal.cpp
+--- xpinstall/src/nsJSInstallTriggerGlobal.cpp	1 Aug 2006 15:46:06 -0000	1.57
++++ xpinstall/src/nsJSInstallTriggerGlobal.cpp	20 Oct 2006 04:03:13 -0000
+@@ -166,17 +166,17 @@ InstallTriggerCheckLoadURIFromScript(JSC
+     // Note that we use a null base URI here, since that's what we use when we
+     // actually convert the string into a URI to load.
+     nsCOMPtr<nsIURI> uri;
+     rv = NS_NewURI(getter_AddRefs(uri), uriStr);
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+     // are we allowed to load this one?
+     rv = secman->CheckLoadURIWithPrincipal(principal, uri,
+-                    nsIScriptSecurityManager::DISALLOW_SCRIPT_OR_DATA);
++                    nsIScriptSecurityManager::DISALLOW_INHERIT_PRINCIPAL);
+     return rv;
+ }
+ 
+ //
+ // Helper function to get native object
+ //
+ // This is our own version of JS_GetInstancePrivate() that in addition
+ // performs the delayed creation of the native InstallTrigger if necessary

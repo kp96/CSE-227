@@ -1,0 +1,145 @@
+# HG changeset patch
+# Parent a6786bf8d71d4cf40c3d40e06d8e3c9866863475
+# User Aidin Gharibnavaz <aidin@aidinhut.com>
+Bug 377630 - Preventing filename disclosure, by putting downloaded files in a private directory. r=bz
+
+
+
+
+diff --git a/toolkit/components/jsdownloads/test/unit/test_PrivateTemp.js b/toolkit/components/jsdownloads/test/unit/test_PrivateTemp.js
+new file mode 100644
+--- /dev/null
++++ b/toolkit/components/jsdownloads/test/unit/test_PrivateTemp.js
+@@ -0,0 +1,32 @@
++/* -*- indent-tabs-mode: nil; js-indent-level: 2 -*- */
++/* vim: set ts=2 et sw=2 tw=80: */
++/* Any copyright is dedicated to the Public Domain.
++ * http://creativecommons.org/publicdomain/zero/1.0/ */
++
++"use strict";
++
++/*
++ * The temporary directory downloads saves to, should be only readable
++ * for the current user.
++ */
++add_task(function test_private_temp() {
++
++  let download = yield promiseStartExternalHelperAppServiceDownload(
++                                                         httpUrl("empty.txt"));
++
++  yield promiseDownloadStopped(download);
++
++  var targetFile = Cc['@mozilla.org/file/local;1'].createInstance(Ci.nsIFile);
++  targetFile.initWithPath(download.target.path);
++
++  // 488 is the decimal value of 0700.
++  equal(targetFile.parent.permissions, 448);
++});
++
++
++////////////////////////////////////////////////////////////////////////////////
++//// Termination
++
++let tailFile = do_get_file("tail.js");
++Services.scriptloader.loadSubScript(NetUtil.newURI(tailFile).spec);
++
+diff --git a/toolkit/components/jsdownloads/test/unit/xpcshell.ini b/toolkit/components/jsdownloads/test/unit/xpcshell.ini
+--- a/toolkit/components/jsdownloads/test/unit/xpcshell.ini
++++ b/toolkit/components/jsdownloads/test/unit/xpcshell.ini
+@@ -11,8 +11,10 @@ support-files =
+ 
+ [test_DownloadCore.js]
+ [test_DownloadImport.js]
+ [test_DownloadIntegration.js]
+ [test_DownloadLegacy.js]
+ [test_DownloadList.js]
+ [test_Downloads.js]
+ [test_DownloadStore.js]
++[test_PrivateTemp.js]
++skip-if = os != 'linux'
+diff --git a/uriloader/exthandler/nsExternalHelperAppService.cpp b/uriloader/exthandler/nsExternalHelperAppService.cpp
+--- a/uriloader/exthandler/nsExternalHelperAppService.cpp
++++ b/uriloader/exthandler/nsExternalHelperAppService.cpp
+@@ -397,16 +397,82 @@ static nsresult GetDownloadDirectory(nsI
+   }
+   else {
+     return NS_ERROR_FAILURE;
+   }
+ #else
+   // On all other platforms, we default to the systems temporary directory.
+   nsresult rv = NS_GetSpecialDirectory(NS_OS_TEMP_DIR, getter_AddRefs(dir));
+   NS_ENSURE_SUCCESS(rv, rv);
++
++#if defined(XP_UNIX)
++  // Ensuring that only the current user can read the file names we end up
++  // creating. Note that Creating directories with specified permission only
++  // supported on Unix platform right now. That's why above if exists.
++
++  PRUint32 permissions;
++  rv = dir->GetPermissions(&permissions);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  if (permissions != PR_IRWXU) {
++    const char* userName = PR_GetEnv("USERNAME");
++    if (!userName || !*userName) {
++      userName = PR_GetEnv("USER");
++      if (!userName || !*userName) {
++        userName = PR_GetEnv("LOGNAME");
++      }
++      else {
++        userName = "mozillaUser";
++      }
++    }
++
++    nsAutoString userDir;
++    userDir.AssignLiteral("mozilla_");
++    userDir.AppendASCII(userName);
++    userDir.ReplaceChar(FILE_PATH_SEPARATOR FILE_ILLEGAL_CHARACTERS, '_');
++
++    int counter = 0;
++    bool pathExists;
++    nsCOMPtr<nsIFile> finalPath;
++
++    while (true) {
++      nsAutoString countedUserDir(userDir);
++      countedUserDir.AppendInt(counter, 10);
++      dir->Clone(getter_AddRefs(finalPath));
++      finalPath->Append(countedUserDir);
++
++      rv = finalPath->Exists(&pathExists);
++      NS_ENSURE_SUCCESS(rv, rv);
++
++      if (pathExists) {
++        // If this path has the right permissions, use it.
++        rv = finalPath->GetPermissions(&permissions);
++        NS_ENSURE_SUCCESS(rv, rv);
++
++        if (permissions == PR_IRWXU) {
++          dir = finalPath;
++          break;
++        }
++      }
++
++      rv = finalPath->Create(nsIFile::DIRECTORY_TYPE, PR_IRWXU);
++      if (NS_SUCCEEDED(rv)) {
++        dir = finalPath;
++        break;
++      }
++      else if (rv != NS_ERROR_FILE_ALREADY_EXISTS) {
++        // Unexpected error.
++        return rv;
++      }
++
++      counter++;
++    }
++  }
++
++#endif
+ #endif
+ 
+   NS_ASSERTION(dir, "Somehow we didn't get a download directory!");
+   dir.forget(_directory);
+   return NS_OK;
+ }
+ 
+ /**

@@ -1,0 +1,43 @@
+diff --git a/security/manager/ssl/src/nsNSSCertHelper.cpp b/security/manager/ssl/src/nsNSSCertHelper.cpp
+--- a/security/manager/ssl/src/nsNSSCertHelper.cpp
++++ b/security/manager/ssl/src/nsNSSCertHelper.cpp
+@@ -2120,17 +2120,17 @@ nsNSSCertificate::CreateTBSCertificateAS
+   SECItem data; 
+   // Is there an issuerUniqueID?
+   if (mCert->issuerID.data != nsnull) {
+     // The issuerID is encoded as a bit string.
+     // The function ProcessRawBytes expects the
+     // length to be in bytes, so let's convert the
+     // length in a temporary SECItem
+     data.data = mCert->issuerID.data;
+-    data.len  = mCert->issuerID.len / 8;
++    data.len  = (mCert->issuerID.len + 7) / 8;
+ 
+     ProcessRawBytes(nssComponent, &data, text);
+     printableItem = new nsNSSASN1PrintableItem();
+     if (printableItem == nsnull)
+       return NS_ERROR_OUT_OF_MEMORY;
+ 
+     printableItem->SetDisplayValue(text);
+     nssComponent->GetPIPNSSBundleString("CertDumpIssuerUniqueID", text);
+@@ -2138,18 +2138,18 @@ nsNSSCertificate::CreateTBSCertificateAS
+     asn1Objects->AppendElement(printableItem, false);
+   }
+ 
+   if (mCert->subjectID.data) {
+     // The subjectID is encoded as a bit string.
+     // The function ProcessRawBytes expects the
+     // length to be in bytes, so let's convert the
+     // length in a temporary SECItem
+-    data.data = mCert->issuerID.data;
+-    data.len  = mCert->issuerID.len / 8;
++    data.data = mCert->subjectID.data;
++    data.len  = (mCert->subjectID.len + 7) / 8;
+ 
+     ProcessRawBytes(nssComponent, &data, text);
+     printableItem = new nsNSSASN1PrintableItem();
+     if (printableItem == nsnull)
+       return NS_ERROR_OUT_OF_MEMORY;
+ 
+     printableItem->SetDisplayValue(text);
+     nssComponent->GetPIPNSSBundleString("CertDumpSubjectUniqueID", text);

@@ -1,0 +1,518 @@
+# HG changeset patch
+# Parent 403356d357a39c38566750f8d9b2ccab4b96d1fb
+# User Brian Smith <bsmith@mozilla.com>
+diff --git a/security/manager/ssl/public/Makefile.in b/security/manager/ssl/public/Makefile.in
+--- a/security/manager/ssl/public/Makefile.in
++++ b/security/manager/ssl/public/Makefile.in
+@@ -90,21 +90,20 @@ XPIDLSRCS = \
+     nsICMSMessageErrors.idl \
+     nsICMSMessage.idl \
+     nsICMSMessage2.idl \
+     nsINSSCertCache.idl \
+     nsIOCSPResponder.idl \
+     nsIPK11Token.idl \
+     nsIPKCS11ModuleDB.idl \
+     nsIPKCS11Module.idl \
+     nsICRLManager.idl \
+     nsISMimeCert.idl \
+-    nsICipherInfo.idl \
+     nsIStreamCipher.idl \
+     nsIKeyModule.idl \
+     nsIProtectedAuthThread.idl \
+     nsIDataSignatureVerifier.idl \
+     $(NULL)
+ 
+ ifdef MOZ_XUL
+ XPIDLSRCS += nsICertTree.idl
+ endif
+ 
+diff --git a/security/manager/ssl/public/nsICipherInfo.idl b/security/manager/ssl/public/nsICipherInfo.idl
+deleted file mode 100644
+--- a/security/manager/ssl/public/nsICipherInfo.idl
++++ /dev/null
+@@ -1,74 +0,0 @@
+-/* ***** BEGIN LICENSE BLOCK *****
+- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
+- *
+- * The contents of this file are subject to the Mozilla Public License Version
+- * 1.1 (the "License"); you may not use this file except in compliance with
+- * the License. You may obtain a copy of the License at
+- * http://www.mozilla.org/MPL/
+- *
+- * Software distributed under the License is distributed on an "AS IS" basis,
+- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
+- * for the specific language governing rights and limitations under the
+- * License.
+- *
+- * The Original Code is Mozilla Communicator.
+- *
+- * The Initial Developer of the Original Code is
+- * Netscape Communications Corporation.
+- * Portions created by the Initial Developer are Copyright (C) 2002
+- * the Initial Developer. All Rights Reserved.
+- *
+- * Contributor(s):
+- *   Kai Engert <kaie@netscape.com>
+- *
+- * Alternatively, the contents of this file may be used under the terms of
+- * either the GNU General Public License Version 2 or later (the "GPL"), or
+- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
+- * in which case the provisions of the GPL or the LGPL are applicable instead
+- * of those above. If you wish to allow use of your version of this file only
+- * under the terms of either the GPL or the LGPL, and not to allow others to
+- * use your version of this file under the terms of the MPL, indicate your
+- * decision by deleting the provisions above and replace them with the notice
+- * and other provisions required by the GPL or the LGPL. If you do not delete
+- * the provisions above, a recipient may use your version of this file under
+- * the terms of any one of the MPL, the GPL or the LGPL.
+- *
+- * ***** END LICENSE BLOCK ***** */
+-
+-#include "nsISupports.idl"
+-#include "nsISimpleEnumerator.idl"
+-
+-[scriptable, uuid(028e2b2a-1f0b-43a4-a1a7-365d2d7f35d0)]
+-interface nsICipherInfo : nsISupports
+-{
+-  readonly attribute ACString longName;
+-
+-  readonly attribute PRBool isSSL2;
+-  readonly attribute PRBool isFIPS;
+-  readonly attribute PRBool isExportable;
+-  readonly attribute PRBool nonStandard;
+-  readonly attribute ACString symCipherName;
+-  readonly attribute ACString authAlgorithmName;
+-  readonly attribute ACString keaTypeName;
+-  readonly attribute ACString macAlgorithmName;
+-  readonly attribute PRInt32 effectiveKeyBits;
+-};
+-
+-[scriptable, uuid(766d47cb-6d8c-4e71-b6b7-336917629a69)]
+-interface nsICipherInfoService : nsISupports
+-{
+-  nsICipherInfo getCipherInfoByPrefString(in ACString aPrefString);
+-};
+-
+-%{C++
+-
+-#define NS_CIPHERINFOSERVICE_CID { /* ec693a6f-0832-49dd-877c-89f6552df5de */ \
+-    0xec693a6f,                                                        \
+-    0x0832,                                                            \
+-    0x49dd,                                                            \
+-    {0x87, 0x7c, 0x89, 0xf6, 0x55, 0x2d, 0xf5, 0xde}                   \
+-  }
+-
+-#define NS_CIPHERINFOSERVICE_CONTRACTID "@mozilla.org/security/cipherinfo;1"
+-
+-%}
+diff --git a/security/manager/ssl/src/Makefile.in b/security/manager/ssl/src/Makefile.in
+--- a/security/manager/ssl/src/Makefile.in
++++ b/security/manager/ssl/src/Makefile.in
+@@ -55,21 +55,20 @@ LIBXUL_LIBRARY	= 1
+ 
+ CPPSRCS = 				\
+ 	nsCERTValInParamWrapper.cpp     \
+ 	nsNSSCleaner.cpp                \
+ 	nsCertOverrideService.cpp   \
+ 	nsRecentBadCerts.cpp \
+         nsClientAuthRemember.cpp        \
+ 	nsPSMBackgroundThread.cpp       \
+ 	nsSSLThread.cpp                 \
+ 	nsCertVerificationThread.cpp    \
+-	nsCipherInfo.cpp \
+ 	nsProtectedAuthThread.cpp \
+ 	nsNSSCallbacks.cpp		\
+ 	nsNSSComponent.cpp		\
+ 	nsNSSErrors.cpp			\
+ 	nsNSSIOLayer.cpp		\
+ 	nsSSLStatus.cpp		\
+ 	nsNSSModule.cpp			\
+ 	nsSSLSocketProvider.cpp		\
+ 	nsTLSSocketProvider.cpp		\
+ 	nsSDR.cpp			\
+diff --git a/security/manager/ssl/src/nsCipherInfo.cpp b/security/manager/ssl/src/nsCipherInfo.cpp
+deleted file mode 100644
+--- a/security/manager/ssl/src/nsCipherInfo.cpp
++++ /dev/null
+@@ -1,199 +0,0 @@
+-/* ***** BEGIN LICENSE BLOCK *****
+- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
+- *
+- * The contents of this file are subject to the Mozilla Public License Version
+- * 1.1 (the "License"); you may not use this file except in compliance with
+- * the License. You may obtain a copy of the License at
+- * http://www.mozilla.org/MPL/
+- *
+- * Software distributed under the License is distributed on an "AS IS" basis,
+- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
+- * for the specific language governing rights and limitations under the
+- * License.
+- *
+- * The Original Code is Mozilla Communicator.
+- *
+- * The Initial Developer of the Original Code is
+- * Netscape Communications Corporation.
+- * Portions created by the Initial Developer are Copyright (C) 2002
+- * the Initial Developer. All Rights Reserved.
+- *
+- * Contributor(s):
+- *   Kai Engert <kaie@netscape.com>
+- *
+- * Alternatively, the contents of this file may be used under the terms of
+- * either the GNU General Public License Version 2 or later (the "GPL"), or
+- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
+- * in which case the provisions of the GPL or the LGPL are applicable instead
+- * of those above. If you wish to allow use of your version of this file only
+- * under the terms of either the GPL or the LGPL, and not to allow others to
+- * use your version of this file under the terms of the MPL, indicate your
+- * decision by deleting the provisions above and replace them with the notice
+- * and other provisions required by the GPL or the LGPL. If you do not delete
+- * the provisions above, a recipient may use your version of this file under
+- * the terms of any one of the MPL, the GPL or the LGPL.
+- *
+- * ***** END LICENSE BLOCK ***** */
+-
+-#include "nsCipherInfo.h"
+-#include "nsReadableUtils.h"
+-#include "nsEnumeratorUtils.h"
+-#include "nsCRT.h"
+-#include "nsNSSComponent.h"
+-#include "ssl.h"
+-#include "sslproto.h"
+-
+-NS_IMPL_ISUPPORTS1(nsCipherInfoService, nsICipherInfoService)
+-
+-nsCipherInfoService::nsCipherInfoService()
+-{
+-}
+-
+-nsCipherInfoService::~nsCipherInfoService()
+-{
+-}
+-
+-NS_IMETHODIMP nsCipherInfoService::GetCipherInfoByPrefString(const nsACString &aPrefString, nsICipherInfo * *aCipherInfo)
+-{
+-  NS_ENSURE_ARG_POINTER(aCipherInfo);
+-
+-  PRUint16 cipher_id = 0;
+-  nsresult rv = nsNSSComponent::GetNSSCipherIDFromPrefString(aPrefString, cipher_id);
+-  if (NS_FAILED(rv))
+-    return rv;
+-
+-  *aCipherInfo = new nsCipherInfo(cipher_id);
+-  NS_IF_ADDREF(*aCipherInfo);
+-  rv = *aCipherInfo != nsnull ? NS_OK : NS_ERROR_OUT_OF_MEMORY;
+-  return rv;
+-}
+-
+-NS_IMPL_ISUPPORTS1(nsCipherInfo, nsICipherInfo)
+-
+-nsCipherInfo::nsCipherInfo(PRUint16 aCipherId)
+-:mHaveInfo(PR_FALSE)
+-{
+-  for (PRUint16 i = 0; i < SSL_NumImplementedCiphers; ++i)
+-  {
+-    const PRUint16 i_id = SSL_ImplementedCiphers[i];
+-    if (i_id != aCipherId)
+-      continue;
+-  
+-    PRBool isGood = (
+-      (SECSuccess == SSL_GetCipherSuiteInfo(i_id, &mInfo, sizeof(mInfo)))
+-      &&
+-      (sizeof(mInfo) == mInfo.length));
+-
+-    if (!isGood)
+-    {
+-      NS_ERROR("unable to get info for implemented cipher");
+-      continue;
+-    }
+-    
+-    mHaveInfo = PR_TRUE;
+-  }
+-}
+-
+-nsCipherInfo::~nsCipherInfo()
+-{
+-}
+-
+-NS_IMETHODIMP nsCipherInfo::GetLongName(nsACString &aLongName)
+-{
+-  if (!mHaveInfo)
+-    return NS_ERROR_NOT_AVAILABLE;
+-
+-  aLongName = ToNewCString(nsDependentCString(mInfo.cipherSuiteName));
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP nsCipherInfo::GetIsSSL2(PRBool *aIsSSL2)
+-{
+-  NS_ENSURE_ARG_POINTER(aIsSSL2);
+-
+-  if (!mHaveInfo)
+-    return NS_ERROR_NOT_AVAILABLE;
+-
+-  *aIsSSL2 = SSL_IS_SSL2_CIPHER(mInfo.cipherSuite);
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP nsCipherInfo::GetIsFIPS(PRBool *aIsFIPS)
+-{
+-  NS_ENSURE_ARG_POINTER(aIsFIPS);
+-
+-  if (!mHaveInfo)
+-    return NS_ERROR_NOT_AVAILABLE;
+-
+-  *aIsFIPS = mInfo.isFIPS;
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP nsCipherInfo::GetIsExportable(PRBool *aIsExportable)
+-{
+-  NS_ENSURE_ARG_POINTER(aIsExportable);
+-
+-  if (!mHaveInfo)
+-    return NS_ERROR_NOT_AVAILABLE;
+-
+-  *aIsExportable = mInfo.isExportable;
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP nsCipherInfo::GetNonStandard(PRBool *aNonStandard)
+-{
+-  NS_ENSURE_ARG_POINTER(aNonStandard);
+-
+-  if (!mHaveInfo)
+-    return NS_ERROR_NOT_AVAILABLE;
+-
+-  *aNonStandard = mInfo.nonStandard;
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP nsCipherInfo::GetSymCipherName(nsACString &aSymCipherName)
+-{
+-  if (!mHaveInfo)
+-    return NS_ERROR_NOT_AVAILABLE;
+-
+-  aSymCipherName = mInfo.symCipherName;
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP nsCipherInfo::GetAuthAlgorithmName(nsACString &aAuthAlgorithmName)
+-{
+-  if (!mHaveInfo)
+-    return NS_ERROR_NOT_AVAILABLE;
+-
+-  aAuthAlgorithmName = mInfo.authAlgorithmName;
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP nsCipherInfo::GetKeaTypeName(nsACString &aKeaTypeName)
+-{
+-  if (!mHaveInfo)
+-    return NS_ERROR_NOT_AVAILABLE;
+-
+-  aKeaTypeName = mInfo.keaTypeName;
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP nsCipherInfo::GetMacAlgorithmName(nsACString &aMacAlgorithmName)
+-{
+-  if (!mHaveInfo)
+-    return NS_ERROR_NOT_AVAILABLE;
+-
+-  aMacAlgorithmName = mInfo.macAlgorithmName;
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP nsCipherInfo::GetEffectiveKeyBits(PRInt32 *aEffectiveKeyBits)
+-{
+-  NS_ENSURE_ARG_POINTER(aEffectiveKeyBits);
+-
+-  if (!mHaveInfo)
+-    return NS_ERROR_NOT_AVAILABLE;
+-
+-  *aEffectiveKeyBits = mInfo.effectiveKeyBits;
+-  return NS_OK;
+-}
+diff --git a/security/manager/ssl/src/nsCipherInfo.h b/security/manager/ssl/src/nsCipherInfo.h
+deleted file mode 100644
+--- a/security/manager/ssl/src/nsCipherInfo.h
++++ /dev/null
+@@ -1,64 +0,0 @@
+-/* ***** BEGIN LICENSE BLOCK *****
+- * Version: MPL 1.1/GPL 2.0/LGPL 2.1
+- *
+- * The contents of this file are subject to the Mozilla Public License Version
+- * 1.1 (the "License"); you may not use this file except in compliance with
+- * the License. You may obtain a copy of the License at
+- * http://www.mozilla.org/MPL/
+- *
+- * Software distributed under the License is distributed on an "AS IS" basis,
+- * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
+- * for the specific language governing rights and limitations under the
+- * License.
+- *
+- * The Original Code is Mozilla Communicator.
+- *
+- * The Initial Developer of the Original Code is
+- * Netscape Communications Corporation.
+- * Portions created by the Initial Developer are Copyright (C) 2002
+- * the Initial Developer. All Rights Reserved.
+- *
+- * Contributor(s):
+- *   Kai Engert <kaie@netscape.com>
+- *
+- * Alternatively, the contents of this file may be used under the terms of
+- * either the GNU General Public License Version 2 or later (the "GPL"), or
+- * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
+- * in which case the provisions of the GPL or the LGPL are applicable instead
+- * of those above. If you wish to allow use of your version of this file only
+- * under the terms of either the GPL or the LGPL, and not to allow others to
+- * use your version of this file under the terms of the MPL, indicate your
+- * decision by deleting the provisions above and replace them with the notice
+- * and other provisions required by the GPL or the LGPL. If you do not delete
+- * the provisions above, a recipient may use your version of this file under
+- * the terms of any one of the MPL, the GPL or the LGPL.
+- *
+- * ***** END LICENSE BLOCK ***** */
+-
+-#include "nsICipherInfo.h"
+-#include "nsString.h"
+-#include "sslt.h"
+-
+-class nsCipherInfoService : public nsICipherInfoService
+-{
+-public:
+-  NS_DECL_ISUPPORTS
+-  NS_DECL_NSICIPHERINFOSERVICE
+-
+-  nsCipherInfoService();
+-  virtual ~nsCipherInfoService();
+-};
+-
+-class nsCipherInfo : public nsICipherInfo
+-{
+-public:
+-  NS_DECL_ISUPPORTS
+-  NS_DECL_NSICIPHERINFO
+-
+-  nsCipherInfo(PRUint16 aCipherId);
+-  virtual ~nsCipherInfo();
+-
+-private:
+-  PRBool mHaveInfo;
+-  SSLCipherSuiteInfo mInfo;
+-};
+diff --git a/security/manager/ssl/src/nsNSSModule.cpp b/security/manager/ssl/src/nsNSSModule.cpp
+--- a/security/manager/ssl/src/nsNSSModule.cpp
++++ b/security/manager/ssl/src/nsNSSModule.cpp
+@@ -61,21 +61,20 @@
+ #endif
+ #include "nsCrypto.h"
+ //For the NS_CRYPTO_CONTRACTID define
+ #include "nsDOMCID.h"
+ 
+ #include "nsCMSSecureMessage.h"
+ #include "nsCertPicker.h"
+ #include "nsCURILoader.h"
+ #include "nsICategoryManager.h"
+ #include "nsCRLManager.h"
+-#include "nsCipherInfo.h"
+ #include "nsNTLMAuthModule.h"
+ #include "nsStreamCipher.h"
+ #include "nsKeyModule.h"
+ #include "nsDataSignatureVerifier.h"
+ #include "nsCertOverrideService.h"
+ #include "nsRandomGenerator.h"
+ #include "nsRecentBadCerts.h"
+ #include "nsSSLStatus.h"
+ #include "nsNSSIOLayer.h"
+ #include "NSSErrorsService.h"
+@@ -232,21 +231,20 @@ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEn
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsCertTree)
+ #endif
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsCrypto)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsPkcs11)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsCMSSecureMessage)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsCMSDecoder)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsCMSEncoder)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsCMSMessage)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsCertPicker)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsCRLManager)
+-NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsCipherInfoService)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nssEnsure, nsNTLMAuthModule, InitTest)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsCryptoHash)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsCryptoHMAC)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsStreamCipher)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsKeyObject)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsKeyObjectFactory)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsDataSignatureVerifier)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nssEnsure, nsCertOverrideService, Init)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsRandomGenerator)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nssEnsure, nsRecentBadCertsService, Init)
+@@ -273,21 +271,20 @@ NS_DEFINE_NAMED_CID(NS_CERTTREE_CID);
+ NS_DEFINE_NAMED_CID(NS_PKCS11_CID);
+ NS_DEFINE_NAMED_CID(NS_CRYPTO_CID);
+ NS_DEFINE_NAMED_CID(NS_CMSSECUREMESSAGE_CID);
+ NS_DEFINE_NAMED_CID(NS_CMSDECODER_CID);
+ NS_DEFINE_NAMED_CID(NS_CMSENCODER_CID);
+ NS_DEFINE_NAMED_CID(NS_CMSMESSAGE_CID);
+ NS_DEFINE_NAMED_CID(NS_CRYPTO_HASH_CID);
+ NS_DEFINE_NAMED_CID(NS_CRYPTO_HMAC_CID);
+ NS_DEFINE_NAMED_CID(NS_CERT_PICKER_CID);
+ NS_DEFINE_NAMED_CID(NS_CRLMANAGER_CID);
+-NS_DEFINE_NAMED_CID(NS_CIPHERINFOSERVICE_CID);
+ NS_DEFINE_NAMED_CID(NS_NTLMAUTHMODULE_CID);
+ NS_DEFINE_NAMED_CID(NS_STREAMCIPHER_CID);
+ NS_DEFINE_NAMED_CID(NS_KEYMODULEOBJECT_CID);
+ NS_DEFINE_NAMED_CID(NS_KEYMODULEOBJECTFACTORY_CID);
+ NS_DEFINE_NAMED_CID(NS_DATASIGNATUREVERIFIER_CID);
+ NS_DEFINE_NAMED_CID(NS_CERTOVERRIDE_CID);
+ NS_DEFINE_NAMED_CID(NS_RANDOMGENERATOR_CID);
+ NS_DEFINE_NAMED_CID(NS_RECENTBADCERTS_CID);
+ NS_DEFINE_NAMED_CID(NS_SSLSTATUS_CID);
+ NS_DEFINE_NAMED_CID(NS_NSSSOCKETINFO_CID);
+@@ -312,21 +309,20 @@ static const mozilla::Module::CIDEntry k
+   { &kNS_PKCS11_CID, false, NULL, nsPkcs11Constructor },
+   { &kNS_CRYPTO_CID, false, NULL, nsCryptoConstructor },
+   { &kNS_CMSSECUREMESSAGE_CID, false, NULL, nsCMSSecureMessageConstructor },
+   { &kNS_CMSDECODER_CID, false, NULL, nsCMSDecoderConstructor },
+   { &kNS_CMSENCODER_CID, false, NULL, nsCMSEncoderConstructor },
+   { &kNS_CMSMESSAGE_CID, false, NULL, nsCMSMessageConstructor },
+   { &kNS_CRYPTO_HASH_CID, false, NULL, nsCryptoHashConstructor },
+   { &kNS_CRYPTO_HMAC_CID, false, NULL, nsCryptoHMACConstructor },
+   { &kNS_CERT_PICKER_CID, false, NULL, nsCertPickerConstructor },
+   { &kNS_CRLMANAGER_CID, false, NULL, nsCRLManagerConstructor },
+-  { &kNS_CIPHERINFOSERVICE_CID, false, NULL, nsCipherInfoServiceConstructor },
+   { &kNS_NTLMAUTHMODULE_CID, false, NULL, nsNTLMAuthModuleConstructor },
+   { &kNS_STREAMCIPHER_CID, false, NULL, nsStreamCipherConstructor },
+   { &kNS_KEYMODULEOBJECT_CID, false, NULL, nsKeyObjectConstructor },
+   { &kNS_KEYMODULEOBJECTFACTORY_CID, false, NULL, nsKeyObjectFactoryConstructor },
+   { &kNS_DATASIGNATUREVERIFIER_CID, false, NULL, nsDataSignatureVerifierConstructor },
+   { &kNS_CERTOVERRIDE_CID, false, NULL, nsCertOverrideServiceConstructor },
+   { &kNS_RANDOMGENERATOR_CID, false, NULL, nsRandomGeneratorConstructor },
+   { &kNS_RECENTBADCERTS_CID, false, NULL, nsRecentBadCertsServiceConstructor },
+   { &kNS_SSLSTATUS_CID, false, NULL, nsSSLStatusConstructor },
+   { &kNS_NSSSOCKETINFO_CID, false, NULL, nsNSSSocketInfoConstructor },
+@@ -353,21 +349,20 @@ static const mozilla::Module::ContractID
+   { NS_CRYPTO_CONTRACTID, &kNS_CRYPTO_CID },
+   { NS_CMSSECUREMESSAGE_CONTRACTID, &kNS_CMSSECUREMESSAGE_CID },
+   { NS_CMSDECODER_CONTRACTID, &kNS_CMSDECODER_CID },
+   { NS_CMSENCODER_CONTRACTID, &kNS_CMSENCODER_CID },
+   { NS_CMSMESSAGE_CONTRACTID, &kNS_CMSMESSAGE_CID },
+   { NS_CRYPTO_HASH_CONTRACTID, &kNS_CRYPTO_HASH_CID },
+   { NS_CRYPTO_HMAC_CONTRACTID, &kNS_CRYPTO_HMAC_CID },
+   { NS_CERT_PICKER_CONTRACTID, &kNS_CERT_PICKER_CID },
+   { "@mozilla.org/uriloader/psm-external-content-listener;1", &kNS_PSMCONTENTLISTEN_CID },
+   { NS_CRLMANAGER_CONTRACTID, &kNS_CRLMANAGER_CID },
+-  { NS_CIPHERINFOSERVICE_CONTRACTID, &kNS_CIPHERINFOSERVICE_CID },
+   { NS_CRYPTO_FIPSINFO_SERVICE_CONTRACTID, &kNS_PKCS11MODULEDB_CID },
+   { NS_NTLMAUTHMODULE_CONTRACTID, &kNS_NTLMAUTHMODULE_CID },
+   { NS_STREAMCIPHER_CONTRACTID, &kNS_STREAMCIPHER_CID },
+   { NS_KEYMODULEOBJECT_CONTRACTID, &kNS_KEYMODULEOBJECT_CID },
+   { NS_KEYMODULEOBJECTFACTORY_CONTRACTID, &kNS_KEYMODULEOBJECTFACTORY_CID },
+   { NS_DATASIGNATUREVERIFIER_CONTRACTID, &kNS_DATASIGNATUREVERIFIER_CID },
+   { NS_CERTOVERRIDE_CONTRACTID, &kNS_CERTOVERRIDE_CID },
+   { NS_RANDOMGENERATOR_CONTRACTID, &kNS_RANDOMGENERATOR_CID },
+   { NS_RECENTBADCERTS_CONTRACTID, &kNS_RECENTBADCERTS_CID },
+   { NULL }

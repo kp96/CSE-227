@@ -1,0 +1,30 @@
+Index: security/manager/ssl/src/nsPK11TokenDB.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsPK11TokenDB.cpp,v
+retrieving revision 1.23
+diff -u -8 -p -r1.23 nsPK11TokenDB.cpp
+--- security/manager/ssl/src/nsPK11TokenDB.cpp	8 Jul 2007 07:08:42 -0000	1.23
++++ security/manager/ssl/src/nsPK11TokenDB.cpp	23 Jul 2008 08:13:11 -0000
+@@ -400,19 +400,20 @@ NS_IMETHODIMP nsPK11Token::ChangePasswor
+ {
+   nsNSSShutDownPreventionLock locker;
+   if (isAlreadyShutDown())
+     return NS_ERROR_NOT_AVAILABLE;
+ 
+   SECStatus rv;
+   NS_ConvertUTF16toUTF8 aUtf8OldPassword(oldPassword);
+   NS_ConvertUTF16toUTF8 aUtf8NewPassword(newPassword);
++
+   rv = PK11_ChangePW(mSlot, 
+-               const_cast<char *>(aUtf8OldPassword.get()), 
+-               const_cast<char *>(aUtf8NewPassword.get()));
++         (oldPassword != NULL ? const_cast<char *>(aUtf8OldPassword.get()) : NULL), 
++         (newPassword != NULL ? const_cast<char *>(aUtf8NewPassword.get()) : NULL));
+   return (rv == SECSuccess) ? NS_OK : NS_ERROR_FAILURE;
+ }
+ 
+ /* boolean isHardwareToken (); */
+ NS_IMETHODIMP nsPK11Token::IsHardwareToken(PRBool *_retval)
+ {
+   nsNSSShutDownPreventionLock locker;
+   if (isAlreadyShutDown())

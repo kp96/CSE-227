@@ -1,0 +1,146 @@
+Index: security/manager/ssl/src/nsNSSIOLayer.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp,v
+retrieving revision 1.96
+diff -p -8 -u -r1.96 nsNSSIOLayer.cpp
+--- security/manager/ssl/src/nsNSSIOLayer.cpp	6 Apr 2005 01:35:06 -0000	1.96
++++ security/manager/ssl/src/nsNSSIOLayer.cpp	2 Aug 2005 12:14:42 -0000
+@@ -290,18 +290,20 @@ nsNSSSocketInfo::SetSecurityState(PRUint
+   mSecurityState = aState;
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsNSSSocketInfo::GetShortSecurityDescription(PRUnichar** aText) {
+   if (mShortDesc.IsEmpty())
+     *aText = nsnull;
+-  else
++  else {
+     *aText = ToNewUnicode(mShortDesc);
++    NS_ENSURE_TRUE(*aText, NS_ERROR_OUT_OF_MEMORY);
++  }
+   return NS_OK;
+ }
+ 
+ nsresult
+ nsNSSSocketInfo::SetShortSecurityDescription(const PRUnichar* aText) {
+   mShortDesc.Assign(aText);
+   return NS_OK;
+ }
+@@ -2043,84 +2045,85 @@ SECStatus nsNSS_SSLGetClientAuthData(voi
+ 
+     char *cissuer = CERT_GetOrgName(&serverCert->issuer);
+     NS_ConvertUTF8toUCS2 issuer(cissuer);
+     if (cissuer) PORT_Free(cissuer);
+ 
+     CERT_DestroyCertificate(serverCert);
+ 
+     certNicknameList = (PRUnichar **)nsMemory::Alloc(sizeof(PRUnichar *) * nicknames->numnicknames);
++    if (!certNicknameList)
++      goto loser;
+     certDetailsList = (PRUnichar **)nsMemory::Alloc(sizeof(PRUnichar *) * nicknames->numnicknames);
++    if (!certDetailsList) {
++      nsMemory::Free(certNicknameList);
++      goto loser;
++    }
+ 
+     PRInt32 CertsToUse;
+-
+     for (CertsToUse = 0, node = CERT_LIST_HEAD(certList);
+          !CERT_LIST_END(node, certList) && CertsToUse < nicknames->numnicknames;
+          node = CERT_LIST_NEXT(node)
+         )
+     {
+-      nsNSSCertificate *tempCert = new nsNSSCertificate(node->cert);
++      nsRefPtr<nsNSSCertificate> tempCert = new nsNSSCertificate(node->cert);
+ 
+-      if (tempCert) {
++      if (!tempCert)
++        continue;
+       
+-        // XXX we really should be using an nsCOMPtr instead of manually add-refing,
+-        // but nsNSSCertificate does not have a default constructor.
+-        
+-        NS_ADDREF(tempCert);
+-
+-        nsAutoString i_nickname(NS_ConvertUTF8toUCS2(nicknames->nicknames[CertsToUse]));
+-        nsAutoString nickWithSerial;
+-        nsAutoString details;
+-        if (NS_SUCCEEDED(tempCert->FormatUIStrings(i_nickname, nickWithSerial, details))) {
+-          certNicknameList[CertsToUse] = ToNewUnicode(nickWithSerial);
+-          certDetailsList[CertsToUse] = ToNewUnicode(details);
+-        }
+-        else {
+-          certNicknameList[CertsToUse] = nsnull;
+-          certDetailsList[CertsToUse] = nsnull;
+-        }
++      NS_ConvertUTF8toUTF16 i_nickname(nicknames->nicknames[CertsToUse]);
++      nsAutoString nickWithSerial, details;
++      
++      if (NS_FAILED(tempCert->FormatUIStrings(i_nickname, nickWithSerial, details)))
++        continue;
+ 
+-        NS_RELEASE(tempCert);
+-        
+-        ++CertsToUse;
++      certNicknameList[CertsToUse] = ToNewUnicode(nickWithSerial);
++      if (!certNicknameList[CertsToUse])
++        continue;
++      certDetailsList[CertsToUse] = ToNewUnicode(details);
++      if (!certDetailsList[CertsToUse]) {
++        nsMemory::Free(certNicknameList[CertsToUse]);
++        continue;
+       }
++
++      ++CertsToUse;
+     }
+ 
+     /* Throw up the client auth dialog and get back the index of the selected cert */
+     rv = getNSSDialogs((void**)&dialogs, 
+                        NS_GET_IID(nsIClientAuthDialogs),
+                        NS_CLIENTAUTHDIALOGS_CONTRACTID);
+ 
+-    if (NS_FAILED(rv)) goto loser;
++    if (NS_FAILED(rv)) {
++      NS_FREE_XPCOM_ALLOCATED_POINTER_ARRAY(CertsToUse, certNicknameList);
++      NS_FREE_XPCOM_ALLOCATED_POINTER_ARRAY(CertsToUse, certDetailsList);
++      goto loser;
++    }
+ 
+     {
+       nsPSMUITracker tracker;
+       if (tracker.isUIForbidden()) {
+         rv = NS_ERROR_NOT_AVAILABLE;
+       }
+       else {
+         rv = dialogs->ChooseCertificate(info, cn.get(), org.get(), issuer.get(), 
+           (const PRUnichar**)certNicknameList, (const PRUnichar**)certDetailsList,
+           CertsToUse, &selectedIndex, &canceled);
+       }
+     }
+ 
+-    int i;
+-    for (i = 0; i < CertsToUse; ++i) {
+-      nsMemory::Free(certNicknameList[i]);
+-      nsMemory::Free(certDetailsList[i]);
+-    }
+-    nsMemory::Free(certNicknameList);
+-    nsMemory::Free(certDetailsList);
+-
+     NS_RELEASE(dialogs);
++    NS_FREE_XPCOM_ALLOCATED_POINTER_ARRAY(CertsToUse, certNicknameList);
++    NS_FREE_XPCOM_ALLOCATED_POINTER_ARRAY(CertsToUse, certDetailsList);
++    
+     if (NS_FAILED(rv)) goto loser;
+ 
+     if (canceled) { rv = NS_ERROR_NOT_AVAILABLE; goto loser; }
+ 
++    int i;
+     for (i = 0, node = CERT_LIST_HEAD(certList);
+          !CERT_LIST_END(node, certList);
+          ++i, node = CERT_LIST_NEXT(node)) {
+ 
+       if (i == selectedIndex) {
+         cert = CERT_DupCertificate(node->cert);
+         break;
+       }

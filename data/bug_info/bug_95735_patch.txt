@@ -1,0 +1,17 @@
+Index: modules/libpref/src/init/all.js
+===================================================================
+RCS file: /cvsroot/mozilla/modules/libpref/src/init/all.js,v
+retrieving revision 3.444
+diff -u -r3.444 all.js
+--- modules/libpref/src/init/all.js     25 Feb 2003 05:23:47 -0000 3.444
++++ modules/libpref/src/init/all.js     28 Feb 2003 01:25:42 -0000
+@@ -334,7 +334,9 @@
+ pref("capability.policy.mailnews.*.baseURI.get", "noAccess");
+ pref("capability.policy.mailnews.*.data.get", "noAccess");
+ pref("capability.policy.mailnews.*.getAttribute", "noAccess");
++pref("capability.policy.mailnews.*.getAttributeNS", "noAccess");
+ pref("capability.policy.mailnews.*.getNamedItem", "noAccess");
++pref("capability.policy.mailnews.*.getNamedItemNS", "noAccess");
+ pref("capability.policy.mailnews.*.host.get", "noAccess");
+ pref("capability.policy.mailnews.*.hostname.get", "noAccess");
+ pref("capability.policy.mailnews.*.href.get", "noAccess");

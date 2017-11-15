@@ -1,0 +1,15 @@
+Index: security/manager/ssl/src/nsSDR.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsSDR.cpp,v
+retrieving revision 1.22
+diff -u -r1.22 nsSDR.cpp
+--- security/manager/ssl/src/nsSDR.cpp	3 Feb 2006 14:18:28 -0000	1.22
++++ security/manager/ssl/src/nsSDR.cpp	8 May 2006 04:45:21 -0000
+@@ -275,7 +275,6 @@
+     r = 0;
+ 
+ loser:
+-    if (r) nsMemory::Free(r);
+     if (decrypted) nsMemory::Free(decrypted);
+     if (decoded) nsMemory::Free(decoded);
+  

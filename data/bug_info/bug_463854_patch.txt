@@ -1,0 +1,26 @@
+Index: src/security/CertificatesWindowController.mm
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/security/CertificatesWindowController.mm,v
+retrieving revision 1.14
+diff -u -8 -r1.14 CertificatesWindowController.mm
+--- src/security/CertificatesWindowController.mm	9 Sep 2008 18:15:36 -0000	1.14
++++ src/security/CertificatesWindowController.mm	9 Nov 2008 00:46:36 -0000
+@@ -536,17 +536,17 @@
+ }
+ 
+ - (IBAction)restoreCertificates:(id)sender
+ {
+   NSOpenPanel* theOpenPanel = [NSOpenPanel openPanel];
+   
+   [theOpenPanel beginSheetForDirectory:nil
+                                   file:nil
+-                                 types:[NSArray arrayWithObjects:@"p12", @"pfx", nil]
++                                 types:[NSArray arrayWithObjects:@"p12", @"pfx", @"pkcs12", nil]
+                         modalForWindow:[self window]
+                          modalDelegate:self
+                         didEndSelector:@selector(restorePanelDidEnd:returnCode:contextInfo:)
+                            contextInfo:NULL];
+ 
+ }
+ 
+ 

@@ -1,0 +1,26 @@
+Index: security/manager/ssl/src/nsNSSComponent.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSComponent.cpp,v
+retrieving revision 1.148
+diff -u -8 -p -r1.148 nsNSSComponent.cpp
+--- security/manager/ssl/src/nsNSSComponent.cpp	30 May 2007 23:13:29 -0000	1.148
++++ security/manager/ssl/src/nsNSSComponent.cpp	5 Jun 2007 17:23:02 -0000
+@@ -2402,17 +2402,17 @@ nsCryptoHash::Finish(PRBool ascii, nsACS
+ {
+   if (!mHashContext)
+     return NS_ERROR_NOT_INITIALIZED;
+   
+   PRUint32 hashLen = 0;
+   unsigned char buffer[HASH_LENGTH_MAX];
+   unsigned char* pbuffer = buffer;
+ 
+-  HASH_End(mHashContext, pbuffer, &hashLen, 32);
++  HASH_End(mHashContext, pbuffer, &hashLen, HASH_LENGTH_MAX);
+   HASH_Destroy(mHashContext);
+ 
+   mHashContext = nsnull;
+ 
+   if (ascii)
+   {
+     char *asciiData = BTOA_DataToAscii(buffer, hashLen);
+     _retval.Assign(asciiData);

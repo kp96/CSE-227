@@ -1,0 +1,33 @@
+---
+ security/manager/Makefile.in |    2 ++
+ 1 file changed, 2 insertions(+)
+
+Index: mozilla/security/manager/Makefile.in
+===================================================================
+--- mozilla.orig/security/manager/Makefile.in
++++ mozilla/security/manager/Makefile.in
+@@ -289,22 +289,24 @@
+ ifndef SKIP_CHK
+ 	$(INSTALL) -m 644 $(DIST)/lib/$(FREEBL_64INT_CHK) $(DIST)/bin
+ 	$(INSTALL) -m 644 $(DIST)/lib/$(FREEBL_64FPU_CHK) $(DIST)/bin
+ endif
+ 	$(INSTALL) -m 755 $(DIST)/lib/$(FREEBL_64INT_LIB) $(DIST)/bin
+ 	$(INSTALL) -m 755 $(DIST)/lib/$(FREEBL_64FPU_LIB) $(DIST)/bin
+ endif
+ endif
++ifndef MOZ_NATIVE_NSS
+ # NSS installs headers to dist/public and we want them in dist/include
+ 	$(NSINSTALL) -D $(DIST)/include/nss
+ 	(cd $(DIST)/public/nss && tar $(TAR_CREATE_FLAGS) - .) | \
+ 	  (cd $(DIST)/include/nss && tar -xf -)
+ 	(cd $(DIST)/public/nss && tar $(TAR_CREATE_FLAGS) - .) | \
+ 	  (cd $(DIST)/sdk/include && tar -xf -)
++endif
+ 	$(MAKE) -C boot $@
+ 	$(MAKE) -C ssl $@
+ 	$(MAKE) -C locales $@
+ ifdef MOZ_XUL
+ 	$(MAKE) -C pki $@
+ endif
+ 
+ check::

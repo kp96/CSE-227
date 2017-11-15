@@ -1,0 +1,18 @@
+# HG changeset patch
+# Parent cd224a5edf04854f264b76b45a5a40473b5fd115
+# User timeless@mozdev.org
+Bug 559333 useless signed check of PRUint32 index in nsCertTree::DeleteEntryObject
+r=kaie
+
+diff --git a/security/manager/ssl/src/nsCertTree.cpp b/security/manager/ssl/src/nsCertTree.cpp
+--- a/security/manager/ssl/src/nsCertTree.cpp
++++ b/security/manager/ssl/src/nsCertTree.cpp
+@@ -792,7 +792,7 @@ if (count) {
+ NS_IMETHODIMP 
+ nsCertTree::DeleteEntryObject(PRUint32 index)
+ {
+-  if (!mTreeArray || index < 0) {
++  if (!mTreeArray) {
+     return NS_ERROR_FAILURE;
+   }
+ 

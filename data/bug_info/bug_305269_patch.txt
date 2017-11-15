@@ -1,0 +1,27 @@
+Index: browser.js
+===================================================================
+RCS file: /cvsroot/mozilla/browser/base/content/browser.js,v
+retrieving revision 1.485
+retrieving revision 1.486
+diff -u -8 -r1.485 -r1.486
+--- browser.js	20 Aug 2005 21:38:36 -0000	1.485
++++ browser.js	21 Aug 2005 06:08:48 -0000	1.486
+@@ -572,17 +572,17 @@
+   window.tryToClose = WindowIsClosing;
+ 
+   var uriToLoad = null;
+   // Check for window.arguments[0]. If present, use that for uriToLoad.
+   if ("arguments" in window && window.arguments.length >= 1 && window.arguments[0])
+     uriToLoad = window.arguments[0];
+ 
+   try {
+-    if (makeURL(uriToLoad).schemeIs("chrome")) {
++    if (makeURI(uriToLoad).schemeIs("chrome")) {
+       dump("*** Preventing external load of chrome: URI into browser window\n");
+       dump("    Use -chrome <uri> instead\n");
+       window.close();
+       return;
+     }
+   } catch(e) {}
+ 
+   gIsLoadingBlank = uriToLoad == "about:blank";

@@ -1,0 +1,61 @@
+Index: security/manager/ssl/src/nsNSSIOLayer.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp,v
+retrieving revision 1.152
+diff -u -8 -p -r1.152 nsNSSIOLayer.cpp
+--- security/manager/ssl/src/nsNSSIOLayer.cpp	22 Feb 2008 01:07:16 -0000	1.152
++++ security/manager/ssl/src/nsNSSIOLayer.cpp	17 Mar 2008 17:47:08 -0000
+@@ -74,16 +74,17 @@
+ #include "nsAutoLock.h"
+ #include "nsSSLThread.h"
+ #include "nsNSSShutDown.h"
+ #include "nsSSLStatus.h"
+ #include "nsNSSCertHelper.h"
+ #include "nsNSSCleaner.h"
+ #include "nsThreadUtils.h"
+ #include "nsIDocShell.h"
++#include "nsIDocShellTreeItem.h"
+ #include "nsISecureBrowserUI.h"
+ #include "nsProxyRelease.h"
+ #include "nsIClassInfoImpl.h"
+ #include "nsIProgrammingLanguage.h"
+ 
+ #include "ssl.h"
+ #include "secerr.h"
+ #include "sslerr.h"
+@@ -331,17 +332,34 @@ nsNSSSocketInfo::SetNotificationCallback
+   // We'll look at the presence of a security UI object inside docshell.
+   // If the docshell wants the lock icon, you'll get the ssl error pages, too.
+   // This is helpful to distinguish from all other contexts, like mail windows,
+   // or any other SSL connections running in the background.
+   // We must query it now and remember, because fatal SSL errors will come 
+   // with a socket close, and the socket transport might detach the callbacks 
+   // instance prior to our error reporting.
+ 
+-  nsCOMPtr<nsIDocShell> docshell(do_GetInterface(mCallbacks));
++  nsCOMPtr<nsIDocShell> docshell;
++
++  nsCOMPtr<nsIDocShellTreeItem> item(do_GetInterface(mCallbacks));
++  if (item)
++  {
++    nsCOMPtr<nsIDocShellTreeItem> proxiedItem;
++    nsCOMPtr<nsIDocShellTreeItem> rootItem;
++    NS_GetProxyForObject(NS_PROXY_TO_MAIN_THREAD,
++                         NS_GET_IID(nsIDocShellTreeItem),
++                         item.get(),
++                         NS_PROXY_SYNC,
++                         getter_AddRefs(proxiedItem));
++
++    proxiedItem->GetSameTypeRootTreeItem(getter_AddRefs(rootItem));
++    docshell = do_QueryInterface(rootItem);
++    NS_ASSERTION(docshell, "rootItem do_QI is null");
++  }
++
+   if (docshell)
+   {
+     nsCOMPtr<nsIDocShell> proxiedDocShell;
+     NS_GetProxyForObject(NS_PROXY_TO_MAIN_THREAD,
+                          NS_GET_IID(nsIDocShell),
+                          docshell.get(),
+                          NS_PROXY_SYNC,
+                          getter_AddRefs(proxiedDocShell));

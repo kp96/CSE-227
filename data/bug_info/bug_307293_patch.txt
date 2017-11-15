@@ -1,0 +1,29 @@
+Index: src/nsNSSASN1Object.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSASN1Object.cpp,v
+retrieving revision 1.9
+diff -u -r1.9 nsNSSASN1Object.cpp
+--- src/nsNSSASN1Object.cpp	25 Apr 2004 15:02:36 -0000	1.9
++++ src/nsNSSASN1Object.cpp	7 Sep 2005 01:20:23 -0000
+@@ -241,7 +241,9 @@
+   return rv; 
+ }
+ 
+-nsNSSASN1Sequence::nsNSSASN1Sequence() : mIsValidContainer(PR_TRUE),
++nsNSSASN1Sequence::nsNSSASN1Sequence() : mType(0),
++                                         mTag(0),
++                                         mIsValidContainer(PR_TRUE),
+                                          mIsExpanded(PR_TRUE)
+ {
+   /* member initializers and constructor code */
+@@ -358,7 +360,9 @@
+ }
+ 
+ 
+-nsNSSASN1PrintableItem::nsNSSASN1PrintableItem() : mData(nsnull),
++nsNSSASN1PrintableItem::nsNSSASN1PrintableItem() : mType(0),
++                                                   mTag(0),
++                                                   mData(nsnull),
+                                                    mLen(0)
+ {
+   /* member initializers and constructor code */

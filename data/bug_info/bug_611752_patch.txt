@@ -1,0 +1,2092 @@
+# HG changeset patch
+# User Brian Smith <brian@briansmith.org>
+# Date 1402890711 25200
+#      Sun Jun 15 20:51:51 2014 -0700
+# Node ID b7d49a5b738528f433e06ec7f254115cebf15b9d
+# Parent  220c5fcb4ccc62a91b7e7638daed76936b5ba31c
+Remove nsICMS*
+
+diff --git a/security/manager/pki/src/nsNSSDialogs.cpp b/security/manager/pki/src/nsNSSDialogs.cpp
+--- a/security/manager/pki/src/nsNSSDialogs.cpp
++++ b/security/manager/pki/src/nsNSSDialogs.cpp
+@@ -43,17 +43,16 @@ nsNSSDialogs::nsNSSDialogs()
+ {
+ }
+ 
+ nsNSSDialogs::~nsNSSDialogs()
+ {
+ }
+ 
+ NS_IMPL_ISUPPORTS(nsNSSDialogs, nsITokenPasswordDialogs,
+-                  nsICertificateDialogs,
+                   nsIClientAuthDialogs,
+                   nsICertPickDialogs,
+                   nsITokenDialogs,
+                   nsIDOMCryptoDialogs,
+                   nsIGeneratingKeypairInfoDialogs)
+ 
+ nsresult
+ nsNSSDialogs::Init()
+diff --git a/security/manager/ssl/public/moz.build b/security/manager/ssl/public/moz.build
+--- a/security/manager/ssl/public/moz.build
++++ b/security/manager/ssl/public/moz.build
+@@ -10,22 +10,16 @@ XPIDL_SOURCES += [
+     'nsIASN1Sequence.idl',
+     'nsIAssociatedContentSecurity.idl',
+     'nsIBadCertListener2.idl',
+     'nsICertificateDialogs.idl',
+     'nsICertificatePrincipal.idl',
+     'nsICertOverrideService.idl',
+     'nsICertPickDialogs.idl',
+     'nsIClientAuthDialogs.idl',
+-    'nsICMSDecoder.idl',
+-    'nsICMSEncoder.idl',
+-    'nsICMSMessage.idl',
+-    'nsICMSMessage2.idl',
+-    'nsICMSMessageErrors.idl',
+-    'nsICMSSecureMessage.idl',
+     'nsIDataSignatureVerifier.idl',
+     'nsIDOMCryptoDialogs.idl',
+     'nsIFormSigningDialog.idl',
+     'nsIGenKeypairInfoDlg.idl',
+     'nsIIdentityInfo.idl',
+     'nsIKeygenThread.idl',
+     'nsIKeyModule.idl',
+     'nsINSSCertCache.idl',
+@@ -34,17 +28,16 @@ XPIDL_SOURCES += [
+     'nsIPK11TokenDB.idl',
+     'nsIPKCS11.idl',
+     'nsIPKCS11Module.idl',
+     'nsIPKCS11ModuleDB.idl',
+     'nsIPKCS11Slot.idl',
+     'nsIProtectedAuthThread.idl',
+     'nsIRecentBadCertsService.idl',
+     'nsISignatureVerifier.idl',
+-    'nsISMimeCert.idl',
+     'nsISSLErrorListener.idl',
+     'nsISSLStatus.idl',
+     'nsIStreamCipher.idl',
+     'nsITokenDialogs.idl',
+     'nsITokenPasswordDialogs.idl',
+     'nsIUserCertPicker.idl',
+     'nsIX509Cert.idl',
+     'nsIX509Cert2.idl',
+diff --git a/security/manager/ssl/public/nsICMSDecoder.idl b/security/manager/ssl/public/nsICMSDecoder.idl
+deleted file mode 100644
+--- a/security/manager/ssl/public/nsICMSDecoder.idl
++++ /dev/null
+@@ -1,29 +0,0 @@
+-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+-/* This Source Code Form is subject to the terms of the Mozilla Public
+- * License, v. 2.0. If a copy of the MPL was not distributed with this
+- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+-
+-#include "nsISupports.idl"
+-
+-%{ C++
+-typedef void (*NSSCMSContentCallback)(void *arg, const char *buf, unsigned long len);
+-
+-#define NS_CMSDECODER_CONTRACTID "@mozilla.org/nsCMSDecoder;1"
+-%}
+-
+-native NSSCMSContentCallback(NSSCMSContentCallback);
+-
+-interface nsICMSMessage;
+-
+-/**
+- * nsICMSDecoder
+- *  Interface to decode an CMS message
+- */
+-[uuid(65244a06-a342-11d5-ba47-00108303b117)]
+-interface nsICMSDecoder : nsISupports
+-{
+-  void start(in NSSCMSContentCallback cb, in voidPtr arg);
+-  void update(in string aBuf, in long aLen);
+-  void finish(out nsICMSMessage msg);
+-};
+-
+diff --git a/security/manager/ssl/public/nsICMSEncoder.idl b/security/manager/ssl/public/nsICMSEncoder.idl
+deleted file mode 100644
+--- a/security/manager/ssl/public/nsICMSEncoder.idl
++++ /dev/null
+@@ -1,30 +0,0 @@
+-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+-/* This Source Code Form is subject to the terms of the Mozilla Public
+- * License, v. 2.0. If a copy of the MPL was not distributed with this
+- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+-
+-#include "nsISupports.idl"
+-
+-%{ C++
+-typedef void (*NSSCMSContentCallback)(void *arg, const char *buf, unsigned long len);
+-
+-#define NS_CMSENCODER_CONTRACTID "@mozilla.org/nsCMSEncoder;1"
+-%}
+-
+-native NSSCMSContentCallback(NSSCMSContentCallback);
+-
+-interface nsICMSMessage;
+-
+-/**
+- * nsICMSEncoder
+- *  Interface to Encode an CMS message
+- */
+-[uuid(a15789aa-8903-462b-81e9-4aa2cff4d5cb)]
+-interface nsICMSEncoder : nsISupports
+-{
+-  void start(in nsICMSMessage aMsg, in NSSCMSContentCallback cb, in voidPtr arg);
+-  void update(in string aBuf, in long aLen);
+-  void finish();
+-  void encode(in nsICMSMessage aMsg);
+-};
+-
+diff --git a/security/manager/ssl/public/nsICMSMessage.idl b/security/manager/ssl/public/nsICMSMessage.idl
+deleted file mode 100644
+--- a/security/manager/ssl/public/nsICMSMessage.idl
++++ /dev/null
+@@ -1,35 +0,0 @@
+-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+-/* This Source Code Form is subject to the terms of the Mozilla Public
+- * License, v. 2.0. If a copy of the MPL was not distributed with this
+- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+-
+-#include "nsISupports.idl"
+-
+-%{ C++
+-#define NS_CMSMESSAGE_CONTRACTID "@mozilla.org/nsCMSMessage;1"
+-%}
+-
+-[ptr] native UnsignedCharPtr(unsigned char);
+-
+-interface nsIX509Cert;
+-interface nsIArray;
+-
+-/**
+- * nsICMSMessage
+- *  Interface to a CMS Message
+- */
+-[uuid(a4557478-ae16-11d5-ba4b-00108303b117)]
+-interface nsICMSMessage : nsISupports
+-{
+-  void contentIsSigned(out boolean aSigned);
+-  void contentIsEncrypted(out boolean aEncrypted);
+-  void getSignerCommonName(out string aName);
+-  void getSignerEmailAddress(out string aEmail);
+-  void getSignerCert(out nsIX509Cert scert);
+-  void getEncryptionCert(out nsIX509Cert ecert);
+-  void verifySignature();
+-  void verifyDetachedSignature(in UnsignedCharPtr aDigestData, in unsigned long aDigestDataLen);
+-  void CreateEncrypted(in nsIArray aRecipientCerts);
+-  void CreateSigned(in nsIX509Cert scert, in nsIX509Cert ecert, in UnsignedCharPtr aDigestData, in unsigned long aDigestDataLen);
+-};
+-
+diff --git a/security/manager/ssl/public/nsICMSMessage2.idl b/security/manager/ssl/public/nsICMSMessage2.idl
+deleted file mode 100644
+--- a/security/manager/ssl/public/nsICMSMessage2.idl
++++ /dev/null
+@@ -1,64 +0,0 @@
+-/* This Source Code Form is subject to the terms of the Mozilla Public
+- * License, v. 2.0. If a copy of the MPL was not distributed with this
+- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+-
+-#include "nsISupports.idl"
+-
+-interface nsISMimeVerificationListener;
+-
+-[ptr] native UnsignedCharPtr(unsigned char);
+-
+-/*
+- * This interface is currently not marked scriptable,
+- * because its verification functions are meant to look like those
+- * in nsICMSMessage. At the time the ptr type is eliminated in both 
+- * interfaces, both should be made scriptable.
+- */
+-
+-[uuid(a99a3203-39e3-45e1-909c-175b0e471c2b)]
+-interface nsICMSMessage2 : nsISupports
+-{
+-  /**
+-    * Async version of nsICMSMessage::VerifySignature.
+-    * Code will be executed on a background thread and
+-    * availability of results will be notified using a 
+-    * call to nsISMimeVerificationListener.
+-   */
+-  void asyncVerifySignature(in nsISMimeVerificationListener listener);
+-  
+-  /**
+-    * Async version of nsICMSMessage::VerifyDetachedSignature.
+-    * Code will be executed on a background thread and
+-    * availability of results will be notified using a 
+-    * call to nsISMimeVerificationListener.
+-    *
+-    * We are using "native unsigned char" ptr, because the function 
+-    * signatures of this one and nsICMSMessage::verifyDetachedSignature 
+-    * should be the identical. Cleaning up nsICMSMessages needs to be
+-    * postponed, because this async version is needed on MOZILLA_1_8_BRANCH.
+-    *
+-    * Once both interfaces get cleaned up, the function signature should
+-    * look like:
+-    *     [array, length_is(aDigestDataLen)]
+-    *     in octet aDigestData,
+-    *     in unsigned long aDigestDataLen);
+-   */
+-  void asyncVerifyDetachedSignature(in nsISMimeVerificationListener listener,
+-                                     in UnsignedCharPtr aDigestData, 
+-                                     in unsigned long aDigestDataLen);
+-};
+-
+-[uuid(56310af6-dffc-48b4-abca-85eae4059064)]
+-interface nsISMimeVerificationListener : nsISupports {
+-
+-  /**
+-   *  Notify that results are ready, that have been requested
+-   *  using nsICMSMessage2::asyncVerify[Detached]Signature()
+-   *
+-   *  verificationResultCode matches synchronous result code from
+-   *  nsICMSMessage::verify[Detached]Signature
+-   */
+-  void notify(in nsICMSMessage2 verifiedMessage,
+-              in nsresult verificationResultCode);
+-};
+-
+diff --git a/security/manager/ssl/public/nsICMSMessageErrors.idl b/security/manager/ssl/public/nsICMSMessageErrors.idl
+deleted file mode 100644
+--- a/security/manager/ssl/public/nsICMSMessageErrors.idl
++++ /dev/null
+@@ -1,35 +0,0 @@
+-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+-/* This Source Code Form is subject to the terms of the Mozilla Public
+- * License, v. 2.0. If a copy of the MPL was not distributed with this
+- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+-
+-#include "nsISupports.idl"
+-
+-/**
+- * nsICMSMessageErrors
+- *  Scriptable error constants for nsICMSMessage
+- */
+-[scriptable,uuid(f2aec680-60a0-49f0-afe5-6cf1d3f15e0d)]
+-interface nsICMSMessageErrors : nsISupports
+-{
+-  const long SUCCESS = 0;
+-  const long GENERAL_ERROR = 1;
+-  const long VERIFY_NOT_SIGNED = 1024;
+-  const long VERIFY_NO_CONTENT_INFO = 1025;
+-  const long VERIFY_BAD_DIGEST = 1026;
+-  const long VERIFY_NOCERT = 1028;
+-  const long VERIFY_UNTRUSTED = 1029;
+-  const long VERIFY_ERROR_UNVERIFIED = 1031;
+-  const long VERIFY_ERROR_PROCESSING = 1032;
+-  const long VERIFY_BAD_SIGNATURE = 1033;
+-  const long VERIFY_DIGEST_MISMATCH = 1034;
+-  const long VERIFY_UNKNOWN_ALGO = 1035;
+-  const long VERIFY_UNSUPPORTED_ALGO = 1036;
+-  const long VERIFY_MALFORMED_SIGNATURE = 1037;
+-  const long VERIFY_HEADER_MISMATCH = 1038;
+-  const long VERIFY_NOT_YET_ATTEMPTED = 1039;
+-  const long VERIFY_CERT_WITHOUT_ADDRESS = 1040;
+-
+-  const long ENCRYPT_NO_BULK_ALG = 1056;
+-  const long ENCRYPT_INCOMPLETE = 1057;
+-};
+diff --git a/security/manager/ssl/public/nsICMSSecureMessage.idl b/security/manager/ssl/public/nsICMSSecureMessage.idl
+deleted file mode 100644
+--- a/security/manager/ssl/public/nsICMSSecureMessage.idl
++++ /dev/null
+@@ -1,42 +0,0 @@
+-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+-/* This Source Code Form is subject to the terms of the Mozilla Public
+- * License, v. 2.0. If a copy of the MPL was not distributed with this
+- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+-
+-#include "nsISupports.idl"
+-
+-interface nsIX509Cert;
+-
+-/**
+- * nsICMSManager (service)
+- *  Interface to access users certificate store
+- */
+-[scriptable, uuid(14b4394a-1dd2-11b2-b4fd-ba4a194fe97e)]
+-interface nsICMSSecureMessage : nsISupports
+-{
+-  /**
+-   * getCertByPrefID - a BASE64 string representing a user's
+-   *   certificate (or NULL if there isn't one)
+-   */
+-  string getCertByPrefID(in string certID);
+-
+-  /**
+-   * decodeCert - decode a BASE64 string into an X509Certificate object
+-   */
+-  nsIX509Cert decodeCert(in string value);
+-
+-  /**
+-   * sendMessage - send a text message to the recipient indicated
+-   *   by the base64-encoded cert.
+-   */
+-  string sendMessage(in string msg, in string cert);
+-
+-  /**
+-   * receiveMessage - receive an encrypted (enveloped) message
+-   */
+-  string receiveMessage(in string msg);
+-};
+-
+-%{C++
+-#define NS_CMSSECUREMESSAGE_CONTRACTID "@mozilla.org/nsCMSSecureMessage;1"
+-%}
+diff --git a/security/manager/ssl/public/nsISMimeCert.idl b/security/manager/ssl/public/nsISMimeCert.idl
+deleted file mode 100644
+--- a/security/manager/ssl/public/nsISMimeCert.idl
++++ /dev/null
+@@ -1,13 +0,0 @@
+-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*-
+- *
+- * This Source Code Form is subject to the terms of the Mozilla Public
+- * License, v. 2.0. If a copy of the MPL was not distributed with this
+- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+-
+-#include "nsISupports.idl"
+-
+-[scriptable, uuid(66710f97-a4dd-49f1-a906-fe0ebc5924c0)]
+-interface nsISMimeCert : nsISupports {
+-  void saveSMimeProfile();
+-};
+-
+diff --git a/security/manager/ssl/src/moz.build b/security/manager/ssl/src/moz.build
+--- a/security/manager/ssl/src/moz.build
++++ b/security/manager/ssl/src/moz.build
+@@ -19,18 +19,16 @@ EXPORTS.mozilla += [
+ 
+ UNIFIED_SOURCES += [
+     'CryptoTask.cpp',
+     'nsCertificatePrincipal.cpp',
+     'nsCertOverrideService.cpp',
+     'nsCertPicker.cpp',
+     'nsCertVerificationThread.cpp',
+     'nsClientAuthRemember.cpp',
+-    'nsCMS.cpp',
+-    'nsCMSSecureMessage.cpp',
+     'nsCrypto.cpp',
+     'nsDataSignatureVerifier.cpp',
+     'nsKeygenHandler.cpp',
+     'nsKeygenThread.cpp',
+     'nsKeyModule.cpp',
+     'nsNSSASN1Object.cpp',
+     'nsNSSCallbacks.cpp',
+     'nsNSSCertCache.cpp',
+diff --git a/security/manager/ssl/src/nsCMS.cpp b/security/manager/ssl/src/nsCMS.cpp
+deleted file mode 100644
+--- a/security/manager/ssl/src/nsCMS.cpp
++++ /dev/null
+@@ -1,893 +0,0 @@
+-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+-/* This Source Code Form is subject to the terms of the Mozilla Public
+- * License, v. 2.0. If a copy of the MPL was not distributed with this
+- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+-
+-#include "nsCMS.h"
+-
+-#include "CertVerifier.h"
+-#include "pkix/pkixtypes.h"
+-#include "nsISupports.h"
+-#include "nsNSSHelper.h"
+-#include "nsNSSCertificate.h"
+-#include "smime.h"
+-#include "cms.h"
+-#include "nsICMSMessageErrors.h"
+-#include "nsIArray.h"
+-#include "nsArrayUtils.h"
+-#include "nsCertVerificationThread.h"
+-
+-#include "prlog.h"
+-
+-using namespace mozilla;
+-using namespace mozilla::psm;
+-
+-#ifdef PR_LOGGING
+-extern PRLogModuleInfo* gPIPNSSLog;
+-#endif
+-
+-using namespace mozilla;
+-
+-NS_IMPL_ISUPPORTS(nsCMSMessage, nsICMSMessage, nsICMSMessage2)
+-
+-nsCMSMessage::nsCMSMessage()
+-{
+-  m_cmsMsg = nullptr;
+-}
+-nsCMSMessage::nsCMSMessage(NSSCMSMessage *aCMSMsg)
+-{
+-  m_cmsMsg = aCMSMsg;
+-}
+-
+-nsCMSMessage::~nsCMSMessage()
+-{
+-  nsNSSShutDownPreventionLock locker;
+-  if (isAlreadyShutDown()) {
+-    return;
+-  }
+-  destructorSafeDestroyNSSReference();
+-  shutdown(calledFromObject);
+-}
+-
+-void nsCMSMessage::virtualDestroyNSSReference()
+-{
+-  destructorSafeDestroyNSSReference();
+-}
+-
+-void nsCMSMessage::destructorSafeDestroyNSSReference()
+-{
+-  if (m_cmsMsg) {
+-    NSS_CMSMessage_Destroy(m_cmsMsg);
+-  }
+-}
+-
+-NS_IMETHODIMP nsCMSMessage::VerifySignature()
+-{
+-  return CommonVerifySignature(nullptr, 0);
+-}
+-
+-NSSCMSSignerInfo* nsCMSMessage::GetTopLevelSignerInfo()
+-{
+-  nsNSSShutDownPreventionLock locker;
+-  if (isAlreadyShutDown())
+-    return nullptr;
+-
+-  if (!m_cmsMsg)
+-    return nullptr;
+-
+-  if (!NSS_CMSMessage_IsSigned(m_cmsMsg))
+-    return nullptr;
+-
+-  NSSCMSContentInfo *cinfo = NSS_CMSMessage_ContentLevel(m_cmsMsg, 0);
+-  if (!cinfo)
+-    return nullptr;
+-
+-  NSSCMSSignedData *sigd = (NSSCMSSignedData*)NSS_CMSContentInfo_GetContent(cinfo);
+-  if (!sigd)
+-    return nullptr;
+-
+-  PR_ASSERT(NSS_CMSSignedData_SignerInfoCount(sigd) > 0);
+-  return NSS_CMSSignedData_GetSignerInfo(sigd, 0);
+-}
+-
+-NS_IMETHODIMP nsCMSMessage::GetSignerEmailAddress(char * * aEmail)
+-{
+-  nsNSSShutDownPreventionLock locker;
+-  if (isAlreadyShutDown())
+-    return NS_ERROR_NOT_AVAILABLE;
+-
+-  PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::GetSignerEmailAddress\n"));
+-  NS_ENSURE_ARG(aEmail);
+-
+-  NSSCMSSignerInfo *si = GetTopLevelSignerInfo();
+-  if (!si)
+-    return NS_ERROR_FAILURE;
+-
+-  *aEmail = NSS_CMSSignerInfo_GetSignerEmailAddress(si);
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP nsCMSMessage::GetSignerCommonName(char ** aName)
+-{
+-  nsNSSShutDownPreventionLock locker;
+-  if (isAlreadyShutDown())
+-    return NS_ERROR_NOT_AVAILABLE;
+-
+-  PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::GetSignerCommonName\n"));
+-  NS_ENSURE_ARG(aName);
+-
+-  NSSCMSSignerInfo *si = GetTopLevelSignerInfo();
+-  if (!si)
+-    return NS_ERROR_FAILURE;
+-
+-  *aName = NSS_CMSSignerInfo_GetSignerCommonName(si);
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP nsCMSMessage::ContentIsEncrypted(bool *isEncrypted)
+-{
+-  nsNSSShutDownPreventionLock locker;
+-  if (isAlreadyShutDown())
+-    return NS_ERROR_NOT_AVAILABLE;
+-
+-  PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::ContentIsEncrypted\n"));
+-  NS_ENSURE_ARG(isEncrypted);
+-
+-  if (!m_cmsMsg)
+-    return NS_ERROR_FAILURE;
+-
+-  *isEncrypted = NSS_CMSMessage_IsEncrypted(m_cmsMsg);
+-
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP nsCMSMessage::ContentIsSigned(bool *isSigned)
+-{
+-  nsNSSShutDownPreventionLock locker;
+-  if (isAlreadyShutDown())
+-    return NS_ERROR_NOT_AVAILABLE;
+-
+-  PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::ContentIsSigned\n"));
+-  NS_ENSURE_ARG(isSigned);
+-
+-  if (!m_cmsMsg)
+-    return NS_ERROR_FAILURE;
+-
+-  *isSigned = NSS_CMSMessage_IsSigned(m_cmsMsg);
+-
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP nsCMSMessage::GetSignerCert(nsIX509Cert **scert)
+-{
+-  nsNSSShutDownPreventionLock locker;
+-  if (isAlreadyShutDown())
+-    return NS_ERROR_NOT_AVAILABLE;
+-
+-  NSSCMSSignerInfo *si = GetTopLevelSignerInfo();
+-  if (!si)
+-    return NS_ERROR_FAILURE;
+-
+-  if (si->cert) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::GetSignerCert got signer cert\n"));
+-
+-    *scert = nsNSSCertificate::Create(si->cert);
+-    if (*scert) {
+-      (*scert)->AddRef();
+-    }
+-  }
+-  else {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::GetSignerCert no signer cert, do we have a cert list? %s\n",
+-      (si->certList ? "yes" : "no") ));
+-
+-    *scert = nullptr;
+-  }
+-  
+-  return NS_OK;
+-}
+-
+-NS_IMETHODIMP nsCMSMessage::GetEncryptionCert(nsIX509Cert **ecert)
+-{
+-  nsNSSShutDownPreventionLock locker;
+-  if (isAlreadyShutDown())
+-    return NS_ERROR_NOT_AVAILABLE;
+-
+-    return NS_ERROR_NOT_IMPLEMENTED;
+-}
+-
+-NS_IMETHODIMP nsCMSMessage::VerifyDetachedSignature(unsigned char* aDigestData, uint32_t aDigestDataLen)
+-{
+-  if (!aDigestData || !aDigestDataLen)
+-    return NS_ERROR_FAILURE;
+-
+-  return CommonVerifySignature(aDigestData, aDigestDataLen);
+-}
+-
+-nsresult nsCMSMessage::CommonVerifySignature(unsigned char* aDigestData, uint32_t aDigestDataLen)
+-{
+-  nsNSSShutDownPreventionLock locker;
+-  if (isAlreadyShutDown())
+-    return NS_ERROR_NOT_AVAILABLE;
+-
+-  PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CommonVerifySignature, content level count %d\n", NSS_CMSMessage_ContentLevelCount(m_cmsMsg)));
+-  NSSCMSContentInfo *cinfo = nullptr;
+-  NSSCMSSignedData *sigd = nullptr;
+-  NSSCMSSignerInfo *si;
+-  int32_t nsigners;
+-  RefPtr<SharedCertVerifier> certVerifier;
+-  nsresult rv = NS_ERROR_FAILURE;
+-
+-  if (!NSS_CMSMessage_IsSigned(m_cmsMsg)) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CommonVerifySignature - not signed\n"));
+-    return NS_ERROR_CMS_VERIFY_NOT_SIGNED;
+-  } 
+-
+-  cinfo = NSS_CMSMessage_ContentLevel(m_cmsMsg, 0);
+-  if (cinfo) {
+-    // I don't like this hard cast. We should check in some way, that we really have this type.
+-    sigd = (NSSCMSSignedData*)NSS_CMSContentInfo_GetContent(cinfo);
+-  }
+-  
+-  if (!sigd) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CommonVerifySignature - no content info\n"));
+-    rv = NS_ERROR_CMS_VERIFY_NO_CONTENT_INFO;
+-    goto loser;
+-  }
+-
+-  if (aDigestData && aDigestDataLen)
+-  {
+-    SECItem digest;
+-    digest.data = aDigestData;
+-    digest.len = aDigestDataLen;
+-
+-    if (NSS_CMSSignedData_SetDigestValue(sigd, SEC_OID_SHA1, &digest)) {
+-      PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CommonVerifySignature - bad digest\n"));
+-      rv = NS_ERROR_CMS_VERIFY_BAD_DIGEST;
+-      goto loser;
+-    }
+-  }
+-
+-  // Import certs. Note that import failure is not a signature verification failure. //
+-  if (NSS_CMSSignedData_ImportCerts(sigd, CERT_GetDefaultCertDB(), certUsageEmailRecipient, true) != SECSuccess) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CommonVerifySignature - can not import certs\n"));
+-  }
+-
+-  nsigners = NSS_CMSSignedData_SignerInfoCount(sigd);
+-  PR_ASSERT(nsigners > 0);
+-  NS_ENSURE_TRUE(nsigners > 0, NS_ERROR_UNEXPECTED);
+-  si = NSS_CMSSignedData_GetSignerInfo(sigd, 0);
+-
+-  // See bug 324474. We want to make sure the signing cert is 
+-  // still valid at the current time.
+-
+-  certVerifier = GetDefaultCertVerifier();
+-  NS_ENSURE_TRUE(certVerifier, NS_ERROR_UNEXPECTED);
+-
+-  {
+-    SECStatus srv = certVerifier->VerifyCert(si->cert,
+-                                             certificateUsageEmailSigner,
+-                                             PR_Now(), nullptr /*XXX pinarg*/,
+-                                             nullptr /*hostname*/);
+-    if (srv != SECSuccess) {
+-      PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
+-             ("nsCMSMessage::CommonVerifySignature - signing cert not trusted now\n"));
+-      rv = NS_ERROR_CMS_VERIFY_UNTRUSTED;
+-      goto loser;
+-    }
+-  }
+-
+-  // We verify the first signer info,  only //
+-  if (NSS_CMSSignedData_VerifySignerInfo(sigd, 0, CERT_GetDefaultCertDB(), certUsageEmailSigner) != SECSuccess) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CommonVerifySignature - unable to verify signature\n"));
+-
+-    if (NSSCMSVS_SigningCertNotFound == si->verificationStatus) {
+-      PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CommonVerifySignature - signing cert not found\n"));
+-      rv = NS_ERROR_CMS_VERIFY_NOCERT;
+-    }
+-    else if(NSSCMSVS_SigningCertNotTrusted == si->verificationStatus) {
+-      PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CommonVerifySignature - signing cert not trusted at signing time\n"));
+-      rv = NS_ERROR_CMS_VERIFY_UNTRUSTED;
+-    }
+-    else if(NSSCMSVS_Unverified == si->verificationStatus) {
+-      PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CommonVerifySignature - can not verify\n"));
+-      rv = NS_ERROR_CMS_VERIFY_ERROR_UNVERIFIED;
+-    }
+-    else if(NSSCMSVS_ProcessingError == si->verificationStatus) {
+-      PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CommonVerifySignature - processing error\n"));
+-      rv = NS_ERROR_CMS_VERIFY_ERROR_PROCESSING;
+-    }
+-    else if(NSSCMSVS_BadSignature == si->verificationStatus) {
+-      PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CommonVerifySignature - bad signature\n"));
+-      rv = NS_ERROR_CMS_VERIFY_BAD_SIGNATURE;
+-    }
+-    else if(NSSCMSVS_DigestMismatch == si->verificationStatus) {
+-      PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CommonVerifySignature - digest mismatch\n"));
+-      rv = NS_ERROR_CMS_VERIFY_DIGEST_MISMATCH;
+-    }
+-    else if(NSSCMSVS_SignatureAlgorithmUnknown == si->verificationStatus) {
+-      PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CommonVerifySignature - algo unknown\n"));
+-      rv = NS_ERROR_CMS_VERIFY_UNKNOWN_ALGO;
+-    }
+-    else if(NSSCMSVS_SignatureAlgorithmUnsupported == si->verificationStatus) {
+-      PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CommonVerifySignature - algo not supported\n"));
+-      rv = NS_ERROR_CMS_VERIFY_UNSUPPORTED_ALGO;
+-    }
+-    else if(NSSCMSVS_MalformedSignature == si->verificationStatus) {
+-      PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CommonVerifySignature - malformed signature\n"));
+-      rv = NS_ERROR_CMS_VERIFY_MALFORMED_SIGNATURE;
+-    }
+-
+-    goto loser;
+-  }
+-
+-  // Save the profile. Note that save import failure is not a signature verification failure. //
+-  if (NSS_SMIMESignerInfo_SaveSMIMEProfile(si) != SECSuccess) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CommonVerifySignature - unable to save smime profile\n"));
+-  }
+-
+-  rv = NS_OK;
+-loser:
+-  return rv;
+-}
+-
+-NS_IMETHODIMP nsCMSMessage::AsyncVerifySignature(
+-                              nsISMimeVerificationListener *aListener)
+-{
+-  return CommonAsyncVerifySignature(aListener, nullptr, 0);
+-}
+-
+-NS_IMETHODIMP nsCMSMessage::AsyncVerifyDetachedSignature(
+-                              nsISMimeVerificationListener *aListener,
+-                              unsigned char* aDigestData, uint32_t aDigestDataLen)
+-{
+-  if (!aDigestData || !aDigestDataLen)
+-    return NS_ERROR_FAILURE;
+-
+-  return CommonAsyncVerifySignature(aListener, aDigestData, aDigestDataLen);
+-}
+-
+-nsresult nsCMSMessage::CommonAsyncVerifySignature(nsISMimeVerificationListener *aListener,
+-                                                  unsigned char* aDigestData, uint32_t aDigestDataLen)
+-{
+-  nsSMimeVerificationJob *job = new nsSMimeVerificationJob;
+-  
+-  if (aDigestData)
+-  {
+-    job->digest_data = new unsigned char[aDigestDataLen];
+-    memcpy(job->digest_data, aDigestData, aDigestDataLen);
+-  }
+-  else
+-  {
+-    job->digest_data = nullptr;
+-  }
+-  
+-  job->digest_len = aDigestDataLen;
+-  job->mMessage = this;
+-  job->mListener = aListener;
+-
+-  nsresult rv = nsCertVerificationThread::addJob(job);
+-  if (NS_FAILED(rv))
+-    delete job;
+-
+-  return rv;
+-}
+-
+-class nsZeroTerminatedCertArray : public nsNSSShutDownObject
+-{
+-public:
+-  nsZeroTerminatedCertArray()
+-  :mCerts(nullptr), mPoolp(nullptr), mSize(0)
+-  {
+-  }
+-  
+-  ~nsZeroTerminatedCertArray()
+-  {
+-    nsNSSShutDownPreventionLock locker;
+-    if (isAlreadyShutDown()) {
+-      return;
+-    }
+-    destructorSafeDestroyNSSReference();
+-    shutdown(calledFromObject);
+-  }
+-
+-  void virtualDestroyNSSReference()
+-  {
+-    destructorSafeDestroyNSSReference();
+-  }
+-
+-  void destructorSafeDestroyNSSReference()
+-  {
+-    if (mCerts)
+-    {
+-      for (uint32_t i=0; i < mSize; i++) {
+-        if (mCerts[i]) {
+-          CERT_DestroyCertificate(mCerts[i]);
+-        }
+-      }
+-    }
+-
+-    if (mPoolp)
+-      PORT_FreeArena(mPoolp, false);
+-  }
+-
+-  bool allocate(uint32_t count)
+-  {
+-    // only allow allocation once
+-    if (mPoolp)
+-      return false;
+-  
+-    mSize = count;
+-
+-    if (!mSize)
+-      return false;
+-  
+-    mPoolp = PORT_NewArena(1024);
+-    if (!mPoolp)
+-      return false;
+-
+-    mCerts = (CERTCertificate**)PORT_ArenaZAlloc(
+-      mPoolp, (count+1)*sizeof(CERTCertificate*));
+-
+-    if (!mCerts)
+-      return false;
+-
+-    // null array, including zero termination
+-    for (uint32_t i = 0; i < count+1; i++) {
+-      mCerts[i] = nullptr;
+-    }
+-
+-    return true;
+-  }
+-  
+-  void set(uint32_t i, CERTCertificate *c)
+-  {
+-    nsNSSShutDownPreventionLock locker;
+-    if (isAlreadyShutDown())
+-      return;
+-
+-    if (i >= mSize)
+-      return;
+-    
+-    if (mCerts[i]) {
+-      CERT_DestroyCertificate(mCerts[i]);
+-    }
+-    
+-    mCerts[i] = CERT_DupCertificate(c);
+-  }
+-  
+-  CERTCertificate *get(uint32_t i)
+-  {
+-    nsNSSShutDownPreventionLock locker;
+-    if (isAlreadyShutDown())
+-      return nullptr;
+-
+-    if (i >= mSize)
+-      return nullptr;
+-    
+-    return CERT_DupCertificate(mCerts[i]);
+-  }
+-
+-  CERTCertificate **getRawArray()
+-  {
+-    nsNSSShutDownPreventionLock locker;
+-    if (isAlreadyShutDown())
+-      return nullptr;
+-
+-    return mCerts;
+-  }
+-
+-private:
+-  CERTCertificate **mCerts;
+-  PLArenaPool *mPoolp;
+-  uint32_t mSize;
+-};
+-
+-NS_IMETHODIMP nsCMSMessage::CreateEncrypted(nsIArray * aRecipientCerts)
+-{
+-  nsNSSShutDownPreventionLock locker;
+-  if (isAlreadyShutDown())
+-    return NS_ERROR_NOT_AVAILABLE;
+-
+-  PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CreateEncrypted\n"));
+-  NSSCMSContentInfo *cinfo;
+-  NSSCMSEnvelopedData *envd;
+-  NSSCMSRecipientInfo *recipientInfo;
+-  nsZeroTerminatedCertArray recipientCerts;
+-  SECOidTag bulkAlgTag;
+-  int keySize;
+-  uint32_t i;
+-  nsCOMPtr<nsIX509Cert2> nssRecipientCert;
+-  nsresult rv = NS_ERROR_FAILURE;
+-
+-  // Check the recipient certificates //
+-  uint32_t recipientCertCount;
+-  aRecipientCerts->GetLength(&recipientCertCount);
+-  PR_ASSERT(recipientCertCount > 0);
+-
+-  if (!recipientCerts.allocate(recipientCertCount)) {
+-    goto loser;
+-  }
+-
+-  for (i=0; i<recipientCertCount; i++) {
+-    nsCOMPtr<nsIX509Cert> x509cert = do_QueryElementAt(aRecipientCerts, i);
+-
+-    nssRecipientCert = do_QueryInterface(x509cert);
+-
+-    if (!nssRecipientCert)
+-      return NS_ERROR_FAILURE;
+-
+-    mozilla::pkix::ScopedCERTCertificate c(nssRecipientCert->GetCert());
+-    recipientCerts.set(i, c.get());
+-  }
+-  
+-  // Find a bulk key algorithm //
+-  if (NSS_SMIMEUtil_FindBulkAlgForRecipients(recipientCerts.getRawArray(), &bulkAlgTag,
+-                                            &keySize) != SECSuccess) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CreateEncrypted - can't find bulk alg for recipients\n"));
+-    rv = NS_ERROR_CMS_ENCRYPT_NO_BULK_ALG;
+-    goto loser;
+-  }
+-
+-  m_cmsMsg = NSS_CMSMessage_Create(nullptr);
+-  if (!m_cmsMsg) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CreateEncrypted - can't create new cms message\n"));
+-    rv = NS_ERROR_OUT_OF_MEMORY;
+-    goto loser;
+-  }
+-
+-  if ((envd = NSS_CMSEnvelopedData_Create(m_cmsMsg, bulkAlgTag, keySize)) == nullptr) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CreateEncrypted - can't create enveloped data\n"));
+-    goto loser;
+-  }
+-
+-  cinfo = NSS_CMSMessage_GetContentInfo(m_cmsMsg);
+-  if (NSS_CMSContentInfo_SetContent_EnvelopedData(m_cmsMsg, cinfo, envd) != SECSuccess) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CreateEncrypted - can't create content enveloped data\n"));
+-    goto loser;
+-  }
+-
+-  cinfo = NSS_CMSEnvelopedData_GetContentInfo(envd);
+-  if (NSS_CMSContentInfo_SetContent_Data(m_cmsMsg, cinfo, nullptr, false) != SECSuccess) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CreateEncrypted - can't set content data\n"));
+-    goto loser;
+-  }
+-
+-  // Create and attach recipient information //
+-  for (i=0; i < recipientCertCount; i++) {
+-    mozilla::pkix::ScopedCERTCertificate rc(recipientCerts.get(i));
+-    if ((recipientInfo = NSS_CMSRecipientInfo_Create(m_cmsMsg, rc.get())) == nullptr) {
+-      PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CreateEncrypted - can't create recipient info\n"));
+-      goto loser;
+-    }
+-    if (NSS_CMSEnvelopedData_AddRecipient(envd, recipientInfo) != SECSuccess) {
+-      PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CreateEncrypted - can't add recipient info\n"));
+-      goto loser;
+-    }
+-  }
+-
+-  return NS_OK;
+-loser:
+-  if (m_cmsMsg) {
+-    NSS_CMSMessage_Destroy(m_cmsMsg);
+-    m_cmsMsg = nullptr;
+-  }
+-
+-  return rv;
+-}
+-
+-NS_IMETHODIMP nsCMSMessage::CreateSigned(nsIX509Cert* aSigningCert, nsIX509Cert* aEncryptCert, unsigned char* aDigestData, uint32_t aDigestDataLen)
+-{
+-  nsNSSShutDownPreventionLock locker;
+-  if (isAlreadyShutDown())
+-    return NS_ERROR_NOT_AVAILABLE;
+-
+-  PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CreateSigned\n"));
+-  NSSCMSContentInfo *cinfo;
+-  NSSCMSSignedData *sigd;
+-  NSSCMSSignerInfo *signerinfo;
+-  mozilla::pkix::ScopedCERTCertificate scert;
+-  mozilla::pkix::ScopedCERTCertificate ecert;
+-  nsCOMPtr<nsIX509Cert2> aSigningCert2 = do_QueryInterface(aSigningCert);
+-  nsresult rv = NS_ERROR_FAILURE;
+-
+-  /* Get the certs */
+-  if (aSigningCert2) {
+-    scert = aSigningCert2->GetCert();
+-  }
+-  if (!scert) {
+-    return NS_ERROR_FAILURE;
+-  }
+-
+-  if (aEncryptCert) {
+-    nsCOMPtr<nsIX509Cert2> aEncryptCert2 = do_QueryInterface(aEncryptCert);
+-    if (aEncryptCert2) {
+-      ecert = aEncryptCert2->GetCert();
+-    }
+-  }
+-
+-  /*
+-   * create the message object
+-   */
+-  m_cmsMsg = NSS_CMSMessage_Create(nullptr); /* create a message on its own pool */
+-  if (!m_cmsMsg) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CreateSigned - can't create new message\n"));
+-    rv = NS_ERROR_OUT_OF_MEMORY;
+-    goto loser;
+-  }
+-
+-  /*
+-   * build chain of objects: message->signedData->data
+-   */
+-  if ((sigd = NSS_CMSSignedData_Create(m_cmsMsg)) == nullptr) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CreateSigned - can't create signed data\n"));
+-    goto loser;
+-  }
+-  cinfo = NSS_CMSMessage_GetContentInfo(m_cmsMsg);
+-  if (NSS_CMSContentInfo_SetContent_SignedData(m_cmsMsg, cinfo, sigd) 
+-          != SECSuccess) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CreateSigned - can't set content signed data\n"));
+-    goto loser;
+-  }
+-
+-  cinfo = NSS_CMSSignedData_GetContentInfo(sigd);
+-
+-  /* we're always passing data in and detaching optionally */
+-  if (NSS_CMSContentInfo_SetContent_Data(m_cmsMsg, cinfo, nullptr, true) 
+-          != SECSuccess) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CreateSigned - can't set content data\n"));
+-    goto loser;
+-  }
+-
+-  /* 
+-   * create & attach signer information
+-   */
+-  if ((signerinfo = NSS_CMSSignerInfo_Create(m_cmsMsg, scert.get(), SEC_OID_SHA1)) 
+-          == nullptr) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CreateSigned - can't create signer info\n"));
+-    goto loser;
+-  }
+-
+-  /* we want the cert chain included for this one */
+-  if (NSS_CMSSignerInfo_IncludeCerts(signerinfo, NSSCMSCM_CertChain, 
+-                                       certUsageEmailSigner) 
+-          != SECSuccess) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CreateSigned - can't include signer cert chain\n"));
+-    goto loser;
+-  }
+-
+-  if (NSS_CMSSignerInfo_AddSigningTime(signerinfo, PR_Now()) 
+-	      != SECSuccess) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CreateSigned - can't add signing time\n"));
+-    goto loser;
+-  }
+-
+-  if (NSS_CMSSignerInfo_AddSMIMECaps(signerinfo) != SECSuccess) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CreateSigned - can't add smime caps\n"));
+-    goto loser;
+-  }
+-
+-  if (ecert) {
+-    if (NSS_CMSSignerInfo_AddSMIMEEncKeyPrefs(signerinfo, ecert.get(),
+-	                                      CERT_GetDefaultCertDB())
+-	  != SECSuccess) {
+-      PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CreateSigned - can't add smime enc key prefs\n"));
+-      goto loser;
+-    }
+-
+-    if (NSS_CMSSignerInfo_AddMSSMIMEEncKeyPrefs(signerinfo, ecert.get(),
+-	                                        CERT_GetDefaultCertDB())
+-	  != SECSuccess) {
+-      PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CreateSigned - can't add MS smime enc key prefs\n"));
+-      goto loser;
+-    }
+-
+-    // If signing and encryption cert are identical, don't add it twice.
+-    bool addEncryptionCert =
+-      (ecert && (!scert || !CERT_CompareCerts(ecert.get(), scert.get())));
+-
+-    if (addEncryptionCert &&
+-        NSS_CMSSignedData_AddCertificate(sigd, ecert.get()) != SECSuccess) {
+-      PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CreateSigned - can't add own encryption certificate\n"));
+-      goto loser;
+-    }
+-  }
+-
+-  if (NSS_CMSSignedData_AddSignerInfo(sigd, signerinfo) != SECSuccess) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CreateSigned - can't add signer info\n"));
+-    goto loser;
+-  }
+-
+-  // Finally, add the pre-computed digest if passed in
+-  if (aDigestData) {
+-    SECItem digest;
+-
+-    digest.data = aDigestData;
+-    digest.len = aDigestDataLen;
+-
+-    if (NSS_CMSSignedData_SetDigestValue(sigd, SEC_OID_SHA1, &digest)) {
+-      PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSMessage::CreateSigned - can't set digest value\n"));
+-      goto loser;
+-    }
+-  }
+-
+-  return NS_OK;
+-loser:
+-  if (m_cmsMsg) {
+-    NSS_CMSMessage_Destroy(m_cmsMsg);
+-    m_cmsMsg = nullptr;
+-  }
+-  return rv;
+-}
+-
+-NS_IMPL_ISUPPORTS(nsCMSDecoder, nsICMSDecoder)
+-
+-nsCMSDecoder::nsCMSDecoder()
+-: m_dcx(nullptr)
+-{
+-}
+-
+-nsCMSDecoder::~nsCMSDecoder()
+-{
+-  nsNSSShutDownPreventionLock locker;
+-  if (isAlreadyShutDown()) {
+-    return;
+-  }
+-  destructorSafeDestroyNSSReference();
+-  shutdown(calledFromObject);
+-}
+-
+-void nsCMSDecoder::virtualDestroyNSSReference()
+-{
+-  destructorSafeDestroyNSSReference();
+-}
+-
+-void nsCMSDecoder::destructorSafeDestroyNSSReference()
+-{
+-  if (m_dcx) {
+-    NSS_CMSDecoder_Cancel(m_dcx);
+-    m_dcx = nullptr;
+-  }
+-}
+-
+-/* void start (in NSSCMSContentCallback cb, in voidPtr arg); */
+-NS_IMETHODIMP nsCMSDecoder::Start(NSSCMSContentCallback cb, void * arg)
+-{
+-  nsNSSShutDownPreventionLock locker;
+-  if (isAlreadyShutDown())
+-    return NS_ERROR_NOT_AVAILABLE;
+-
+-  PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSDecoder::Start\n"));
+-  m_ctx = new PipUIContext();
+-
+-  m_dcx = NSS_CMSDecoder_Start(0, cb, arg, 0, m_ctx, 0, 0);
+-  if (!m_dcx) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSDecoder::Start - can't start decoder\n"));
+-    return NS_ERROR_FAILURE;
+-  }
+-  return NS_OK;
+-}
+-
+-/* void update (in string bug, in long len); */
+-NS_IMETHODIMP nsCMSDecoder::Update(const char *buf, int32_t len)
+-{
+-  nsNSSShutDownPreventionLock locker;
+-  if (isAlreadyShutDown())
+-    return NS_ERROR_NOT_AVAILABLE;
+-
+-  PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSDecoder::Update\n"));
+-  NSS_CMSDecoder_Update(m_dcx, (char *)buf, len);
+-  return NS_OK;
+-}
+-
+-/* void finish (); */
+-NS_IMETHODIMP nsCMSDecoder::Finish(nsICMSMessage ** aCMSMsg)
+-{
+-  nsNSSShutDownPreventionLock locker;
+-  if (isAlreadyShutDown())
+-    return NS_ERROR_NOT_AVAILABLE;
+-
+-  PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSDecoder::Finish\n"));
+-  NSSCMSMessage *cmsMsg;
+-  cmsMsg = NSS_CMSDecoder_Finish(m_dcx);
+-  m_dcx = nullptr;
+-  if (cmsMsg) {
+-    nsCMSMessage *obj = new nsCMSMessage(cmsMsg);
+-    // The NSS object cmsMsg still carries a reference to the context
+-    // we gave it on construction.
+-    // Make sure the context will live long enough.
+-    obj->referenceContext(m_ctx);
+-    *aCMSMsg = obj;
+-    NS_ADDREF(*aCMSMsg);
+-  }
+-  return NS_OK;
+-}
+-
+-NS_IMPL_ISUPPORTS(nsCMSEncoder, nsICMSEncoder)
+-
+-nsCMSEncoder::nsCMSEncoder()
+-: m_ecx(nullptr)
+-{
+-}
+-
+-nsCMSEncoder::~nsCMSEncoder()
+-{
+-  nsNSSShutDownPreventionLock locker;
+-  if (isAlreadyShutDown()) {
+-    return;
+-  }
+-  destructorSafeDestroyNSSReference();
+-  shutdown(calledFromObject);
+-}
+-
+-void nsCMSEncoder::virtualDestroyNSSReference()
+-{
+-  destructorSafeDestroyNSSReference();
+-}
+-
+-void nsCMSEncoder::destructorSafeDestroyNSSReference()
+-{
+-  if (m_ecx)
+-    NSS_CMSEncoder_Cancel(m_ecx);
+-}
+-
+-/* void start (); */
+-NS_IMETHODIMP nsCMSEncoder::Start(nsICMSMessage *aMsg, NSSCMSContentCallback cb, void * arg)
+-{
+-  nsNSSShutDownPreventionLock locker;
+-  if (isAlreadyShutDown())
+-    return NS_ERROR_NOT_AVAILABLE;
+-
+-  PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSEncoder::Start\n"));
+-  nsCMSMessage *cmsMsg = static_cast<nsCMSMessage*>(aMsg);
+-  m_ctx = new PipUIContext();
+-
+-  m_ecx = NSS_CMSEncoder_Start(cmsMsg->getCMS(), cb, arg, 0, 0, 0, m_ctx, 0, 0, 0, 0);
+-  if (!m_ecx) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSEncoder::Start - can't start encoder\n"));
+-    return NS_ERROR_FAILURE;
+-  }
+-  return NS_OK;
+-}
+-
+-/* void update (in string aBuf, in long aLen); */
+-NS_IMETHODIMP nsCMSEncoder::Update(const char *aBuf, int32_t aLen)
+-{
+-  nsNSSShutDownPreventionLock locker;
+-  if (isAlreadyShutDown())
+-    return NS_ERROR_NOT_AVAILABLE;
+-
+-  PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSEncoder::Update\n"));
+-  if (!m_ecx || NSS_CMSEncoder_Update(m_ecx, aBuf, aLen) != SECSuccess) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSEncoder::Update - can't update encoder\n"));
+-    return NS_ERROR_FAILURE;
+-  }
+-  return NS_OK;
+-}
+-
+-/* void finish (); */
+-NS_IMETHODIMP nsCMSEncoder::Finish()
+-{
+-  nsNSSShutDownPreventionLock locker;
+-  if (isAlreadyShutDown())
+-    return NS_ERROR_NOT_AVAILABLE;
+-
+-  nsresult rv = NS_OK;
+-  PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSEncoder::Finish\n"));
+-  if (!m_ecx || NSS_CMSEncoder_Finish(m_ecx) != SECSuccess) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSEncoder::Finish - can't finish encoder\n"));
+-    rv = NS_ERROR_FAILURE;
+-  }
+-  m_ecx = nullptr;
+-  return rv;
+-}
+-
+-/* void encode (in nsICMSMessage aMsg); */
+-NS_IMETHODIMP nsCMSEncoder::Encode(nsICMSMessage *aMsg)
+-{
+-  nsNSSShutDownPreventionLock locker;
+-  if (isAlreadyShutDown())
+-    return NS_ERROR_NOT_AVAILABLE;
+-
+-  PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSEncoder::Encode\n"));
+-  return NS_ERROR_NOT_IMPLEMENTED;
+-}
+diff --git a/security/manager/ssl/src/nsCMS.h b/security/manager/ssl/src/nsCMS.h
+deleted file mode 100644
+--- a/security/manager/ssl/src/nsCMS.h
++++ /dev/null
+@@ -1,103 +0,0 @@
+-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+-/* This Source Code Form is subject to the terms of the Mozilla Public
+- * License, v. 2.0. If a copy of the MPL was not distributed with this
+- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+-
+-#ifndef __NS_CMS_H__
+-#define __NS_CMS_H__
+-
+-#include "nsISupports.h"
+-#include "nsCOMPtr.h"
+-#include "nsXPIDLString.h"
+-#include "nsIInterfaceRequestor.h"
+-#include "nsICMSMessage.h"
+-#include "nsICMSMessage2.h"
+-#include "nsIX509Cert3.h"
+-#include "nsVerificationJob.h"
+-#include "nsICMSEncoder.h"
+-#include "nsICMSDecoder.h"
+-#include "sechash.h"
+-#include "cms.h"
+-#include "nsNSSShutDown.h"
+-
+-#define NS_CMSMESSAGE_CID \
+-  { 0xa4557478, 0xae16, 0x11d5, { 0xba,0x4b,0x00,0x10,0x83,0x03,0xb1,0x17 } }
+-
+-class nsCMSMessage : public nsICMSMessage,
+-                     public nsICMSMessage2,
+-                     public nsNSSShutDownObject
+-{
+-public:
+-  NS_DECL_THREADSAFE_ISUPPORTS
+-  NS_DECL_NSICMSMESSAGE
+-  NS_DECL_NSICMSMESSAGE2
+-
+-  nsCMSMessage();
+-  nsCMSMessage(NSSCMSMessage* aCMSMsg);
+-  virtual ~nsCMSMessage();
+-  
+-  void referenceContext(nsIInterfaceRequestor* aContext) {m_ctx = aContext;}
+-  NSSCMSMessage* getCMS() {return m_cmsMsg;}
+-private:
+-  nsCOMPtr<nsIInterfaceRequestor> m_ctx;
+-  NSSCMSMessage * m_cmsMsg;
+-  NSSCMSSignerInfo* GetTopLevelSignerInfo();
+-  nsresult CommonVerifySignature(unsigned char* aDigestData, uint32_t aDigestDataLen);
+-
+-  nsresult CommonAsyncVerifySignature(nsISMimeVerificationListener *aListener,
+-                                      unsigned char* aDigestData, uint32_t aDigestDataLen);
+-
+-  virtual void virtualDestroyNSSReference();
+-  void destructorSafeDestroyNSSReference();
+-
+-friend class nsSMimeVerificationJob;
+-};
+-
+-// ===============================================
+-// nsCMSDecoder - implementation of nsICMSDecoder
+-// ===============================================
+-
+-#define NS_CMSDECODER_CID \
+-  { 0x9dcef3a4, 0xa3bc, 0x11d5, { 0xba, 0x47, 0x00, 0x10, 0x83, 0x03, 0xb1, 0x17 } }
+-
+-class nsCMSDecoder : public nsICMSDecoder,
+-                     public nsNSSShutDownObject
+-{
+-public:
+-  NS_DECL_THREADSAFE_ISUPPORTS
+-  NS_DECL_NSICMSDECODER
+-
+-  nsCMSDecoder();
+-  virtual ~nsCMSDecoder();
+-
+-private:
+-  nsCOMPtr<nsIInterfaceRequestor> m_ctx;
+-  NSSCMSDecoderContext *m_dcx;
+-  virtual void virtualDestroyNSSReference();
+-  void destructorSafeDestroyNSSReference();
+-};
+-
+-// ===============================================
+-// nsCMSEncoder - implementation of nsICMSEncoder
+-// ===============================================
+-
+-#define NS_CMSENCODER_CID \
+-  { 0xa15789aa, 0x8903, 0x462b, { 0x81, 0xe9, 0x4a, 0xa2, 0xcf, 0xf4, 0xd5, 0xcb } }
+-class nsCMSEncoder : public nsICMSEncoder,
+-                     public nsNSSShutDownObject
+-{
+-public:
+-  NS_DECL_THREADSAFE_ISUPPORTS
+-  NS_DECL_NSICMSENCODER
+-
+-  nsCMSEncoder();
+-  virtual ~nsCMSEncoder();
+-
+-private:
+-  nsCOMPtr<nsIInterfaceRequestor> m_ctx;
+-  NSSCMSEncoderContext *m_ecx;
+-  virtual void virtualDestroyNSSReference();
+-  void destructorSafeDestroyNSSReference();
+-};
+-
+-#endif
+diff --git a/security/manager/ssl/src/nsCMSSecureMessage.cpp b/security/manager/ssl/src/nsCMSSecureMessage.cpp
+deleted file mode 100644
+--- a/security/manager/ssl/src/nsCMSSecureMessage.cpp
++++ /dev/null
+@@ -1,346 +0,0 @@
+-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+-/* This Source Code Form is subject to the terms of the Mozilla Public
+- * License, v. 2.0. If a copy of the MPL was not distributed with this
+- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+-
+-#include "nsXPIDLString.h"
+-#include "nsCOMPtr.h"
+-#include "nsISupports.h"
+-#include "nsIInterfaceRequestor.h"
+-#include "nsCRT.h"
+-
+-#include "nsICMSSecureMessage.h"
+-
+-#include "nsCMSSecureMessage.h"
+-#include "nsNSSCertificate.h"
+-#include "nsNSSHelper.h"
+-#include "nsNSSShutDown.h"
+-
+-#include <string.h>
+-#include "plbase64.h"
+-#include "cert.h"
+-#include "cms.h"
+-
+-#include "nsIServiceManager.h"
+-#include "nsIPrefService.h"
+-#include "nsIPrefBranch.h"
+-
+-#include "prlog.h"
+-#ifdef PR_LOGGING
+-extern PRLogModuleInfo* gPIPNSSLog;
+-#endif
+-
+-// Standard ISupports implementation
+-// NOTE: Should these be the thread-safe versions?
+-
+-/*****
+- * nsCMSSecureMessage
+- *****/
+-
+-// Standard ISupports implementation
+-NS_IMPL_ISUPPORTS(nsCMSSecureMessage, nsICMSSecureMessage)
+-
+-// nsCMSSecureMessage constructor
+-nsCMSSecureMessage::nsCMSSecureMessage()
+-{
+-  // initialize superclass
+-}
+-
+-// nsCMSMessage destructor
+-nsCMSSecureMessage::~nsCMSSecureMessage()
+-{
+-}
+-
+-/* string getCertByPrefID (in string certID); */
+-NS_IMETHODIMP nsCMSSecureMessage::
+-GetCertByPrefID(const char *certID, char **_retval)
+-{
+-  nsNSSShutDownPreventionLock locker;
+-  PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSSecureMessage::GetCertByPrefID\n"));
+-  nsresult rv = NS_OK;
+-  CERTCertificate *cert = 0;
+-  nsXPIDLCString nickname;
+-  nsCOMPtr<nsIInterfaceRequestor> ctx = new PipUIContext();
+-
+-  *_retval = 0;
+-
+-  nsCOMPtr<nsIPrefBranch> prefs = do_GetService(NS_PREFSERVICE_CONTRACTID, &rv);
+-  if (NS_FAILED(rv)) {
+-    goto done;
+-  }
+-
+-  rv = prefs->GetCharPref(certID,
+-                          getter_Copies(nickname));
+-  if (NS_FAILED(rv)) goto done;
+-
+-  /* Find a good cert in the user's database */
+-  cert = CERT_FindUserCertByUsage(CERT_GetDefaultCertDB(), const_cast<char*>(nickname.get()), 
+-           certUsageEmailRecipient, true, ctx);
+-
+-  if (!cert) { 
+-    /* Success, but no value */
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSSecureMessage::GetCertByPrefID - can't find user cert\n"));
+-    goto done;
+-  } 
+-
+-  /* Convert the DER to a BASE64 String */
+-  encode(cert->derCert.data, cert->derCert.len, _retval);
+-
+-done:
+-  if (cert) CERT_DestroyCertificate(cert);
+-  return rv;
+-}
+-
+-
+-// nsCMSSecureMessage::DecodeCert
+-nsresult nsCMSSecureMessage::
+-DecodeCert(const char *value, nsIX509Cert ** _retval)
+-{
+-  nsNSSShutDownPreventionLock locker;
+-  PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSSecureMessage::DecodeCert\n"));
+-  nsresult rv = NS_OK;
+-  int32_t length;
+-  unsigned char *data = 0;
+-
+-  *_retval = 0;
+-
+-  if (!value) { return NS_ERROR_FAILURE; }
+-
+-  rv = decode(value, &data, &length);
+-  if (NS_FAILED(rv)) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSSecureMessage::DecodeCert - can't decode cert\n"));
+-    return rv;
+-  }
+-
+-  nsCOMPtr<nsIX509Cert> cert =  nsNSSCertificate::ConstructFromDER((char *)data, length);
+-
+-  if (cert) {
+-    *_retval = cert;
+-    NS_ADDREF(*_retval);
+-  }
+-  else {
+-    rv = NS_ERROR_FAILURE;
+-  }
+-
+-  free((char*)data);
+-  return rv;
+-}
+-
+-// nsCMSSecureMessage::SendMessage
+-nsresult nsCMSSecureMessage::
+-SendMessage(const char *msg, const char *base64Cert, char ** _retval)
+-{
+-  nsNSSShutDownPreventionLock locker;
+-  PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSSecureMessage::SendMessage\n"));
+-  nsresult rv = NS_OK;
+-  CERTCertificate *cert = 0;
+-  NSSCMSMessage *cmsMsg = 0;
+-  unsigned char *certDER = 0;
+-  int32_t derLen;
+-  NSSCMSEnvelopedData *env;
+-  NSSCMSContentInfo *cinfo;
+-  NSSCMSRecipientInfo *rcpt;
+-  SECItem output;
+-  PLArenaPool *arena = PORT_NewArena(1024);
+-  SECStatus s;
+-  nsCOMPtr<nsIInterfaceRequestor> ctx = new PipUIContext();
+-
+-  /* Step 0. Create a CMS Message */
+-  cmsMsg = NSS_CMSMessage_Create(nullptr);
+-  if (!cmsMsg) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSSecureMessage::SendMessage - can't create NSSCMSMessage\n"));
+-    rv = NS_ERROR_FAILURE;
+-    goto done;
+-  }
+-
+-  /* Step 1.  Import the certificate into NSS */
+-  rv = decode(base64Cert, &certDER, &derLen);
+-  if (NS_FAILED(rv)) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSSecureMessage::SendMessage - can't decode / import cert into NSS\n"));
+-    goto done;
+-  }
+-
+-  cert = CERT_DecodeCertFromPackage((char *)certDER, derLen);
+-  if (!cert) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSSecureMessage::SendMessage - can't decode cert from package\n"));
+-    rv = NS_ERROR_FAILURE;
+-    goto done;
+-  }
+-
+-  /* Step 2.  Get a signature cert */
+-
+-  /* Step 3. Build inner (signature) content */
+-
+-  /* Step 4. Build outer (enveloped) content */
+-  env = NSS_CMSEnvelopedData_Create(cmsMsg, SEC_OID_DES_EDE3_CBC, 0);
+-  if (!env) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSSecureMessage::SendMessage - can't create envelope data\n"));
+-    rv = NS_ERROR_FAILURE;
+-    goto done;
+-  }
+-
+-  cinfo = NSS_CMSEnvelopedData_GetContentInfo(env);
+-  s = NSS_CMSContentInfo_SetContent_Data(cmsMsg, cinfo, 0, false);
+-  if (s != SECSuccess) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSSecureMessage::SendMessage - can't set content data\n"));
+-    rv = NS_ERROR_FAILURE;
+-    goto done;
+-  }
+-
+-  rcpt = NSS_CMSRecipientInfo_Create(cmsMsg, cert);
+-  if (!rcpt) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSSecureMessage::SendMessage - can't create recipient info\n"));
+-    rv = NS_ERROR_FAILURE;
+-    goto done;
+-  }
+-
+-  s = NSS_CMSEnvelopedData_AddRecipient(env, rcpt);
+-  if (s != SECSuccess) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSSecureMessage::SendMessage - can't add recipient\n"));
+-    rv = NS_ERROR_FAILURE;
+-    goto done;
+-  }
+-
+-  /* Step 5. Add content to message */
+-  cinfo = NSS_CMSMessage_GetContentInfo(cmsMsg);
+-  s = NSS_CMSContentInfo_SetContent_EnvelopedData(cmsMsg, cinfo, env);
+-  if (s != SECSuccess) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSSecureMessage::SendMessage - can't set content enveloped data\n"));
+-    rv = NS_ERROR_FAILURE;
+-    goto done;
+-  }
+-  
+-  /* Step 6. Encode */
+-  NSSCMSEncoderContext *ecx;
+-
+-  output.data = 0; output.len = 0;
+-  ecx = NSS_CMSEncoder_Start(cmsMsg, 0, 0, &output, arena,
+-            0, ctx, 0, 0, 0, 0);
+-  if (!ecx) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSSecureMessage::SendMessage - can't start cms encoder\n"));
+-    rv = NS_ERROR_FAILURE;
+-    goto done;
+-  }
+-
+-  s = NSS_CMSEncoder_Update(ecx, msg, strlen(msg));
+-  if (s != SECSuccess) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSSecureMessage::SendMessage - can't update encoder\n"));
+-    rv = NS_ERROR_FAILURE;
+-    goto done;
+-  }
+-
+-  s = NSS_CMSEncoder_Finish(ecx);
+-  if (s != SECSuccess) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSSecureMessage::SendMessage - can't finish encoder\n"));
+-    rv = NS_ERROR_FAILURE;
+-    goto done;
+-  }
+-
+-  /* Step 7. Base64 encode and return the result */
+-  rv = encode(output.data, output.len, _retval);
+-
+-done:
+-  if (certDER) free((char *)certDER);
+-  if (cert) CERT_DestroyCertificate(cert);
+-  if (cmsMsg) NSS_CMSMessage_Destroy(cmsMsg);
+-  if (arena) PORT_FreeArena(arena, false);  /* false? */
+-
+-  return rv;
+-}
+-
+-/*
+- * nsCMSSecureMessage::ReceiveMessage
+- */
+-nsresult nsCMSSecureMessage::
+-ReceiveMessage(const char *msg, char **_retval)
+-{
+-  nsNSSShutDownPreventionLock locker;
+-  PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSSecureMessage::ReceiveMessage\n"));
+-  nsresult rv = NS_OK;
+-  NSSCMSDecoderContext *dcx;
+-  unsigned char *der = 0;
+-  int32_t derLen;
+-  NSSCMSMessage *cmsMsg = 0;
+-  SECItem *content;
+-  nsCOMPtr<nsIInterfaceRequestor> ctx = new PipUIContext();
+-
+-  /* Step 1. Decode the base64 wrapper */
+-  rv = decode(msg, &der, &derLen);
+-  if (NS_FAILED(rv)) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSSecureMessage::ReceiveMessage - can't base64 decode\n"));
+-    goto done;
+-  }
+-
+-  dcx = NSS_CMSDecoder_Start(0, 0, 0, /* pw */ 0, ctx, /* key */ 0, 0);
+-  if (!dcx) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSSecureMessage::ReceiveMessage - can't start decoder\n"));
+-    rv = NS_ERROR_FAILURE;
+-    goto done;
+-  }
+-
+-  (void)NSS_CMSDecoder_Update(dcx, (char *)der, derLen);
+-  cmsMsg = NSS_CMSDecoder_Finish(dcx);
+-  if (!cmsMsg) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSSecureMessage::ReceiveMessage - can't finish decoder\n"));
+-    rv = NS_ERROR_FAILURE;
+-    /* Memory leak on dcx?? */
+-    goto done;
+-  }
+-
+-  content = NSS_CMSMessage_GetContent(cmsMsg);
+-  if (!content) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSSecureMessage::ReceiveMessage - can't get content\n"));
+-    rv = NS_ERROR_FAILURE;
+-    goto done;
+-  }
+-
+-  /* Copy the data */
+-  *_retval = (char*)malloc(content->len+1);
+-  memcpy(*_retval, content->data, content->len);
+-  (*_retval)[content->len] = 0;
+-
+-done:
+-  if (der) free(der);
+-  if (cmsMsg) NSS_CMSMessage_Destroy(cmsMsg);
+-
+-  return rv;
+-}
+-
+-nsresult nsCMSSecureMessage::
+-encode(const unsigned char *data, int32_t dataLen, char **_retval)
+-{
+-  nsresult rv = NS_OK;
+-
+-  *_retval = PL_Base64Encode((const char *)data, dataLen, nullptr);
+-  if (!*_retval) { rv = NS_ERROR_OUT_OF_MEMORY; goto loser; }
+-
+-loser:
+-  return rv;
+-}
+-
+-nsresult nsCMSSecureMessage::
+-decode(const char *data, unsigned char **result, int32_t * _retval)
+-{
+-  PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSSecureMessage::decode\n"));
+-  nsresult rv = NS_OK;
+-  uint32_t len = strlen(data);
+-  int adjust = 0;
+-
+-  /* Compute length adjustment */
+-  if (data[len-1] == '=') {
+-    adjust++;
+-    if (data[len-2] == '=') adjust++;
+-  }
+-
+-  *result = (unsigned char *)PL_Base64Decode(data, len, nullptr);
+-  if (!*result) {
+-    PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsCMSSecureMessage::decode - error decoding base64\n"));
+-    rv = NS_ERROR_ILLEGAL_VALUE;
+-    goto loser;
+-  }
+-
+-  *_retval = (len*3)/4 - adjust;
+-
+-loser:
+-  return rv;
+-}
+diff --git a/security/manager/ssl/src/nsCMSSecureMessage.h b/security/manager/ssl/src/nsCMSSecureMessage.h
+deleted file mode 100644
+--- a/security/manager/ssl/src/nsCMSSecureMessage.h
++++ /dev/null
+@@ -1,36 +0,0 @@
+-/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
+-/* This Source Code Form is subject to the terms of the Mozilla Public
+- * License, v. 2.0. If a copy of the MPL was not distributed with this
+- * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+-
+-#ifndef _NSCMSSECUREMESSAGE_H_
+-#define _NSCMSSECUREMESSAGE_H_
+-
+-#include "nsICMSSecureMessage.h"
+-
+-#include "cms.h"
+-
+-// ===============================================
+-// nsCMSManager - implementation of nsICMSManager
+-// ===============================================
+-
+-#define NS_CMSSECUREMESSAGE_CID \
+-  { 0x5fb907e0, 0x1dd2, 0x11b2, { 0xa7, 0xc0, 0xf1, 0x4c, 0x41, 0x6a, 0x62, 0xa1 } }
+-
+-class nsCMSSecureMessage
+-: public nsICMSSecureMessage
+-{
+-public:
+-  NS_DECL_ISUPPORTS
+-  NS_DECL_NSICMSSECUREMESSAGE
+-
+-  nsCMSSecureMessage();
+-  virtual ~nsCMSSecureMessage();
+-
+-private:
+-  NS_METHOD encode(const unsigned char *data, int32_t dataLen, char **_retval);
+-  NS_METHOD decode(const char *data, unsigned char **result, int32_t * _retval);
+-};
+-
+-
+-#endif /* _NSCMSMESSAGE_H_ */
+diff --git a/security/manager/ssl/src/nsCertVerificationThread.cpp b/security/manager/ssl/src/nsCertVerificationThread.cpp
+--- a/security/manager/ssl/src/nsCertVerificationThread.cpp
++++ b/security/manager/ssl/src/nsCertVerificationThread.cpp
+@@ -64,32 +64,16 @@ void nsCertVerificationJob::Run()
+     ires = vres;
+   }
+   
+   nsCOMPtr<nsIX509Cert3> c3 = do_QueryInterface(mCert);
+   nsCOMPtr<nsIRunnable> r = new DispatchCertVerificationResult(mListener, c3, ires);
+   NS_DispatchToMainThread(r);
+ }
+ 
+-void nsSMimeVerificationJob::Run()
+-{
+-  if (!mMessage || !mListener)
+-    return;
+-  
+-  nsresult rv;
+-  
+-  if (digest_data)
+-    rv = mMessage->VerifyDetachedSignature(digest_data, digest_len);
+-  else
+-    rv = mMessage->VerifySignature();
+-  
+-  nsCOMPtr<nsICMSMessage2> m2 = do_QueryInterface(mMessage);
+-  mListener->Notify(m2, rv);
+-}
+-
+ nsCertVerificationThread::nsCertVerificationThread()
+ : mJobQ(nullptr)
+ {
+   NS_ASSERTION(!verification_thread_singleton, 
+                "nsCertVerificationThread is a singleton, caller attempts"
+                " to create another instance!");
+   
+   verification_thread_singleton = this;
+diff --git a/security/manager/ssl/src/nsNSSCertificate.cpp b/security/manager/ssl/src/nsNSSCertificate.cpp
+--- a/security/manager/ssl/src/nsNSSCertificate.cpp
++++ b/security/manager/ssl/src/nsNSSCertificate.cpp
+@@ -15,17 +15,16 @@
+ #include "nsNSSCleaner.h"
+ #include "nsCOMPtr.h"
+ #include "nsIMutableArray.h"
+ #include "nsNSSCertValidity.h"
+ #include "nsPKCS12Blob.h"
+ #include "nsPK11TokenDB.h"
+ #include "nsIX509Cert.h"
+ #include "nsIX509Cert3.h"
+-#include "nsISMimeCert.h"
+ #include "nsNSSASN1Object.h"
+ #include "nsString.h"
+ #include "nsXPIDLString.h"
+ #include "nsReadableUtils.h"
+ #include "nsIURI.h"
+ #include "nsCRT.h"
+ #include "nsUsageArrayHelper.h"
+ #include "nsICertificateDialogs.h"
+@@ -68,17 +67,16 @@ NSSCleanupAutoPtrClass_WithParam(PLArena
+ // in the list to mean not yet initialized.
+ #define CERT_TYPE_NOT_YET_INITIALIZED (1 << 30)
+ 
+ NS_IMPL_ISUPPORTS(nsNSSCertificate,
+                   nsIX509Cert,
+                   nsIX509Cert2,
+                   nsIX509Cert3,
+                   nsIIdentityInfo,
+-                  nsISMimeCert,
+                   nsISerializable,
+                   nsIClassInfo)
+ 
+ /*static*/ nsNSSCertificate*
+ nsNSSCertificate::Create(CERTCertificate* cert, SECOidTag* evOidPolicy)
+ {
+   if (GeckoProcessType_Default != XRE_GetProcessType()) {
+     NS_ERROR("Trying to initialize nsNSSCertificate in a non-chrome process!");
+@@ -1384,29 +1382,16 @@ nsNSSCertificate::Equals(nsIX509Cert* ot
+   if (!other2)
+     return NS_ERROR_FAILURE;
+ 
+   ScopedCERTCertificate cert(other2->GetCert());
+   *result = (mCert.get() == cert.get());
+   return NS_OK;
+ }
+ 
+-NS_IMETHODIMP
+-nsNSSCertificate::SaveSMimeProfile()
+-{
+-  nsNSSShutDownPreventionLock locker;
+-  if (isAlreadyShutDown())
+-    return NS_ERROR_NOT_AVAILABLE;
+-
+-  if (SECSuccess != CERT_SaveSMimeProfile(mCert.get(), nullptr, nullptr))
+-    return NS_ERROR_FAILURE;
+-  else
+-    return NS_OK;
+-}
+-
+ #ifndef MOZ_NO_EV_CERTS
+ 
+ nsresult
+ nsNSSCertificate::hasValidEVOidTag(SECOidTag& resultOidTag, bool& validEV)
+ {
+   nsNSSShutDownPreventionLock locker;
+   if (isAlreadyShutDown())
+     return NS_ERROR_NOT_AVAILABLE;
+diff --git a/security/manager/ssl/src/nsNSSCertificate.h b/security/manager/ssl/src/nsNSSCertificate.h
+--- a/security/manager/ssl/src/nsNSSCertificate.h
++++ b/security/manager/ssl/src/nsNSSCertificate.h
+@@ -7,44 +7,41 @@
+ #define _NS_NSSCERTIFICATE_H_
+ 
+ #include "nsIX509Cert.h"
+ #include "nsIX509Cert2.h"
+ #include "nsIX509Cert3.h"
+ #include "nsIX509CertDB.h"
+ #include "nsIX509CertList.h"
+ #include "nsIASN1Object.h"
+-#include "nsISMimeCert.h"
+ #include "nsIIdentityInfo.h"
+ #include "nsCOMPtr.h"
+ #include "nsNSSShutDown.h"
+ #include "nsISimpleEnumerator.h"
+ #include "nsISerializable.h"
+ #include "nsIClassInfo.h"
+ #include "pkix/pkixtypes.h"
+ #include "certt.h"
+ 
+ class nsAutoString;
+ class nsINSSComponent;
+ class nsIASN1Sequence;
+ 
+ class nsNSSCertificate : public nsIX509Cert3,
+                          public nsIIdentityInfo,
+-                         public nsISMimeCert,
+                          public nsISerializable,
+                          public nsIClassInfo,
+                          public nsNSSShutDownObject
+ {
+ public:
+   NS_DECL_THREADSAFE_ISUPPORTS
+   NS_DECL_NSIX509CERT
+   NS_DECL_NSIX509CERT2
+   NS_DECL_NSIX509CERT3
+   NS_DECL_NSIIDENTITYINFO
+-  NS_DECL_NSISMIMECERT
+   NS_DECL_NSISERIALIZABLE
+   NS_DECL_NSICLASSINFO
+ 
+   friend class nsNSSCertificateFakeTransport;
+ 
+   nsNSSCertificate(CERTCertificate* cert, SECOidTag* evOidPolicy = nullptr);
+   nsNSSCertificate();
+   virtual ~nsNSSCertificate();
+diff --git a/security/manager/ssl/src/nsNSSModule.cpp b/security/manager/ssl/src/nsNSSModule.cpp
+--- a/security/manager/ssl/src/nsNSSModule.cpp
++++ b/security/manager/ssl/src/nsNSSModule.cpp
+@@ -14,26 +14,24 @@
+ #include "nsSDR.h"
+ 
+ #include "nsPK11TokenDB.h"
+ #include "nsPKCS11Slot.h"
+ #include "nsNSSCertificate.h"
+ #include "nsNSSCertificateFakeTransport.h"
+ #include "nsNSSCertificateDB.h"
+ #include "nsNSSCertCache.h"
+-#include "nsCMS.h"
+ #ifdef MOZ_XUL
+ #include "nsCertTree.h"
+ #endif
+ #include "nsCrypto.h"
+ #include "nsCryptoHash.h"
+ //For the NS_CRYPTO_CONTRACTID define
+ #include "nsDOMCID.h"
+ #include "nsNetCID.h"
+-#include "nsCMSSecureMessage.h"
+ #include "nsCertPicker.h"
+ #include "nsCURILoader.h"
+ #include "nsICategoryManager.h"
+ #include "nsNTLMAuthModule.h"
+ #include "nsStreamCipher.h"
+ #include "nsKeyModule.h"
+ #include "nsDataSignatureVerifier.h"
+ #include "nsCertOverrideService.h"
+@@ -189,20 +187,16 @@ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEn
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsNSSCertList)
+ #ifdef MOZ_XUL
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsCertTree)
+ #endif
+ #ifndef MOZ_DISABLE_CRYPTOLEGACY
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsCrypto)
+ #endif
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsPkcs11)
+-NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsCMSSecureMessage)
+-NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsCMSDecoder)
+-NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsCMSEncoder)
+-NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsCMSMessage)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsCertPicker)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nssEnsure, nsNTLMAuthModule, InitTest)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsCryptoHash)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsCryptoHMAC)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsStreamCipher)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsKeyObject)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsKeyObjectFactory)
+ NS_NSS_GENERIC_FACTORY_CONSTRUCTOR(nssEnsure, nsDataSignatureVerifier)
+@@ -229,20 +223,16 @@ NS_DEFINE_NAMED_CID(NS_NSSCERTCACHE_CID)
+ NS_DEFINE_NAMED_CID(NS_FORMPROCESSOR_CID);
+ #ifdef MOZ_XUL
+ NS_DEFINE_NAMED_CID(NS_CERTTREE_CID);
+ #endif
+ NS_DEFINE_NAMED_CID(NS_PKCS11_CID);
+ #ifndef MOZ_DISABLE_CRYPTOLEGACY
+ NS_DEFINE_NAMED_CID(NS_CRYPTO_CID);
+ #endif
+-NS_DEFINE_NAMED_CID(NS_CMSSECUREMESSAGE_CID);
+-NS_DEFINE_NAMED_CID(NS_CMSDECODER_CID);
+-NS_DEFINE_NAMED_CID(NS_CMSENCODER_CID);
+-NS_DEFINE_NAMED_CID(NS_CMSMESSAGE_CID);
+ NS_DEFINE_NAMED_CID(NS_CRYPTO_HASH_CID);
+ NS_DEFINE_NAMED_CID(NS_CRYPTO_HMAC_CID);
+ NS_DEFINE_NAMED_CID(NS_CERT_PICKER_CID);
+ NS_DEFINE_NAMED_CID(NS_NTLMAUTHMODULE_CID);
+ NS_DEFINE_NAMED_CID(NS_STREAMCIPHER_CID);
+ NS_DEFINE_NAMED_CID(NS_KEYMODULEOBJECT_CID);
+ NS_DEFINE_NAMED_CID(NS_KEYMODULEOBJECTFACTORY_CID);
+ NS_DEFINE_NAMED_CID(NS_DATASIGNATUREVERIFIER_CID);
+@@ -268,20 +258,16 @@ static const mozilla::Module::CIDEntry k
+   { &kNS_FORMPROCESSOR_CID, false, nullptr, nsKeygenFormProcessor::Create },
+ #ifdef MOZ_XUL
+   { &kNS_CERTTREE_CID, false, nullptr, nsCertTreeConstructor },
+ #endif
+   { &kNS_PKCS11_CID, false, nullptr, nsPkcs11Constructor },
+ #ifndef MOZ_DISABLE_CRYPTOLEGACY
+   { &kNS_CRYPTO_CID, false, nullptr, nsCryptoConstructor },
+ #endif
+-  { &kNS_CMSSECUREMESSAGE_CID, false, nullptr, nsCMSSecureMessageConstructor },
+-  { &kNS_CMSDECODER_CID, false, nullptr, nsCMSDecoderConstructor },
+-  { &kNS_CMSENCODER_CID, false, nullptr, nsCMSEncoderConstructor },
+-  { &kNS_CMSMESSAGE_CID, false, nullptr, nsCMSMessageConstructor },
+   { &kNS_CRYPTO_HASH_CID, false, nullptr, nsCryptoHashConstructor },
+   { &kNS_CRYPTO_HMAC_CID, false, nullptr, nsCryptoHMACConstructor },
+   { &kNS_CERT_PICKER_CID, false, nullptr, nsCertPickerConstructor },
+   { &kNS_NTLMAUTHMODULE_CID, false, nullptr, nsNTLMAuthModuleConstructor },
+   { &kNS_STREAMCIPHER_CID, false, nullptr, nsStreamCipherConstructor },
+   { &kNS_KEYMODULEOBJECT_CID, false, nullptr, nsKeyObjectConstructor },
+   { &kNS_KEYMODULEOBJECTFACTORY_CID, false, nullptr, nsKeyObjectFactoryConstructor },
+   { &kNS_DATASIGNATUREVERIFIER_CID, false, nullptr, nsDataSignatureVerifierConstructor },
+@@ -310,20 +296,16 @@ static const mozilla::Module::ContractID
+   { NS_FORMPROCESSOR_CONTRACTID, &kNS_FORMPROCESSOR_CID },
+ #ifdef MOZ_XUL
+   { NS_CERTTREE_CONTRACTID, &kNS_CERTTREE_CID },
+ #endif
+   { NS_PKCS11_CONTRACTID, &kNS_PKCS11_CID },
+ #ifndef MOZ_DISABLE_CRYPTOLEGACY
+   { NS_CRYPTO_CONTRACTID, &kNS_CRYPTO_CID },
+ #endif
+-  { NS_CMSSECUREMESSAGE_CONTRACTID, &kNS_CMSSECUREMESSAGE_CID },
+-  { NS_CMSDECODER_CONTRACTID, &kNS_CMSDECODER_CID },
+-  { NS_CMSENCODER_CONTRACTID, &kNS_CMSENCODER_CID },
+-  { NS_CMSMESSAGE_CONTRACTID, &kNS_CMSMESSAGE_CID },
+   { NS_CRYPTO_HASH_CONTRACTID, &kNS_CRYPTO_HASH_CID },
+   { NS_CRYPTO_HMAC_CONTRACTID, &kNS_CRYPTO_HMAC_CID },
+   { NS_CERT_PICKER_CONTRACTID, &kNS_CERT_PICKER_CID },
+   { "@mozilla.org/uriloader/psm-external-content-listener;1", &kNS_PSMCONTENTLISTEN_CID },
+   { NS_CRYPTO_FIPSINFO_SERVICE_CONTRACTID, &kNS_PKCS11MODULEDB_CID },
+   { NS_NTLMAUTHMODULE_CONTRACTID, &kNS_NTLMAUTHMODULE_CID },
+   { NS_STREAMCIPHER_CONTRACTID, &kNS_STREAMCIPHER_CID },
+   { NS_KEYMODULEOBJECT_CONTRACTID, &kNS_KEYMODULEOBJECT_CID },
+diff --git a/security/manager/ssl/src/nsVerificationJob.h b/security/manager/ssl/src/nsVerificationJob.h
+--- a/security/manager/ssl/src/nsVerificationJob.h
++++ b/security/manager/ssl/src/nsVerificationJob.h
+@@ -6,18 +6,16 @@
+ 
+ #ifndef _INC_NSVERIFICATIONJOB_H
+ #define _INC_NSVERIFICATIONJOB_H
+ 
+ #include "nspr.h"
+ 
+ #include "nsIX509Cert.h"
+ #include "nsIX509Cert3.h"
+-#include "nsICMSMessage.h"
+-#include "nsICMSMessage2.h"
+ #include "nsProxyRelease.h"
+ 
+ class nsBaseVerificationJob
+ {
+ public:
+   virtual ~nsBaseVerificationJob() {}
+   virtual void Run() = 0;
+ };
+@@ -44,26 +42,9 @@ private:
+   nsresult mRV;
+   uint32_t mVerified;
+   uint32_t mCount;
+   char16_t **mUsages;
+ 
+ friend class nsCertVerificationJob;
+ };
+ 
+-class nsSMimeVerificationJob : public nsBaseVerificationJob
+-{
+-public:
+-  nsSMimeVerificationJob() { digest_data = nullptr; digest_len = 0; }
+-  ~nsSMimeVerificationJob() { delete [] digest_data; }
+-
+-  nsCOMPtr<nsICMSMessage> mMessage;
+-  nsCOMPtr<nsISMimeVerificationListener> mListener;
+-
+-  unsigned char *digest_data;
+-  uint32_t digest_len;
+-
+-  void Run();
+-};
+-
+-
+-
+ #endif

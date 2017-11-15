@@ -1,0 +1,113 @@
+diff --git a/mailnews/base/util/nsMsgProtocol.cpp b/mailnews/base/util/nsMsgProtocol.cpp
+--- a/mailnews/base/util/nsMsgProtocol.cpp
++++ b/mailnews/base/util/nsMsgProtocol.cpp
+@@ -274,16 +274,24 @@ nsresult nsMsgProtocol::OpenFileSocket(n
+   rv = sts->CreateInputTransport(stream, nsInt64(aStartPosition),
+                                  nsInt64(aReadCount), PR_TRUE,
+                                  getter_AddRefs(m_transport));
+ 
+   m_socketIsOpen = PR_FALSE;
+   return rv;
+ }
+ 
++nsresult nsMsgProtocol::GetTopmostMsgWindow(nsIMsgWindow **aWindow)
++{
++  nsresult rv;
++  nsCOMPtr<nsIMsgMailSession> mailSession ( do_GetService(NS_MSGMAILSESSION_CONTRACTID, &rv));
++  NS_ENSURE_SUCCESS(rv, rv);
++  return mailSession->GetTopmostMsgWindow(aWindow);
++}
++
+ nsresult nsMsgProtocol::SetupTransportState()
+ {
+   if (!m_socketIsOpen && m_transport)
+   {
+     nsresult rv;
+ 
+     // open buffered, blocking output stream
+     rv = m_transport->OpenOutputStream(nsITransport::OPEN_BLOCKING, 0, 0, getter_AddRefs(m_outputStream));
+diff --git a/mailnews/base/util/nsMsgProtocol.h b/mailnews/base/util/nsMsgProtocol.h
+--- a/mailnews/base/util/nsMsgProtocol.h
++++ b/mailnews/base/util/nsMsgProtocol.h
+@@ -49,16 +49,18 @@
+ #include "nsCOMPtr.h"
+ #include "nsIInterfaceRequestor.h"
+ #include "nsIInterfaceRequestorUtils.h"
+ #include "nsIProgressEventSink.h"
+ #include "nsITransport.h"
+ #include "nsIAsyncOutputStream.h"
+ #include "nsIAuthModule.h"
+ 
++class nsIMsgWindow;
++
+ #define UNKNOWN_ERROR             101
+ #define UNKNOWN_HOST_ERROR        102
+ #define CONNECTION_REFUSED_ERROR  103
+ #define NET_TIMEOUT_ERROR         104
+ 
+ class nsIPrompt;
+ class nsIMsgMailNewsUrl;
+ class nsMsgFilePostHelper;
+@@ -118,16 +120,18 @@ protected:
+                                              PRInt32 aGetPort,
+                                              const char *connectionType,
+                                              nsIProxyInfo *aProxyInfo,
+                                              nsIInterfaceRequestor* callbacks);
+   // helper routine
+   nsresult GetFileFromURL(nsIURI * aURL, nsIFile **aResult);
+   virtual nsresult OpenFileSocket(nsIURI * aURL, PRUint32 aStartPosition, PRInt32 aReadCount); // used to open a file socket connection
+ 
++  nsresult GetTopmostMsgWindow(nsIMsgWindow **aWindow);
++
+   // a Protocol typically overrides this method. They free any of their own connection state and then
+   // they call up into the base class to free the generic connection objects
+   virtual nsresult CloseSocket(); 
+ 
+   virtual nsresult SetupTransportState(); // private method used by OpenNetworkSocket and OpenFileSocket
+ 
+   // ProcessProtocolState - This is the function that gets churned by calls to OnDataAvailable. 
+   // As data arrives on the socket, OnDataAvailable calls ProcessProtocolState.
+diff --git a/mailnews/imap/src/nsImapProtocol.cpp b/mailnews/imap/src/nsImapProtocol.cpp
+--- a/mailnews/imap/src/nsImapProtocol.cpp
++++ b/mailnews/imap/src/nsImapProtocol.cpp
+@@ -764,16 +764,18 @@ nsresult nsImapProtocol::SetupWithUrl(ns
+       // if we have a listener from a mock channel, over-ride the consumer that was passed in
+       nsCOMPtr<nsIStreamListener> channelListener;
+       m_mockChannel->GetChannelListener(getter_AddRefs(channelListener));
+       if (channelListener) // only over-ride if we have a non null channel listener
+         aRealStreamListener = channelListener;
+       m_mockChannel->GetChannelContext(getter_AddRefs(m_channelContext));
+       nsCOMPtr<nsIMsgWindow> msgWindow;
+       GetMsgWindow(getter_AddRefs(msgWindow));
++      if (!msgWindow)
++        GetTopmostMsgWindow(getter_AddRefs(msgWindow));
+       if (msgWindow)
+       {
+         nsCOMPtr<nsIInterfaceRequestor> interfaceRequestor;
+         msgWindow->GetNotificationCallbacks(getter_AddRefs(interfaceRequestor));
+         m_mockChannel->SetNotificationCallbacks(interfaceRequestor);
+       }
+     }
+ 
+diff --git a/mailnews/local/src/nsPop3Protocol.cpp b/mailnews/local/src/nsPop3Protocol.cpp
+--- a/mailnews/local/src/nsPop3Protocol.cpp
++++ b/mailnews/local/src/nsPop3Protocol.cpp
+@@ -534,16 +534,18 @@ nsresult nsPop3Protocol::Initialize(nsIU
+     // When we are making a secure connection, we need to make sure that we
+     // pass an interface requestor down to the socket transport so that PSM can
+     // retrieve a nsIPrompt instance if needed.
+     nsCOMPtr<nsIInterfaceRequestor> ir;
+     if (m_socketType != nsIMsgIncomingServer::defaultSocket)
+     {
+       nsCOMPtr<nsIMsgWindow> msgwin;
+       mailnewsUrl->GetMsgWindow(getter_AddRefs(msgwin));
++      if (!msgwin)
++        GetTopmostMsgWindow(getter_AddRefs(msgwin));
+       if (msgwin)
+       {
+         nsCOMPtr<nsIDocShell> docshell;
+         msgwin->GetRootDocShell(getter_AddRefs(docshell));
+         ir = do_QueryInterface(docshell);
+         nsCOMPtr<nsIInterfaceRequestor> notificationCallbacks;
+         msgwin->GetNotificationCallbacks(getter_AddRefs(notificationCallbacks));
+         if (notificationCallbacks)

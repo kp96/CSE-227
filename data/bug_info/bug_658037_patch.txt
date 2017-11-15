@@ -1,0 +1,433 @@
+# HG changeset patch
+# Parent 9ac190a247ad0148909c05389079db1c1e379ff4
+# User Mounir Lamouri <mounir.lamouri@gmail.com>
+# Date 1308326467 -7200
+
+diff --git a/content/base/src/nsContentUtils.cpp b/content/base/src/nsContentUtils.cpp
+--- a/content/base/src/nsContentUtils.cpp
++++ b/content/base/src/nsContentUtils.cpp
+@@ -1197,17 +1197,18 @@ nsContentUtils::CanCallerAccess(nsIPrinc
+ // static
+ PRBool
+ nsContentUtils::CanCallerAccess(nsIDOMNode *aNode)
+ {
+   // XXXbz why not check the IsCapabilityEnabled thing up front, and not bother
+   // with the system principal games?  But really, there should be a simpler
+   // API here, dammit.
+   nsCOMPtr<nsIPrincipal> subjectPrincipal;
+-  sSecurityManager->GetSubjectPrincipal(getter_AddRefs(subjectPrincipal));
++  nsresult rv = sSecurityManager->GetSubjectPrincipal(getter_AddRefs(subjectPrincipal));
++  NS_ENSURE_SUCCESS(rv, PR_FALSE);
+ 
+   if (!subjectPrincipal) {
+     // we're running as system, grant access to the node.
+ 
+     return PR_TRUE;
+   }
+ 
+   nsCOMPtr<nsINode> node = do_QueryInterface(aNode);
+@@ -1219,17 +1220,18 @@ nsContentUtils::CanCallerAccess(nsIDOMNo
+ // static
+ PRBool
+ nsContentUtils::CanCallerAccess(nsPIDOMWindow* aWindow)
+ {
+   // XXXbz why not check the IsCapabilityEnabled thing up front, and not bother
+   // with the system principal games?  But really, there should be a simpler
+   // API here, dammit.
+   nsCOMPtr<nsIPrincipal> subjectPrincipal;
+-  sSecurityManager->GetSubjectPrincipal(getter_AddRefs(subjectPrincipal));
++  nsresult rv = sSecurityManager->GetSubjectPrincipal(getter_AddRefs(subjectPrincipal));
++  NS_ENSURE_SUCCESS(rv, PR_FALSE);
+ 
+   if (!subjectPrincipal) {
+     // we're running as system, grant access to the node.
+ 
+     return PR_TRUE;
+   }
+ 
+   nsCOMPtr<nsIScriptObjectPrincipal> scriptObject =
+diff --git a/content/base/src/nsDOMFileReader.cpp b/content/base/src/nsDOMFileReader.cpp
+--- a/content/base/src/nsDOMFileReader.cpp
++++ b/content/base/src/nsDOMFileReader.cpp
+@@ -174,17 +174,18 @@ nsDOMFileReader::Init()
+ 
+   if (NS_FAILED(stack->Peek(&cx)) || !cx) {
+     return NS_OK;
+   }
+ 
+   nsIScriptSecurityManager *secMan = nsContentUtils::GetSecurityManager();
+   nsCOMPtr<nsIPrincipal> subjectPrincipal;
+   if (secMan) {
+-    secMan->GetSubjectPrincipal(getter_AddRefs(subjectPrincipal));
++    nsresult rv = secMan->GetSubjectPrincipal(getter_AddRefs(subjectPrincipal));
++    NS_ENSURE_SUCCESS(rv, rv);
+   }
+   NS_ENSURE_STATE(subjectPrincipal);
+   mPrincipal = subjectPrincipal;
+ 
+   nsIScriptContext* context = GetScriptContextFromJSContext(cx);
+   if (context) {
+     mScriptContext = context;
+     nsCOMPtr<nsPIDOMWindow> window =
+diff --git a/content/base/src/nsDOMParser.cpp b/content/base/src/nsDOMParser.cpp
+--- a/content/base/src/nsDOMParser.cpp
++++ b/content/base/src/nsDOMParser.cpp
+@@ -401,17 +401,18 @@ nsDOMParser::Initialize(nsISupports* aOw
+                               getter_AddRefs(documentURI),
+                               getter_AddRefs(baseURI));
+     NS_ENSURE_SUCCESS(rv, rv);
+   } else {
+     // No arguments; use the subject principal
+     nsIScriptSecurityManager* secMan = nsContentUtils::GetSecurityManager();
+     NS_ENSURE_TRUE(secMan, NS_ERROR_UNEXPECTED);
+ 
+-    secMan->GetSubjectPrincipal(getter_AddRefs(prin));
++    nsresult rv = secMan->GetSubjectPrincipal(getter_AddRefs(prin));
++    NS_ENSURE_SUCCESS(rv, rv);
+ 
+     // We're called from JS; there better be a subject principal, really.
+     NS_ENSURE_TRUE(prin, NS_ERROR_UNEXPECTED);
+   }
+ 
+   NS_ASSERTION(prin, "Must have principal by now");
+   
+   if (!documentURI) {
+@@ -458,17 +459,18 @@ nsDOMParser::Init(nsIPrincipal *aPrincip
+   nsIScriptContext* scriptContext = GetScriptContextFromJSContext(cx);
+ 
+   nsCOMPtr<nsIPrincipal> principal = aPrincipal;
+ 
+   if (!principal && !aDocumentURI) {
+     nsIScriptSecurityManager* secMan = nsContentUtils::GetSecurityManager();
+     NS_ENSURE_TRUE(secMan, NS_ERROR_UNEXPECTED);
+ 
+-    secMan->GetSubjectPrincipal(getter_AddRefs(principal));
++    nsresult rv = secMan->GetSubjectPrincipal(getter_AddRefs(principal));
++    NS_ENSURE_SUCCESS(rv, rv);
+ 
+     // We're called from JS; there better be a subject principal, really.
+     NS_ENSURE_TRUE(principal, NS_ERROR_UNEXPECTED);
+   }
+ 
+   return Init(principal, aDocumentURI, aBaseURI,
+               scriptContext ? scriptContext->GetGlobalObject() : nsnull);
+ }
+diff --git a/content/base/src/nsXMLHttpRequest.cpp b/content/base/src/nsXMLHttpRequest.cpp
+--- a/content/base/src/nsXMLHttpRequest.cpp
++++ b/content/base/src/nsXMLHttpRequest.cpp
+@@ -475,17 +475,18 @@ nsXMLHttpRequest::Init()
+ 
+   if (NS_FAILED(stack->Peek(&cx)) || !cx) {
+     return NS_OK;
+   }
+ 
+   nsIScriptSecurityManager *secMan = nsContentUtils::GetSecurityManager();
+   nsCOMPtr<nsIPrincipal> subjectPrincipal;
+   if (secMan) {
+-    secMan->GetSubjectPrincipal(getter_AddRefs(subjectPrincipal));
++    nsresult rv = secMan->GetSubjectPrincipal(getter_AddRefs(subjectPrincipal));
++    NS_ENSURE_SUCCESS(rv, rv);
+   }
+   NS_ENSURE_STATE(subjectPrincipal);
+   mPrincipal = subjectPrincipal;
+ 
+   nsIScriptContext* context = GetScriptContextFromJSContext(cx);
+   if (context) {
+     mScriptContext = context;
+     nsCOMPtr<nsPIDOMWindow> window =
+diff --git a/content/events/src/nsDOMDataTransfer.cpp b/content/events/src/nsDOMDataTransfer.cpp
+--- a/content/events/src/nsDOMDataTransfer.cpp
++++ b/content/events/src/nsDOMDataTransfer.cpp
+@@ -798,17 +798,19 @@ nsDOMDataTransfer::SetDataWithPrincipal(
+ }
+ 
+ nsIPrincipal*
+ nsDOMDataTransfer::GetCurrentPrincipal()
+ {
+   nsIScriptSecurityManager* ssm = nsContentUtils::GetSecurityManager();
+ 
+   nsCOMPtr<nsIPrincipal> currentPrincipal;
+-  ssm->GetSubjectPrincipal(getter_AddRefs(currentPrincipal));
++  nsresult rv = ssm->GetSubjectPrincipal(getter_AddRefs(currentPrincipal));
++  NS_ENSURE_SUCCESS(rv, nsnull);
++
+   if (!currentPrincipal)
+     ssm->GetSystemPrincipal(getter_AddRefs(currentPrincipal));
+ 
+   return currentPrincipal.get();
+ }
+ 
+ void
+ nsDOMDataTransfer::GetRealFormat(const nsAString& aInFormat, nsAString& aOutFormat)
+diff --git a/content/xslt/src/xslt/txMozillaXSLTProcessor.cpp b/content/xslt/src/xslt/txMozillaXSLTProcessor.cpp
+--- a/content/xslt/src/xslt/txMozillaXSLTProcessor.cpp
++++ b/content/xslt/src/xslt/txMozillaXSLTProcessor.cpp
+@@ -1260,17 +1260,18 @@ txMozillaXSLTProcessor::ContentRemoved(n
+ NS_IMETHODIMP
+ txMozillaXSLTProcessor::Initialize(nsISupports* aOwner, JSContext* cx,
+                                    JSObject* obj, PRUint32 argc, jsval* argv)
+ {
+     nsCOMPtr<nsIPrincipal> prin;
+     nsIScriptSecurityManager* secMan = nsContentUtils::GetSecurityManager();
+     NS_ENSURE_TRUE(secMan, NS_ERROR_UNEXPECTED);
+ 
+-    secMan->GetSubjectPrincipal(getter_AddRefs(prin));
++    nsresult rv = secMan->GetSubjectPrincipal(getter_AddRefs(prin));
++    NS_ENSURE_SUCCESS(rv, rv);
+     NS_ENSURE_TRUE(prin, NS_ERROR_UNEXPECTED);
+ 
+     return Init(prin);
+ }
+ 
+ NS_IMETHODIMP
+ txMozillaXSLTProcessor::Init(nsIPrincipal* aPrincipal)
+ {
+diff --git a/dom/src/storage/nsDOMStorage.cpp b/dom/src/storage/nsDOMStorage.cpp
+--- a/dom/src/storage/nsDOMStorage.cpp
++++ b/dom/src/storage/nsDOMStorage.cpp
+@@ -132,18 +132,19 @@ GetPrincipalURIAndHost(nsIPrincipal* aPr
+ //
+ // Helper that tells us whether the caller is secure or not.
+ //
+ 
+ static PRBool
+ IsCallerSecure()
+ {
+   nsCOMPtr<nsIPrincipal> subjectPrincipal;
+-  nsContentUtils::GetSecurityManager()->
+-    GetSubjectPrincipal(getter_AddRefs(subjectPrincipal));
++  nsresult rv = nsContentUtils::GetSecurityManager()->
++                  GetSubjectPrincipal(getter_AddRefs(subjectPrincipal));
++  NS_ENSURE_SUCCESS(rv, PR_FALSE);
+ 
+   if (!subjectPrincipal) {
+     // No subject principal means no code is running. Default to not
+     // being secure in that case.
+ 
+     return PR_FALSE;
+   }
+ 
+@@ -156,17 +157,17 @@ IsCallerSecure()
+ 
+   nsCOMPtr<nsIURI> innerUri = NS_GetInnermostURI(codebase);
+ 
+   if (!innerUri) {
+     return PR_FALSE;
+   }
+ 
+   PRBool isHttps = PR_FALSE;
+-  nsresult rv = innerUri->SchemeIs("https", &isHttps);
++  rv = innerUri->SchemeIs("https", &isHttps);
+ 
+   return NS_SUCCEEDED(rv) && isHttps;
+ }
+ 
+ PRUint32
+ GetOfflinePermission(const nsACString &aDomain)
+ {
+   // Fake a URI for the permission manager
+@@ -1465,18 +1466,19 @@ nsDOMStorage::CanUseStorage(PRPackedBool
+     return PR_FALSE;
+   }
+ 
+   // chrome can always use storage regardless of permission preferences
+   if (nsContentUtils::IsCallerChrome())
+     return PR_TRUE;
+ 
+   nsCOMPtr<nsIPrincipal> subjectPrincipal;
+-  nsContentUtils::GetSecurityManager()->
+-    GetSubjectPrincipal(getter_AddRefs(subjectPrincipal));
++  nsresult rv = nsContentUtils::GetSecurityManager()->
++                  GetSubjectPrincipal(getter_AddRefs(subjectPrincipal));
++  NS_ENSURE_SUCCESS(rv, PR_FALSE);
+ 
+   // if subjectPrincipal were null we'd have returned after
+   // IsCallerChrome().
+ 
+   nsCOMPtr<nsIURI> subjectURI;
+   nsCAutoString unused;
+   if (NS_FAILED(GetPrincipalURIAndHost(subjectPrincipal,
+                                        getter_AddRefs(subjectURI),
+@@ -1528,17 +1530,18 @@ nsDOMStorage::CacheStoragePermissions()
+   if (!CanUseStorage(&mStorageImpl->mSessionOnly))
+     return PR_FALSE;
+ 
+   nsIScriptSecurityManager* ssm = nsContentUtils::GetSecurityManager();
+   if (!ssm)
+     return PR_FALSE;
+ 
+   nsCOMPtr<nsIPrincipal> subjectPrincipal;
+-  ssm->GetSubjectPrincipal(getter_AddRefs(subjectPrincipal));
++  nsresult rv = ssm->GetSubjectPrincipal(getter_AddRefs(subjectPrincipal));
++  NS_ENSURE_SUCCESS(rv, PR_FALSE);
+ 
+   NS_ASSERTION(mSecurityChecker, "Has non-null mSecurityChecker");
+   return mSecurityChecker->CanAccess(subjectPrincipal);
+ }
+ 
+ // static
+ PRBool
+ nsDOMStorage::URICanUseChromePersist(nsIURI* aURI) {
+diff --git a/layout/style/nsCSSStyleSheet.cpp b/layout/style/nsCSSStyleSheet.cpp
+--- a/layout/style/nsCSSStyleSheet.cpp
++++ b/layout/style/nsCSSStyleSheet.cpp
+@@ -1571,24 +1571,25 @@ nsCSSStyleSheet::DidDirty()
+ nsresult
+ nsCSSStyleSheet::SubjectSubsumesInnerPrincipal() const
+ {
+   // Get the security manager and do the subsumes check
+   nsIScriptSecurityManager *securityManager =
+     nsContentUtils::GetSecurityManager();
+ 
+   nsCOMPtr<nsIPrincipal> subjectPrincipal;
+-  securityManager->GetSubjectPrincipal(getter_AddRefs(subjectPrincipal));
++  nsresult rv = securityManager->GetSubjectPrincipal(getter_AddRefs(subjectPrincipal));
++  NS_ENSURE_SUCCESS(rv, rv);
+ 
+   if (!subjectPrincipal) {
+     return NS_ERROR_DOM_SECURITY_ERR;
+   }
+ 
+   PRBool subsumes;
+-  nsresult rv = subjectPrincipal->Subsumes(mInner->mPrincipal, &subsumes);
++  rv = subjectPrincipal->Subsumes(mInner->mPrincipal, &subsumes);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   if (subsumes) {
+     return NS_OK;
+   }
+   
+   if (!nsContentUtils::IsCallerTrustedForWrite()) {
+     return NS_ERROR_DOM_SECURITY_ERR;
+diff --git a/security/manager/ssl/src/nsCrypto.cpp b/security/manager/ssl/src/nsCrypto.cpp
+--- a/security/manager/ssl/src/nsCrypto.cpp
++++ b/security/manager/ssl/src/nsCrypto.cpp
+@@ -2008,17 +2008,18 @@ nsCrypto::GenerateCRMFRequest(nsIDOMCRMF
+   //
+ 
+ 
+   nsCOMPtr<nsIScriptSecurityManager> secMan =
+     do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID);
+   NS_ENSURE_TRUE(secMan, NS_ERROR_UNEXPECTED);
+   
+   nsCOMPtr<nsIPrincipal> principals;
+-  secMan->GetSubjectPrincipal(getter_AddRefs(principals));
++  nsresult rv = secMan->GetSubjectPrincipal(getter_AddRefs(principals));
++  NS_ENSURE_SUCCESS(rv, rv);
+   NS_ENSURE_TRUE(principals, NS_ERROR_UNEXPECTED);
+   
+   nsCryptoRunArgs *args = new nsCryptoRunArgs();
+   if (!args)
+     return NS_ERROR_OUT_OF_MEMORY;
+ 
+   args->m_cx         = cx;
+   args->m_kungFuDeathGrip = GetISupportsFromContext(cx);
+@@ -2026,17 +2027,17 @@ nsCrypto::GenerateCRMFRequest(nsIDOMCRMF
+ 
+   args->m_jsCallback.Adopt(!!jsCallback ? nsCRT::strdup(jsCallback.ptr()) : 0);
+   args->m_principals = principals;
+   
+   nsCryptoRunnable *cryptoRunnable = new nsCryptoRunnable(args);
+   if (!cryptoRunnable)
+     return NS_ERROR_OUT_OF_MEMORY;
+ 
+-  nsresult rv = NS_DispatchToMainThread(cryptoRunnable);
++  rv = NS_DispatchToMainThread(cryptoRunnable);
+   if (NS_FAILED(rv))
+     delete cryptoRunnable;
+ 
+   return rv;
+ }
+ 
+ 
+ // Reminder that we inherit the memory passed into us here.
+diff --git a/xpinstall/src/nsJSInstallTriggerGlobal.cpp b/xpinstall/src/nsJSInstallTriggerGlobal.cpp
+--- a/xpinstall/src/nsJSInstallTriggerGlobal.cpp
++++ b/xpinstall/src/nsJSInstallTriggerGlobal.cpp
+@@ -251,18 +251,19 @@ InstallTriggerGlobalInstall(JSContext *c
+   nsCOMPtr<nsIScriptSecurityManager> secman(do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID));
+   if (!secman)
+   {
+     JS_ReportError(cx, "Could not the script security manager service.");
+     return JS_FALSE;
+   }
+   // get the principal.  if it doesn't exist, die.
+   nsCOMPtr<nsIPrincipal> principal;
+-  secman->GetSubjectPrincipal(getter_AddRefs(principal));
+-  if (!principal)
++  nsresult rv = secman->GetSubjectPrincipal(getter_AddRefs(principal));
++
++  if (NS_FAILED(rv) || !principal)
+   {
+     JS_ReportError(cx, "Could not get the Subject Principal during InstallTrigger.Install()");
+     return JS_FALSE;
+   }
+ 
+   // get window.location to construct relative URLs
+   nsCOMPtr<nsIURI> baseURL;
+   JSObject* global = JS_GetGlobalObject(cx);
+@@ -364,17 +365,17 @@ InstallTriggerGlobalInstall(JSContext *c
+             if (iconURL && baseURL)
+             {
+                 nsCAutoString resolvedIcon;
+                 baseURL->Resolve(NS_ConvertUTF16toUTF8(icon), resolvedIcon);
+                 icon = NS_ConvertUTF8toUTF16(resolvedIcon);
+             }
+ 
+             // Make sure we're allowed to load this URL and the icon URL
+-            nsresult rv = InstallTriggerCheckLoadURIFromScript(cx, xpiURL);
++            rv = InstallTriggerCheckLoadURIFromScript(cx, xpiURL);
+             if (NS_FAILED(rv))
+                 abortLoad = PR_TRUE;
+ 
+             if (!abortLoad && iconURL)
+             {
+                 rv = InstallTriggerCheckLoadURIFromScript(cx, icon);
+                 if (NS_FAILED(rv))
+                     abortLoad = PR_TRUE;
+@@ -399,18 +400,18 @@ InstallTriggerGlobalInstall(JSContext *c
+       JS_DestroyIdArray( cx, ida );
+     }
+ 
+ 
+     // pass on only if good stuff found
+     if (!abortLoad && trigger->Size() > 0)
+     {
+         nsCOMPtr<nsIURI> checkuri;
+-        nsresult rv = nativeThis->GetOriginatingURI(globalObject,
+-                                                    getter_AddRefs(checkuri));
++        rv = nativeThis->GetOriginatingURI(globalObject,
++                                           getter_AddRefs(checkuri));
+         if (NS_SUCCEEDED(rv))
+         {
+             nsCOMPtr<nsIDOMWindowInternal> win(do_QueryInterface(globalObject));
+             nsCOMPtr<nsIXPIInstallInfo> installInfo =
+                 new nsXPIInstallInfo(win, checkuri, trigger, 0);
+             if (installInfo)
+             {
+                 // installInfo now owns triggers
+diff --git a/xpinstall/src/nsXPITriggerInfo.cpp b/xpinstall/src/nsXPITriggerInfo.cpp
+--- a/xpinstall/src/nsXPITriggerInfo.cpp
++++ b/xpinstall/src/nsXPITriggerInfo.cpp
+@@ -279,18 +279,19 @@ XPITriggerEvent::Run()
+         do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID);
+     if (!secman)
+     {
+         JS_ReportError(cx, "Could not get script security manager service");
+         return 0;
+     }
+ 
+     nsCOMPtr<nsIPrincipal> principal;
+-    secman->GetSubjectPrincipal(getter_AddRefs(principal));
+-    if (!principal)
++    nsresult rv = secman->GetSubjectPrincipal(getter_AddRefs(principal));
++
++    if (NS_FAILED(rv) || !principal)
+     {
+          JS_ReportError(cx, "Could not get principal from script security manager");
+          return 0;
+     }
+ 
+     PRBool equals = PR_FALSE;
+     principal->Equals(princ, &equals);
+     if (!equals)

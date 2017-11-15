@@ -1,0 +1,16 @@
+Index: nsScriptSecurityManager.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/caps/src/nsScriptSecurityManager.cpp,v
+retrieving revision 1.265
+diff -up -r1.265 nsScriptSecurityManager.cpp
+--- nsScriptSecurityManager.cpp
++++ nsScriptSecurityManager.cpp
+@@ -3521,6 +3593,8 @@ nsScriptSecurityManager::PrintPolicyDB()
+     if(mOriginToPolicyMap)
+     {
+         JSContext* cx = GetCurrentJSContext();
++        if (!cx)
++            cx = GetSafeJSContext();
+         printf("----------------------------\n");
+         printf("Domain: Default.\n");
+         PL_DHashTableEnumerate(mDefaultPolicy, PrintClassPolicy, (void*)cx);

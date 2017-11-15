@@ -1,0 +1,924 @@
+Index: content/base/public/nsContentUtils.h
+===================================================================
+RCS file: /cvsroot/mozilla/content/base/public/nsContentUtils.h,v
+retrieving revision 1.7
+diff -u -6 -r1.7 nsContentUtils.h
+--- content/base/public/nsContentUtils.h	23 Mar 2002 23:54:41 -0000	1.7
++++ content/base/public/nsContentUtils.h	12 Apr 2002 07:53:02 -0000
+@@ -55,12 +55,14 @@
+ 
+   static nsresult ReparentContentWrapper(nsIContent *aContent,
+                                          nsIContent *aNewParent,
+                                          nsIDocument *aNewDocument,
+                                          nsIDocument *aOldDocument);
+ 
++  static PRBool IsCallerChrome();
++
+   // These are copied from nsJSUtils.h
+ 
+   static nsresult GetStaticScriptGlobal(JSContext* aContext,
+                                         JSObject* aObj,
+                                         nsIScriptGlobalObject** aNativeGlobal);
+ 
+Index: content/base/src/nsContentUtils.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/content/base/src/nsContentUtils.cpp,v
+retrieving revision 1.10
+diff -u -6 -r1.10 nsContentUtils.cpp
+--- content/base/src/nsContentUtils.cpp	23 Mar 2002 23:54:43 -0000	1.10
++++ content/base/src/nsContentUtils.cpp	12 Apr 2002 07:53:02 -0000
+@@ -44,12 +44,17 @@
+ #include "nsContentUtils.h"
+ #include "nsIXPConnect.h"
+ #include "nsIContent.h"
+ #include "nsIDocument.h"
+ #include "nsINodeInfo.h"
+ 
++#include "nsIJSContextStack.h"
++#include "nsIDocShell.h"
++#include "nsIDocShellTreeItem.h"
++
++static const char *sJSStackContractID = "@mozilla.org/js/xpc/ContextStack;1";
+ 
+ nsIDOMScriptObjectFactory *nsContentUtils::sDOMScriptObjectFactory = nsnull;
+ nsIXPConnect *nsContentUtils::sXPConnect = nsnull;
+ 
+ // static
+ nsresult
+@@ -511,8 +516,41 @@
+   JSObject *obj;
+   rv = holder->GetJSObject(&obj);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   return doReparentContentWrapper(aContent, aNewDocument, aOldDocument, cx,
+                                   obj);
++}
++
++PRBool
++nsContentUtils::IsCallerChrome()
++{
++  nsCOMPtr<nsIDocShell> docShell;
++  nsCOMPtr<nsIThreadJSContextStack> stack(do_GetService(sJSStackContractID));
++
++  if (stack) {
++    JSContext *cx = nsnull;
++    stack->Peek(&cx);
++
++    if (cx) {
++      nsCOMPtr<nsIScriptGlobalObject> sgo;
++      nsContentUtils::GetDynamicScriptGlobal(cx, getter_AddRefs(sgo));
++
++      if (sgo) {
++        sgo->GetDocShell(getter_AddRefs(docShell));
++      }
++    }
++  }
++
++  nsCOMPtr<nsIDocShellTreeItem> item(do_QueryInterface(docShell));
++  if (item) {
++    PRInt32 callerType = nsIDocShellTreeItem::typeChrome;
++    item->GetItemType(&callerType);
++
++    if (callerType != nsIDocShellTreeItem::typeChrome) {
++      return PR_FALSE;
++    }
++  }
++
++  return PR_TRUE;
+ }
+ 
+Index: content/html/content/src/nsHTMLImageElement.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/content/html/content/src/nsHTMLImageElement.cpp,v
+retrieving revision 1.111
+diff -u -6 -r1.111 nsHTMLImageElement.cpp
+--- content/html/content/src/nsHTMLImageElement.cpp	27 Mar 2002 00:13:22 -0000	1.111
++++ content/html/content/src/nsHTMLImageElement.cpp	12 Apr 2002 07:53:02 -0000
+@@ -65,24 +65,27 @@
+ #include "nsIImageFrame.h"
+ #include "nsLayoutAtoms.h"
+ #include "nsNodeInfoManager.h"
+ #include "nsGUIEvent.h"
+ #include "nsContentPolicyUtils.h"
+ #include "nsIDOMWindow.h"
++#include "nsIPref.h"
+ 
+ #include "imgIContainer.h"
+ #include "imgILoader.h"
+ #include "imgIRequest.h"
+ #include "imgIDecoderObserver.h"
+ 
+ #include "nsILoadGroup.h"
+ 
+ #include "nsRuleNode.h"
+ 
+ #include "nsIJSContextStack.h"
+ 
++static NS_DEFINE_CID(kPrefServiceCID, NS_PREF_CID);
++
+ // XXX nav attrs: suppress
+ 
+ class nsHTMLImageElement : public nsGenericHTMLLeafElement,
+                            public nsIDOMHTMLImageElement,
+                            public nsIDOMNSHTMLImageElement,
+                            public nsIJSNativeInitializer,
+@@ -967,12 +970,27 @@
+   return result;
+ }
+ 
+ NS_IMETHODIMP
+ nsHTMLImageElement::SetSrc(const nsAString& aSrc)
+ {
++  /*
++   * If caller is not chrome and dom.disable_image_src_set is true,
++   * prevent setting image.src by exiting early
++   */
++
++  nsCOMPtr<nsIPref> prefs(do_GetService(kPrefServiceCID));
++  if (prefs) {
++    PRBool disableImageSrcSet = PR_FALSE;
++    prefs->GetBoolPref("dom.disable_image_src_set", &disableImageSrcSet);
++
++    if (disableImageSrcSet && !nsContentUtils::IsCallerChrome()) {
++      return NS_OK;
++    }
++  }
++
+   nsCOMPtr<nsIURI> baseURL;
+   nsresult rv = NS_OK;
+ 
+   (void) GetCallerSourceURL(getter_AddRefs(baseURL));
+ 
+   nsCOMPtr<nsIDocument> doc;
+Index: content/html/document/src/nsHTMLDocument.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/content/html/document/src/nsHTMLDocument.cpp,v
+retrieving revision 3.419
+diff -u -6 -r3.419 nsHTMLDocument.cpp
+--- content/html/document/src/nsHTMLDocument.cpp	5 Apr 2002 05:41:48 -0000	3.419
++++ content/html/document/src/nsHTMLDocument.cpp	12 Apr 2002 07:53:07 -0000
+@@ -155,12 +155,14 @@
+ #define ID_NOT_IN_DOCUMENT ((nsIContent *)1)
+ 
+ static NS_DEFINE_CID(kCookieServiceCID, NS_COOKIESERVICE_CID);
+ 
+ static NS_DEFINE_CID(kRDFServiceCID, NS_RDFSERVICE_CID);
+ 
++static NS_DEFINE_CID(kPrefServiceCID, NS_PREF_CID);
++
+ static PRBool
+ IsNamedItem(nsIContent* aContent, nsIAtom *aTag, nsAString& aName);
+ 
+ static NS_DEFINE_CID(kCParserCID, NS_PARSER_CID);
+ 
+ static NS_DEFINE_CID(kHTMLStyleSheetCID,NS_HTMLSTYLESHEET_CID);
+@@ -2145,16 +2147,30 @@
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP    
+ nsHTMLDocument::GetCookie(nsAString& aCookie)
+ {
++  aCookie.Truncate(); // clear current cookie in case service fails;
++                      // no cookie isn't an error condition.
++
++  // If caller is not chrome and dom.disable_cookie_get is true,
++  // prevent getting cookies by exiting early
++  nsCOMPtr<nsIPref> prefs(do_GetService(kPrefServiceCID));
++  if (prefs) {
++    PRBool disableCookieGet = PR_FALSE;
++    prefs->GetBoolPref("dom.disable_cookie_get", &disableCookieGet);
++
++    if (disableCookieGet && !nsContentUtils::IsCallerChrome()) {
++      return NS_OK;
++    }
++  }
++
+   nsresult result = NS_OK;
+   nsAutoString str;
+ 
+-  aCookie.Truncate(); // clear current cookie in case service fails; no cookie isn't an error condition.
+ 
+   nsCOMPtr<nsICookieService> service = do_GetService(kCookieServiceCID, &result);
+   if (NS_SUCCEEDED(result) && service && mDocumentURL) {
+     nsXPIDLCString cookie;
+     result = service->GetCookieString(mDocumentURL, getter_Copies(cookie));
+     if (NS_SUCCEEDED(result) && cookie)
+@@ -2163,12 +2179,23 @@
+   return result;
+ }
+ 
+ NS_IMETHODIMP    
+ nsHTMLDocument::SetCookie(const nsAString& aCookie)
+ {
++  // If caller is not chrome and dom.disable_cookie_get is true,
++  // prevent setting cookies by exiting early
++  nsCOMPtr<nsIPref> prefs(do_GetService(kPrefServiceCID));
++  if (prefs) {
++    PRBool disableCookieSet = PR_FALSE;
++    prefs->GetBoolPref("dom.disable_cookie_set", &disableCookieSet);
++    if (disableCookieSet && !nsContentUtils::IsCallerChrome()) {
++      return NS_OK;
++    }
++  }
++
+   nsresult result = NS_OK;
+   nsCOMPtr<nsICookieService> service = do_GetService(kCookieServiceCID, &result);
+   if (NS_SUCCEEDED(result) && service && mDocumentURL) {
+     nsCOMPtr<nsIScriptGlobalObject> globalObj;
+     nsCOMPtr<nsIPrompt> prompt;
+     this->GetScriptGlobalObject(getter_AddRefs(globalObj));
+Index: dom/src/base/nsGlobalWindow.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/dom/src/base/nsGlobalWindow.cpp,v
+retrieving revision 1.509
+diff -u -6 -r1.509 nsGlobalWindow.cpp
+--- dom/src/base/nsGlobalWindow.cpp	12 Apr 2002 02:13:15 -0000	1.509
++++ dom/src/base/nsGlobalWindow.cpp	12 Apr 2002 07:53:10 -0000
+@@ -167,12 +167,56 @@
+ 
+ 
+ 
+ static const char * const kCryptoContractID = NS_CRYPTO_CONTRACTID;
+ static const char * const kPkcs11ContractID = NS_PKCS11_CONTRACTID;
+ 
++static PRBool IsCallerChrome()
++{
++  nsCOMPtr<nsIDocShell> docShell;
++  nsCOMPtr<nsIThreadJSContextStack> stack(do_GetService(sJSStackContractID));
++  if (stack) {
++    JSContext *cx = nsnull;
++    stack->Peek(&cx);
++
++    if (cx) {
++      nsCOMPtr<nsIScriptGlobalObject> sgo;
++      nsJSUtils::GetDynamicScriptGlobal(cx, getter_AddRefs(sgo));
++      if (sgo) {
++        sgo->GetDocShell(getter_AddRefs(docShell));
++      }
++    }
++  }
++
++  nsCOMPtr<nsIDocShellTreeItem> item(do_QueryInterface(docShell));
++  if (item) {
++    PRInt32 callerType = nsIDocShellTreeItem::typeChrome;
++    item->GetItemType(&callerType);
++
++    if (callerType != nsIDocShellTreeItem::typeChrome) {
++      return PR_FALSE;
++    }
++  }
++
++  return PR_TRUE;
++}
++
++static PRBool CanSetProperty(const char * prefName)
++{
++  nsCOMPtr<nsIPref> prefs(do_GetService(kPrefServiceCID));
++  if (!prefs) {
++    return PR_FALSE;
++  }
++
++  PRBool prefValue = PR_TRUE;
++  // if pref is set to true, we can't set the property
++  prefs->GetBoolPref(prefName, &prefValue);
++
++  return !prefValue;
++}
++
+ //*****************************************************************************
+ //***    GlobalWindowImpl: Object Management
+ //*****************************************************************************
+ 
+ GlobalWindowImpl::GlobalWindowImpl() :
+   mJSObject(nsnull), mNavigator(nsnull), mScreen(nsnull), mHistory(nsnull),
+@@ -1258,12 +1302,21 @@
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ GlobalWindowImpl::SetStatus(const nsAString& aStatus)
+ {
++  /*
++   * If caller is not chrome and dom.disable_window_status_change is true,
++   * prevent setting window.status by exiting early
++   */
++
++  if (!CanSetProperty("dom.disable_window_status_change") && !IsCallerChrome()) {
++    return NS_OK;
++  }
++
+   mStatus = aStatus;
+ 
+   nsCOMPtr<nsIWebBrowserChrome> browserChrome;
+   GetWebBrowserChrome(getter_AddRefs(browserChrome));
+   if(browserChrome) {
+     browserChrome->SetStatus(nsIWebBrowserChrome::STATUS_SCRIPT,
+@@ -1280,19 +1333,29 @@
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ GlobalWindowImpl::SetDefaultStatus(const nsAString& aDefaultStatus)
+ {
++  /*
++   * If caller is not chrome and dom.disable_window_status_change is true,
++   * prevent setting window.defaultStatus by exiting early
++   */
++
++  if (!CanSetProperty("dom.disable_window_status_change") && !IsCallerChrome()) {
++    return NS_OK;
++  }
++
+   mDefaultStatus = aDefaultStatus;
+ 
+-   nsCOMPtr<nsIWebBrowserChrome> browserChrome;
+-   GetWebBrowserChrome(getter_AddRefs(browserChrome));
+-   if(browserChrome)
+-      browserChrome->SetStatus(nsIWebBrowserChrome::STATUS_SCRIPT_DEFAULT,
+-                               PromiseFlatString(aDefaultStatus).get());
++  nsCOMPtr<nsIWebBrowserChrome> browserChrome;
++  GetWebBrowserChrome(getter_AddRefs(browserChrome));
++  if (browserChrome) {
++    browserChrome->SetStatus(nsIWebBrowserChrome::STATUS_SCRIPT_DEFAULT,
++                             PromiseFlatString(aDefaultStatus).get());
++  }
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ GlobalWindowImpl::GetName(nsAString& aName)
+@@ -1329,12 +1392,21 @@
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ GlobalWindowImpl::SetInnerWidth(PRInt32 aInnerWidth)
+ {
++  /*
++   * If caller is not chrome and dom.disable_window_move_resize is true,
++   * prevent setting window.innerWidth by exiting early
++   */
++
++  if (!CanSetProperty("dom.disable_window_move_resize") && !IsCallerChrome()) {
++    return NS_OK;
++  }
++
+   nsCOMPtr<nsIDocShellTreeItem> docShellAsItem(do_QueryInterface(mDocShell));
+   NS_ENSURE_TRUE(docShellAsItem, NS_ERROR_FAILURE);
+ 
+   nsCOMPtr<nsIDocShellTreeItem> docShellParent;
+   docShellAsItem->GetSameTypeParent(getter_AddRefs(docShellParent));
+ 
+@@ -1371,12 +1443,21 @@
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ GlobalWindowImpl::SetInnerHeight(PRInt32 aInnerHeight)
+ {
++  /*
++   * If caller is not chrome and dom.disable_window_move_resize is true,
++   * prevent setting window.innerHeight by exiting early
++   */
++
++  if (!CanSetProperty("dom.disable_window_move_resize") && !IsCallerChrome()) {
++    return NS_OK;
++  }
++
+   nsCOMPtr<nsIDocShellTreeItem> docShellAsItem(do_QueryInterface(mDocShell));
+   NS_ENSURE_TRUE(docShellAsItem, NS_ERROR_FAILURE);
+ 
+   nsCOMPtr<nsIDocShellTreeItem> docShellParent;
+   docShellAsItem->GetSameTypeParent(getter_AddRefs(docShellParent));
+ 
+@@ -1416,12 +1497,21 @@
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ GlobalWindowImpl::SetOuterWidth(PRInt32 aOuterWidth)
+ {
++  /*
++   * If caller is not chrome and dom.disable_window_move_resize is true,
++   * prevent setting window.outerWidth by exiting early
++   */
++
++  if (!CanSetProperty("dom.disable_window_move_resize") && !IsCallerChrome()) {
++    return NS_OK;
++  }
++
+   nsCOMPtr<nsIBaseWindow> treeOwnerAsWin;
+   GetTreeOwner(getter_AddRefs(treeOwnerAsWin));
+   NS_ENSURE_TRUE(treeOwnerAsWin, NS_ERROR_FAILURE);
+ 
+   NS_ENSURE_SUCCESS(CheckSecurityWidthAndHeight(&aOuterWidth, nsnull),
+                     NS_ERROR_FAILURE);
+@@ -1450,12 +1540,21 @@
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ GlobalWindowImpl::SetOuterHeight(PRInt32 aOuterHeight)
+ {
++  /*
++   * If caller is not chrome and dom.disable_window_move_resize is true,
++   * prevent setting window.outerHeight by exiting early
++   */
++
++  if (!CanSetProperty("dom.disable_window_move_resize") && !IsCallerChrome()) {
++    return NS_OK;
++  }
++
+   nsCOMPtr<nsIBaseWindow> treeOwnerAsWin;
+   GetTreeOwner(getter_AddRefs(treeOwnerAsWin));
+   NS_ENSURE_TRUE(treeOwnerAsWin, NS_ERROR_FAILURE);
+ 
+   NS_ENSURE_SUCCESS(CheckSecurityWidthAndHeight(nsnull, &aOuterHeight),
+                     NS_ERROR_FAILURE);
+@@ -1484,12 +1583,21 @@
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ GlobalWindowImpl::SetScreenX(PRInt32 aScreenX)
+ {
++  /*
++   * If caller is not chrome and dom.disable_window_move_resize is true,
++   * prevent setting window.screenX by exiting early
++   */
++
++  if (!CanSetProperty("dom.disable_window_move_resize") && !IsCallerChrome()) {
++    return NS_OK;
++  }
++
+   nsCOMPtr<nsIBaseWindow> treeOwnerAsWin;
+   GetTreeOwner(getter_AddRefs(treeOwnerAsWin));
+   NS_ENSURE_TRUE(treeOwnerAsWin, NS_ERROR_FAILURE);
+ 
+   NS_ENSURE_SUCCESS(CheckSecurityLeftAndTop(&aScreenX, nsnull),
+                     NS_ERROR_FAILURE);
+@@ -1519,12 +1627,21 @@
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ GlobalWindowImpl::SetScreenY(PRInt32 aScreenY)
+ {
++  /*
++   * If caller is not chrome and dom.disable_window_move_resize is true,
++   * prevent setting window.screenY by exiting early
++   */
++
++  if (!CanSetProperty("dom.disable_window_move_resize") && !IsCallerChrome()) {
++    return NS_OK;
++  }
++
+   nsCOMPtr<nsIBaseWindow> treeOwnerAsWin;
+   GetTreeOwner(getter_AddRefs(treeOwnerAsWin));
+   NS_ENSURE_TRUE(treeOwnerAsWin, NS_ERROR_FAILURE);
+ 
+   NS_ENSURE_SUCCESS(CheckSecurityLeftAndTop(nsnull, &aScreenY),
+                     NS_ERROR_FAILURE);
+@@ -2163,12 +2280,21 @@
+   return Prompt(message, initial, title, savePassword, aReturn);
+ }
+ 
+ NS_IMETHODIMP
+ GlobalWindowImpl::Focus()
+ {
++  /*
++   * If caller is not chrome and dom.disable_window_flip is true,
++   * prevent setting window.focus() by exiting early
++   */
++
++  if (!CanSetProperty("dom.disable_window_flip") && !IsCallerChrome()) {
++    return NS_OK;
++  }
++
+   nsCOMPtr<nsIBaseWindow> treeOwnerAsWin;
+   GetTreeOwner(getter_AddRefs(treeOwnerAsWin));
+   if (treeOwnerAsWin) {
+     PRBool isEnabled = PR_TRUE;
+     if (NS_SUCCEEDED(treeOwnerAsWin->GetEnabled(&isEnabled)) && !isEnabled) {
+       NS_WARNING( "Should not try to set the focus on a disabled window" );
+@@ -2297,12 +2423,21 @@
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ GlobalWindowImpl::MoveTo(PRInt32 aXPos, PRInt32 aYPos)
+ {
++  /*
++   * If caller is not chrome and dom.disable_window_move_resize is true,
++   * prevent window.moveTo() by exiting early
++   */
++
++  if (!CanSetProperty("dom.disable_window_move_resize") && !IsCallerChrome()) {
++    return NS_OK;
++  }
++
+   nsCOMPtr<nsIBaseWindow> treeOwnerAsWin;
+   GetTreeOwner(getter_AddRefs(treeOwnerAsWin));
+   NS_ENSURE_TRUE(treeOwnerAsWin, NS_ERROR_FAILURE);
+ 
+   NS_ENSURE_SUCCESS(CheckSecurityLeftAndTop(&aXPos, &aYPos),
+                     NS_ERROR_FAILURE);
+@@ -2313,12 +2448,21 @@
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ GlobalWindowImpl::MoveBy(PRInt32 aXDif, PRInt32 aYDif)
+ {
++  /*
++   * If caller is not chrome and dom.disable_window_move_resize is true,
++   * prevent window.moveBy() by exiting early
++   */
++
++  if (!CanSetProperty("dom.disable_window_move_resize") && !IsCallerChrome()) {
++    return NS_OK;
++  }
++
+   nsCOMPtr<nsIBaseWindow> treeOwnerAsWin;
+   GetTreeOwner(getter_AddRefs(treeOwnerAsWin));
+   NS_ENSURE_TRUE(treeOwnerAsWin, NS_ERROR_FAILURE);
+ 
+   PRInt32 x, y;
+   NS_ENSURE_SUCCESS(treeOwnerAsWin->GetPosition(&x, &y), NS_ERROR_FAILURE);
+@@ -2333,12 +2477,21 @@
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ GlobalWindowImpl::ResizeTo(PRInt32 aWidth, PRInt32 aHeight)
+ {
++  /*
++   * If caller is not chrome and dom.disable_window_move_resize is true,
++   * prevent window.resizeTo() by exiting early
++   */
++
++  if (!CanSetProperty("dom.disable_window_move_resize") && !IsCallerChrome()) {
++    return NS_OK;
++  }
++
+   nsCOMPtr<nsIBaseWindow> treeOwnerAsWin;
+   GetTreeOwner(getter_AddRefs(treeOwnerAsWin));
+   NS_ENSURE_TRUE(treeOwnerAsWin, NS_ERROR_FAILURE);
+ 
+   NS_ENSURE_SUCCESS(CheckSecurityWidthAndHeight(&aWidth, &aHeight),
+                     NS_ERROR_FAILURE);
+@@ -2349,12 +2502,21 @@
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ GlobalWindowImpl::ResizeBy(PRInt32 aWidthDif, PRInt32 aHeightDif)
+ {
++  /*
++   * If caller is not chrome and dom.disable_window_move_resize is true,
++   * prevent window.resizeBy() by exiting early
++   */
++
++  if (!CanSetProperty("dom.disable_window_move_resize") && !IsCallerChrome()) {
++    return NS_OK;
++  }
++
+   nsCOMPtr<nsIBaseWindow> treeOwnerAsWin;
+   GetTreeOwner(getter_AddRefs(treeOwnerAsWin));
+   NS_ENSURE_TRUE(treeOwnerAsWin, NS_ERROR_FAILURE);
+ 
+   PRInt32 cx, cy;
+   NS_ENSURE_SUCCESS(treeOwnerAsWin->GetSize(&cx, &cy), NS_ERROR_FAILURE);
+@@ -2370,12 +2532,21 @@
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ GlobalWindowImpl::SizeToContent()
+ {
++  /*
++   * If caller is not chrome and dom.disable_window_move_resize is true,
++   * block window.SizeToContent() by exiting
++   */
++
++  if (!CanSetProperty("dom.disable_window_move_resize") && !IsCallerChrome()) {
++    return NS_OK;
++  }
++
+   nsCOMPtr<nsIDocShellTreeItem> docShellAsItem(do_QueryInterface(mDocShell));
+   NS_ENSURE_TRUE(docShellAsItem, NS_ERROR_FAILURE);
+ 
+   nsCOMPtr<nsIDocShellTreeItem> docShellParent;
+   docShellAsItem->GetSameTypeParent(getter_AddRefs(docShellParent));
+ 
+Index: modules/libpref/src/init/all.js
+===================================================================
+RCS file: /cvsroot/mozilla/modules/libpref/src/init/all.js,v
+retrieving revision 3.371
+diff -u -6 -r3.371 all.js
+--- modules/libpref/src/init/all.js	12 Apr 2002 02:15:43 -0000	3.371
++++ modules/libpref/src/init/all.js	12 Apr 2002 07:53:10 -0000
+@@ -346,22 +346,31 @@
+ pref("capability.policy.mailnews.Window.outerWidth.set", "noAccess");
+ pref("capability.policy.mailnews.Window.resizeBy", "noAccess");
+ pref("capability.policy.mailnews.Window.resizeTo", "noAccess");
+ pref("capability.policy.mailnews.Window.screenX.set", "noAccess");
+ pref("capability.policy.mailnews.Window.screenY.set", "noAccess");
+ pref("capability.policy.mailnews.Window.sizeToContent", "noAccess");
+-pref("dom.disable_open_during_load", false);
++
++// Scripts & Windows prefs
++pref("browser.block.target_new_window",     false);
++pref("dom.disable_cookie_get",              false);
++pref("dom.disable_cookie_set",              false);
++pref("dom.disable_image_src_set",           false);
++pref("dom.disable_open_during_load",        false);
++pref("dom.disable_window_flip",             false);
++pref("dom.disable_window_move_resize",      false);
++pref("dom.disable_window_status_change",    false);
+ 
+ pref("javascript.enabled",                  true);
+ pref("javascript.allow.mailnews",           false);
+ pref("javascript.options.strict",           false);
+ pref("javascript.options.showInConsole",    true);
+ 
+ // advanced prefs
+ pref("advanced.always_load_images",         true);
+-pref("security.enable_java",                 true);
++pref("security.enable_java",                true);
+ pref("css.allow",                           true);
+ pref("advanced.mailftp",                    false);
+ pref("image.animation_mode",                "normal");
+ 
+ pref("offline.startup_state",            0);
+ pref("offline.send.unsent_messages",            0);
+Index: xpfe/components/prefwindow/resources/content/pref-scripts.js
+===================================================================
+RCS file: /cvsroot/mozilla/xpfe/components/prefwindow/resources/content/pref-scripts.js,v
+retrieving revision 1.6
+diff -u -6 -r1.6 pref-scripts.js
+--- xpfe/components/prefwindow/resources/content/pref-scripts.js	29 Mar 2002 02:45:48 -0000	1.6
++++ xpfe/components/prefwindow/resources/content/pref-scripts.js	12 Apr 2002 07:53:11 -0000
+@@ -40,12 +40,13 @@
+ // need it globally, but can only set it in startup()
+ var data;
+ 
+ function changeDisabledState(state){
+   //Set the states of the groupbox children state based on the "javascript enabled" checkbox value
+   document.getElementById("allowScripts").disabled = state;
++  document.getElementById("allowTargetNew").disabled = state;
+   document.getElementById("allowWindowMoveResize").disabled = state;
+   document.getElementById("allowWindowOpen").disabled = state;
+   document.getElementById("allowImageSrcChange").disabled = state;
+   document.getElementById("allowDocumentCookieSet").disabled = state;
+   document.getElementById("allowDocumentCookieGet").disabled = state;
+   document.getElementById("allowWindowStatusChange").disabled = state;
+@@ -64,25 +65,23 @@
+   } else {
+     changeDisabledState(!document.getElementById('javascriptAllowNavigator').checked);
+   }
+ }
+ 
+ function getPrefValueForCheckbox(prefName){
+-
+-  var prefValue;
++  var prefValue = false;
+ 
+   try {
+-    prefValue = pref.GetCharPref(prefName);
+-
+-    if(prefValue != "allAccess" && prefValue != "sameOrigin"){
+-      return false; 
+-    }
++    prefValue = pref.GetBoolPref(prefName);
+   }
+   catch(e) {}
+ 
+-  return true;
++  // the prefs are stored in terms of disabling,
++  // but we want our value in terms of enabling.
++  // so let's invert the prefValue.
++  return !prefValue;
+ }
+ 
+ function Startup(){
+ 
+   data = parent.hPrefWindow.wsm.dataManager.pageData["chrome://communicator/content/pref/pref-scripts.xul"];
+ 
+@@ -95,79 +94,36 @@
+     data.scriptData = [];
+     for(var run = 0; run < changedList.length; run++ ){
+       data.scriptData[ changedList[run] ] = [];
+       data.scriptData[ changedList[run] ].value = false;
+     }
+ 
+-    try{
+-      document.getElementById("allowWindowOpen").checked = 
+-        !pref.GetBoolPref("dom.disable_open_during_load"); 
+-    } catch (e){
+-      //We will only get an error if the preference doesn't exist, when that happens we default to true
+-      document.getElementById("allowWindowOpen").checked = true;
+-    }
+-
+-    try{
+-      document.getElementById("allowTargetNew").checked = 
+-        !pref.GetBoolPref("browser.block.target_new_window");
+-    } catch (e){
+-      //We will only get an error if the preference doesn't exist, when that happens we default to true
+-      document.getElementById("allowTargetNew").checked = true;
+-    }
+-
+-    //If one of the security capability prefs is set, then the checkbox becomes unchecked
+-    document.getElementById("allowWindowMoveResize").checked = 
+-      getPrefValueForCheckbox("capability.policy.default.Window.resizeTo") &&
+-      getPrefValueForCheckbox("capability.policy.default.Window.innerWidth.set") && 
+-      getPrefValueForCheckbox("capability.policy.default.Window.innerHeight.set") &&
+-      getPrefValueForCheckbox("capability.policy.default.Window.outerWidth.set") && 
+-      getPrefValueForCheckbox("capability.policy.default.Window.outerHeight.set") &&
+-      getPrefValueForCheckbox("capability.policy.default.Window.sizeToContent") && 
+-      getPrefValueForCheckbox("capability.policy.default.Window.resizeBy") &&
+-      getPrefValueForCheckbox("capability.policy.default.Window.screenX.set") && 
+-      getPrefValueForCheckbox("capability.policy.default.Window.screenY.set") &&
+-      getPrefValueForCheckbox("capability.policy.default.Window.moveTo") && 
+-      getPrefValueForCheckbox("capability.policy.default.Window.moveBy");
+-
+-    document.getElementById("allowWindowFlip").checked = 
+-      getPrefValueForCheckbox("capability.policy.default.Window.focus");
+-
+-    document.getElementById("allowWindowStatusChange").checked = 
+-      getPrefValueForCheckbox("capability.policy.default.Window.status") &&
+-      getPrefValueForCheckbox("capability.policy.default.Window.defaultStatus");
+-
+-    document.getElementById("allowImageSrcChange").checked = 
+-      getPrefValueForCheckbox("capability.policy.default.HTMLImageElement.src");
+-
+-    document.getElementById("allowDocumentCookieGet").checked = 
+-      getPrefValueForCheckbox("capability.policy.default.HTMLDocument.cookie.get");
+-
+-    document.getElementById("allowDocumentCookieSet").checked = 
+-      getPrefValueForCheckbox("capability.policy.default.HTMLDocument.cookie.set");
++    document.getElementById("allowWindowOpen").checked = getPrefValueForCheckbox("dom.disable_open_during_load");
++    document.getElementById("allowTargetNew").checked = getPrefValueForCheckbox("browser.block.target_new_window");
++    document.getElementById("allowWindowMoveResize").checked =  getPrefValueForCheckbox("dom.disable_window_move_resize");
++    document.getElementById("allowWindowFlip").checked = getPrefValueForCheckbox("dom.disable_window_flip");
++    document.getElementById("allowWindowStatusChange").checked = getPrefValueForCheckbox("dom.disable_window_status_change");
++    document.getElementById("allowImageSrcChange").checked = getPrefValueForCheckbox("dom.disable_image_src_set");
++    document.getElementById("allowDocumentCookieGet").checked = getPrefValueForCheckbox("dom.disable_cookie_get");
++    document.getElementById("allowDocumentCookieSet").checked = getPrefValueForCheckbox("dom.disable_cookie_set");
+ 
+   } else { //not first time it was loaded, get default values from data 
+- 
+-    document.getElementById("allowWindowOpen").checked = data["allowWindowOpen"].checked; 
+-
+-    document.getElementById("allowTargetNew").checked = data["allowTargetNew"].checked; 
+-
+-    document.getElementById("allowWindowMoveResize").checked = data["allowWindowMoveResize"].checked; 
+-
+-    document.getElementById("allowWindowFlip").checked = data["allowWindowFlip"].checked; 
+-    document.getElementById("allowWindowStatusChange").checked = data["allowWindowStatusChange"].checked; 
+-
+-    document.getElementById("allowImageSrcChange").checked = data["allowImageSrcChange"].checked; 
+-
+-    document.getElementById("allowDocumentCookieSet").checked = data["allowDocumentCookieSet"].checked; 
+-
+-    document.getElementById("allowDocumentCookieGet").checked = data["allowDocumentCookieGet"].checked; 
+ 
++    document.getElementById("allowWindowOpen").checked = data["allowWindowOpen"].checked;
++    document.getElementById("allowTargetNew").checked = data["allowTargetNew"].checked;
++    document.getElementById("allowWindowMoveResize").checked = data["allowWindowMoveResize"].checked;
++    document.getElementById("allowWindowFlip").checked = data["allowWindowFlip"].checked;
++    document.getElementById("allowWindowStatusChange").checked = data["allowWindowStatusChange"].checked;
++    document.getElementById("allowImageSrcChange").checked = data["allowImageSrcChange"].checked;
++    document.getElementById("allowDocumentCookieSet").checked = data["allowDocumentCookieSet"].checked;
++    document.getElementById("allowDocumentCookieGet").checked = data["allowDocumentCookieGet"].checked;
+     document.getElementById("javascriptAllowNavigator").checked = data["javascriptAllowNavigator"].checked;
+ 
+-    if (document.getElementById("javascriptAllowMailnews")) 
++    if (document.getElementById("javascriptAllowMailnews")) {
+       document.getElementById("javascriptAllowMailNews").checked = data["javascriptAllowMailNews"].checked;
++    }
+   }
+ 
+   javascriptEnabledChange();
+ 
+   document.getElementById("AllowList").addEventListener("CheckboxStateChange", onCheckboxCheck, false);
+ 
+@@ -186,80 +142,53 @@
+   function getCheckboxValue(name){
+     if ("onCheckboxCheck" in window)
+       return document.getElementById(name).checked;
+ 
+     return data[name].checked;
+   }
+- 
+-  function setCapabilityPolicy(prefName, checkboxValue){
+-
+-    //If checked, we allow the script to do task, so we clear the pref.
+-    //since some options are made up of multiple capability policies and users can turn 
+-    //individual ones on/off via prefs.js, it can happen that we clear a nonexistent pref
+-    if (checkboxValue){
+-      try { 
+-        parent.hPrefWindow.pref.ClearUserPref(prefName);
+-      } catch (e) {}
+-    } else {
+-      parent.hPrefWindow.setPref("string", prefName, "noAccess");
+-    }
+-  }
+ 
+   var data = parent.hPrefWindow.wsm.dataManager.pageData["chrome://communicator/content/pref/pref-scripts.xul"];
+  
+   if (data.scriptData["allowWindowOpenChanged"].value){
+-    parent.hPrefWindow.setPref("bool", "dom.disable_open_during_load", 
++    parent.hPrefWindow.setPref("bool", "dom.disable_open_during_load",
+       !getCheckboxValue('allowWindowOpen'));
+   }
+ 
+   if (data.scriptData["allowTargetNewChanged"].value){
+-    parent.hPrefWindow.setPref("bool", "browser.block.target_new_window", 
++    parent.hPrefWindow.setPref("bool", "browser.block.target_new_window",
+       !getCheckboxValue('allowTargetNew'));
+   }
+ 
+   if (data.scriptData["allowWindowMoveResizeChanged"].value){
+-    var allowWindowMoveResize = getCheckboxValue("allowWindowMoveResize");
+-
+-    setCapabilityPolicy("capability.policy.default.Window.resizeTo", allowWindowMoveResize);
+-    setCapabilityPolicy("capability.policy.default.Window.innerWidth.set", allowWindowMoveResize);
+-    setCapabilityPolicy("capability.policy.default.Window.innerHeight.set", allowWindowMoveResize);
+-    setCapabilityPolicy("capability.policy.default.Window.outerWidth.set", allowWindowMoveResize);
+-    setCapabilityPolicy("capability.policy.default.Window.outerHeight.set", allowWindowMoveResize);
+-    setCapabilityPolicy("capability.policy.default.Window.sizeToContent", allowWindowMoveResize);
+-    setCapabilityPolicy("capability.policy.default.Window.resizeBy", allowWindowMoveResize);
+-    setCapabilityPolicy("capability.policy.default.Window.screenX.set", allowWindowMoveResize);
+-    setCapabilityPolicy("capability.policy.default.Window.screenY.set", allowWindowMoveResize);
+-    setCapabilityPolicy("capability.policy.default.Window.moveTo", allowWindowMoveResize);
+-    setCapabilityPolicy("capability.policy.default.Window.moveBy", allowWindowMoveResize);
++    parent.hPrefWindow.setPref("bool", "dom.disable_window_move_resize",
++      !getCheckboxValue('allowWindowMoveResize'));
+   }
+ 
+   if (data.scriptData["allowWindowStatusChangeChanged"].value){
+-    var allowWindowStatusChange = getCheckboxValue("allowWindowStatusChange");
+-
+-    setCapabilityPolicy("capability.policy.default.Window.status", allowWindowStatusChange);
+-    setCapabilityPolicy("capability.policy.default.Window.defaultStatus", allowWindowStatusChange);
++    parent.hPrefWindow.setPref("bool", "dom.disable_window_status_change",
++      !getCheckboxValue("allowWindowStatusChange"));
+   }
+ 
+   if (data.scriptData["allowWindowFlipChanged"].value){
+-    setCapabilityPolicy("capability.policy.default.Window.focus", 
+-      getCheckboxValue("allowWindowFlip"));
++    parent.hPrefWindow.setPref("bool", "dom.disable_window_flip",
++      !getCheckboxValue("allowWindowFlip"));
+   }
+ 
+   if (data.scriptData["allowDocumentCookieSetChanged"].value){
+-    setCapabilityPolicy("capability.policy.default.HTMLDocument.cookie.set", 
+-      getCheckboxValue("allowDocumentCookieSet"));
++    parent.hPrefWindow.setPref("bool", "dom.disable_cookie_set",
++      !getCheckboxValue("allowDocumentCookieSet"));
+   }
+ 
+   if (data.scriptData["allowDocumentCookieGetChanged"].value){
+-    setCapabilityPolicy("capability.policy.default.HTMLDocument.cookie.get", 
+-      getCheckboxValue("allowDocumentCookieGet"));
++    parent.hPrefWindow.setPref("bool", "dom.disable_cookie_get",
++      !getCheckboxValue("allowDocumentCookieGet"));
+   } 
+ 
+   if (data.scriptData["allowImageSrcChangeChanged"].value){
+-    setCapabilityPolicy("capability.policy.default.HTMLImageElement.src", 
+-      getCheckboxValue("allowImageSrcChange"));
++    parent.hPrefWindow.setPref("bool", "dom.disable_image_src_set",
++      !getCheckboxValue("allowImageSrcChange"));
+   }
+ }
+ 
+ function onCheckboxCheck(event)
+ {
+   data.scriptData[event.target.id+"Changed"].value = !data.scriptData[event.target.id+"Changed"].value;
+Index: xpfe/components/prefwindow/resources/content/pref-scripts.xul
+===================================================================
+RCS file: /cvsroot/mozilla/xpfe/components/prefwindow/resources/content/pref-scripts.xul,v
+retrieving revision 1.7
+diff -u -6 -r1.7 pref-scripts.xul
+--- xpfe/components/prefwindow/resources/content/pref-scripts.xul	5 Apr 2002 04:23:19 -0000	1.7
++++ xpfe/components/prefwindow/resources/content/pref-scripts.xul	12 Apr 2002 07:53:11 -0000
+@@ -49,13 +49,13 @@
+       onload="parent.initPanel('chrome://communicator/content/pref/pref-scripts.xul');"
+       headertitle="&lHeader;">
+   <script type="application/x-javascript" src="chrome://communicator/content/pref/pref-scripts.js"/>
+   <script type="application/x-javascript">
+     <![CDATA[
+       var panel = "chrome://communicator/content/pref/pref-scripts.xul";
+-      var _elementIDs = ["javascriptAllowNavigator", "allowWindowOpen", "allowTargetNew", "allowWindowMoveResize", "allowWindowFlip", "allowWindowStatusChange", "allowImageSrcChange", "allowDocumentCookieSet", "allowDocumentCookieGet"];
++      var _elementIDs = ["javascriptAllowNavigator", "allowWindowOpen", "allowWindowMoveResize", "allowWindowFlip", "allowWindowStatusChange", "allowImageSrcChange", "allowDocumentCookieSet", "allowDocumentCookieGet","allowTargetNew"];
+     ]]>
+   </script>
+ 
+   <label value="&enableJavaScript.label;"/> 
+ 
+   <checkbox id="javascriptAllowNavigator" label="&navigator.label;" accesskey="&navigator.accesskey;"

@@ -1,0 +1,22 @@
+diff --git a/caps/src/nsScriptSecurityManager.cpp b/caps/src/nsScriptSecurityManager.cpp
+--- a/caps/src/nsScriptSecurityManager.cpp
++++ b/caps/src/nsScriptSecurityManager.cpp
+@@ -2045,17 +2045,17 @@ nsScriptSecurityManager::GetScriptPrinci
+     *rv = NS_OK;
+     if (!script)
+     {
+         return nsnull;
+     }
+     JSPrincipals *jsp = JS_GetScriptPrincipals(cx, script);
+     if (!jsp) {
+         *rv = NS_ERROR_FAILURE;
+-        // Script didn't have principals -- shouldn't happen.
++        NS_ERROR("Script compiled without principals!");
+         return nsnull;
+     }
+     nsJSPrincipals *nsJSPrin = static_cast<nsJSPrincipals *>(jsp);
+     nsIPrincipal* result = nsJSPrin->nsIPrincipalPtr;
+     if (!result)
+         *rv = NS_ERROR_FAILURE;
+     return result;
+ }

@@ -1,0 +1,29 @@
+Index: mozilla/security/manager/ssl/src/nsCertTree.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsCertTree.cpp,v
+retrieving revision 1.46
+diff -p -u -6 -r1.46 nsCertTree.cpp
+--- mozilla/security/manager/ssl/src/nsCertTree.cpp	12 Apr 2006 15:43:32 -0000	1.46
++++ mozilla/security/manager/ssl/src/nsCertTree.cpp	6 May 2006 23:06:23 -0000
+@@ -866,16 +866,17 @@ nsCertTree::SetTree(nsITreeBoxObject *tr
+ NS_IMETHODIMP 
+ nsCertTree::ToggleOpenState(PRInt32 index)
+ {
+   if (!mTreeArray)
+     return NS_ERROR_NOT_INITIALIZED;
+   treeArrayEl *el = GetThreadDescAtIndex(index);
+-  if (el) el->open = !el->open;
+-  PRInt32 fac = (el->open) ? 1 : -1;
+-  if (mTree) mTree->RowCountChanged(index, fac * el->numChildren);
+-  mSelection->Select(index);
++  if (el) {
++    el->open = !el->open;
++    PRInt32 newChildren = (el->open) ? el->numChildren : -el->numChildren;
++    if (mTree) mTree->RowCountChanged(index + 1, newChildren);
++  }
+   return NS_OK;
+ }
+ 
+ /* void cycleHeader (in nsITreeColumn); */
+ NS_IMETHODIMP 
+ nsCertTree::CycleHeader(nsITreeColumn* col)

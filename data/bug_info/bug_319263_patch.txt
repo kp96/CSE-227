@@ -1,0 +1,284 @@
+Index: jsarray.c
+===================================================================
+RCS file: /cvsroot/mozilla/js/src/jsarray.c,v
+retrieving revision 3.83
+diff -p -U10 -r3.83 jsarray.c
+--- jsarray.c	28 Apr 2006 00:20:44 -0000	3.83
++++ jsarray.c	4 May 2006 06:09:10 -0000
+@@ -1628,49 +1628,58 @@ array_extra(JSContext *cx, JSObject *obj
+     }
+ 
+     if (length == 0)
+         return JS_TRUE;
+ 
+     if (argc > 1) {
+         if (!js_ValueToObject(cx, argv[1], &thisp))
+             return JS_FALSE;
+         argv[1] = OBJECT_TO_JSVAL(thisp);
+     } else {
+-        JSObject *tmp;
+-        thisp = callable;
+-        while ((tmp = OBJ_GET_PARENT(cx, thisp)) != NULL)
+-            thisp = tmp;
++        thisp = NULL;
+     }
+ 
+     /* We call with 3 args (value, index, array), plus room for rval. */
+     origsp = js_AllocStack(cx, 2 + 3 + 1, &mark);
+     if (!origsp)
+         return JS_FALSE;
++    origsp[0] = OBJECT_TO_JSVAL(callable);
++    origsp[1] = OBJECT_TO_JSVAL(thisp);
++
++    thisp = js_SafeComputeThis(cx, thisp, origsp + 2);
++    if (!thisp) {
++        ok = JS_FALSE;
++        goto out;
++    }
+ 
+     /* Lift current frame to include our args. */
+     fp = cx->fp;
+     oldsp = fp->sp;
+ 
+     for (i = 0; i < length; i++) {
+         jsid id;
+         jsval rval2;
+ 
+         ok = IndexToExistingId(cx, obj, i, &id);
+         if (!ok)
+             break;
+         if (id == JSID_HOLE)
+             continue;
+         ok = OBJ_GET_PROPERTY(cx, obj, id, vp);
+         if (!ok)
+             break;
+ 
+-        /* Push callable and 'this', then args. */
++        /*
++         * Push callable and 'this', then args. We must do this for every
++         * iteration around the loop since one or both of origsp[1] and
++         * origsp[2] can get mutated by the call.
++         */
+         sp = origsp;
+         *sp++ = OBJECT_TO_JSVAL(callable);
+         *sp++ = OBJECT_TO_JSVAL(thisp);
+         *sp++ = *vp;
+         *sp++ = INT_TO_JSVAL(i);
+         *sp++ = OBJECT_TO_JSVAL(obj);
+ 
+         /* Do the call. */
+         fp->sp = sp;
+         ok = js_Invoke(cx, 3, JSINVOKE_INTERNAL);
+Index: jsinterp.c
+===================================================================
+RCS file: /cvsroot/mozilla/js/src/jsinterp.c,v
+retrieving revision 3.238
+diff -p -U10 -r3.238 jsinterp.c
+--- jsinterp.c	27 Apr 2006 23:49:51 -0000	3.238
++++ jsinterp.c	4 May 2006 06:09:11 -0000
+@@ -521,20 +521,59 @@ js_ComputeThis(JSContext *cx, JSObject *
+             /* walk up to find the top-level object */
+             thisp = parent;
+             while ((parent = OBJ_GET_PARENT(cx, thisp)) != NULL)
+                 thisp = parent;
+         }
+     }
+     argv[-1] = OBJECT_TO_JSVAL(thisp);
+     return thisp;
+ }
+ 
++/* Like js_ComputeThis, but with security checks. */
++JSObject *
++js_SafeComputeThis(JSContext *cx, JSObject *thisp, jsval *argv)
++{
++    jsid id;
++    jsval v;
++    uintN attrs;
++
++    /* N.B. This function closely mirrors the logic in js_ComputeThis. */
++    JS_ASSERT(thisp == JSVAL_TO_OBJECT(argv[-1]));
++
++    /*
++     * In this case, it is safe to simply return thisp and skip the
++     * OBJ_THIS_OBJECT, since all callers of js_SafeComputeThis call
++     * us first, and will always call js_ComputeThis afterwards.
++     */
++    if (thisp && OBJ_GET_CLASS(cx, thisp) != &js_CallClass)
++        return thisp;
++
++    JS_ASSERT(!JSVAL_IS_PRIMITIVE(argv[-2]));
++    thisp = OBJ_GET_PARENT(cx, JSVAL_TO_OBJECT(argv[-2]));
++    if (!thisp) {
++        thisp = cx->globalObject;
++    } else {
++        id = ATOM_TO_JSID(cx->runtime->atomState.parentAtom);
++        for (;;) {
++            if (!OBJ_CHECK_ACCESS(cx, thisp, id, JSACC_PARENT, &v, &attrs))
++                return NULL;
++            if (JSVAL_IS_VOID(v) || JSVAL_IS_NULL(v))
++                break;
++            JS_ASSERT(JSVAL_TO_OBJECT(v) == OBJ_GET_PARENT(cx, thisp));
++            thisp = JSVAL_TO_OBJECT(v);
++        }
++    }
++
++    argv[-1] = OBJECT_TO_JSVAL(thisp);
++    return thisp;
++}
++
+ #if JS_HAS_NO_SUCH_METHOD
+ 
+ static JSBool
+ NoSuchMethod(JSContext *cx, JSStackFrame *fp, jsval *vp, uint32 flags,
+              uintN *argcp)
+ {
+     jsval v, *sp, *newsp;
+     JSObject *thisp, *argsobj;
+     jsid id;
+     jsbytecode *pc;
+Index: jsinterp.h
+===================================================================
+RCS file: /cvsroot/mozilla/js/src/jsinterp.h,v
+retrieving revision 3.47
+diff -p -U10 -r3.47 jsinterp.h
+--- jsinterp.h	17 Apr 2006 23:36:31 -0000	3.47
++++ jsinterp.h	4 May 2006 06:09:11 -0000
+@@ -262,20 +262,23 @@ extern void         js_DumpCallTable(JSC
+ /*
+  * Compute the 'this' parameter for a call with nominal 'this' given by thisp
+  * and arguments including argv[-1] (nominal 'this') and argv[-2] (callee).
+  * Activation objects ("Call" objects not created with "new Call()", i.e.,
+  * "Call" objects that have private data) may not be referred to by 'this',
+  * per ECMA-262, so js_ComputeThis censors them.
+  */
+ extern JSObject *
+ js_ComputeThis(JSContext *cx, JSObject *thisp, jsval *argv);
+ 
++extern JSObject *
++js_SafeComputeThis(JSContext *cx, JSObject *thisp, jsval *argv);
++
+ /*
+  * NB: js_Invoke requires that cx is currently running JS (i.e., that cx->fp
+  * is non-null), and that the callee, |this| parameter, and actual arguments
+  * are already pushed on the stack under cx->fp->sp.
+  */
+ extern JS_FRIEND_API(JSBool)
+ js_Invoke(JSContext *cx, uintN argc, uintN flags);
+ 
+ /*
+  * Consolidated js_Invoke flags simply rename the low JSFRAME_* flags.
+Index: jsfun.c
+===================================================================
+RCS file: /cvsroot/mozilla/js/src/jsfun.c,v
+retrieving revision 3.152
+diff -p -U10 -r3.152 jsfun.c
+--- jsfun.c	27 Apr 2006 17:58:55 -0000	3.152
++++ jsfun.c	4 May 2006 06:09:11 -0000
+@@ -1494,21 +1494,20 @@ fun_toSource(JSContext *cx, JSObject *ob
+ }
+ #endif
+ 
+ static const char call_str[] = "call";
+ 
+ static JSBool
+ fun_call(JSContext *cx, JSObject *obj, uintN argc, jsval *argv, jsval *rval)
+ {
+     jsval fval, *sp, *oldsp;
+     JSString *str;
+-    JSObject *tmp;
+     void *mark;
+     uintN i;
+     JSStackFrame *fp;
+     JSBool ok;
+ 
+     if (!OBJ_DEFAULT_VALUE(cx, obj, JSTYPE_FUNCTION, &argv[-1]))
+         return JS_FALSE;
+     fval = argv[-1];
+ 
+     if (!VALUE_IS_FUNCTION(cx, fval)) {
+@@ -1517,50 +1516,56 @@ fun_call(JSContext *cx, JSObject *obj, u
+             JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL,
+                                  JSMSG_INCOMPATIBLE_PROTO,
+                                  js_Function_str, call_str,
+                                  JS_GetStringBytes(str));
+         }
+         return JS_FALSE;
+     }
+ 
+     if (argc == 0) {
+         /* Call fun with its global object as the 'this' param if no args. */
+-        while ((tmp = OBJ_GET_PARENT(cx, obj)) != NULL)
+-            obj = tmp;
++        obj = NULL;
+     } else {
+         /* Otherwise convert the first arg to 'this' and skip over it. */
+         if (!js_ValueToObject(cx, argv[0], &obj))
+             return JS_FALSE;
+         argc--;
+         argv++;
+     }
+ 
+     /* Allocate stack space for fval, obj, and the args. */
+     sp = js_AllocStack(cx, 2 + argc, &mark);
+     if (!sp)
+         return JS_FALSE;
+ 
+     /* Push fval, obj, and the args. */
+     *sp++ = fval;
+     *sp++ = OBJECT_TO_JSVAL(obj);
+     for (i = 0; i < argc; i++)
+         *sp++ = argv[i];
+ 
++    obj = js_SafeComputeThis(cx, obj, sp - argc);
++    if (!obj) {
++        ok = JS_FALSE;
++        goto out;
++    }
++
+     /* Lift current frame to include the args and do the call. */
+     fp = cx->fp;
+     oldsp = fp->sp;
+     fp->sp = sp;
+     ok = js_Invoke(cx, argc, JSINVOKE_INTERNAL | JSINVOKE_SKIP_CALLER);
+ 
+     /* Store rval and pop stack back to our frame's sp. */
+     *rval = fp->sp[-1];
+     fp->sp = oldsp;
++out:
+     js_FreeStack(cx, mark);
+     return ok;
+ }
+ 
+ static JSBool
+ fun_apply(JSContext *cx, JSObject *obj, uintN argc, jsval *argv, jsval *rval)
+ {
+     jsval fval, *sp, *oldsp;
+     JSString *str;
+     JSObject *aobj;
+@@ -1627,20 +1632,26 @@ fun_apply(JSContext *cx, JSObject *obj, 
+     /* Push fval, obj, and aobj's elements as args. */
+     *sp++ = fval;
+     *sp++ = OBJECT_TO_JSVAL(obj);
+     for (i = 0; i < argc; i++) {
+         ok = JS_GetElement(cx, aobj, (jsint)i, sp);
+         if (!ok)
+             goto out;
+         sp++;
+     }
+ 
++    obj = js_SafeComputeThis(cx, obj, sp - argc);
++    if (!obj) {
++        ok = JS_FALSE;
++        goto out;
++    }
++
+     /* Lift current frame to include the args and do the call. */
+     fp = cx->fp;
+     oldsp = fp->sp;
+     fp->sp = sp;
+     ok = js_Invoke(cx, argc, JSINVOKE_INTERNAL | JSINVOKE_SKIP_CALLER);
+ 
+     /* Store rval and pop stack back to our frame's sp. */
+     *rval = fp->sp[-1];
+     fp->sp = oldsp;
+ out:

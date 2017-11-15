@@ -1,0 +1,112 @@
+commit 59a750ac82820defe72f778ab2674c191119bfdc
+Author: Ehsan Akhgari <ehsan@mozilla.com>
+Date:   Fri Oct 12 23:38:19 2012 -0400
+
+    Bug 722978 - Port the certificate exception UI to the new per-window private browsing API; r=jdm
+
+diff --git a/browser/base/content/browser.js b/browser/base/content/browser.js
+index 1eb112b..b68c96f 100644
+--- a/browser/base/content/browser.js
++++ b/browser/base/content/browser.js
+@@ -2549,7 +2549,7 @@ let BrowserOnClick = {
+     switch (elmId) {
+       case "exceptionDialogButton":
+         secHistogram.add(Ci.nsISecurityUITelemetry.WARNING_BAD_CERT_CLICK_ADD_EXCEPTION);
+-        let params = { exceptionAdded : false, handlePrivateBrowsing : true };
++        let params = { exceptionAdded : false };
+ 
+         try {
+           switch (Services.prefs.getIntPref("browser.ssl_override_behavior")) {
+diff --git a/browser/components/privatebrowsing/test/browser/global/browser_privatebrowsing_certexceptionsui.js b/browser/components/privatebrowsing/test/browser/global/browser_privatebrowsing_certexceptionsui.js
+index 0ec6099..858f094 100644
+--- a/browser/components/privatebrowsing/test/browser/global/browser_privatebrowsing_certexceptionsui.js
++++ b/browser/components/privatebrowsing/test/browser/global/browser_privatebrowsing_certexceptionsui.js
+@@ -19,14 +19,13 @@ function test() {
+   // enter private browsing mode
+   pb.privateBrowsingEnabled = true;
+ 
+-  step1();
++  doTest();
+ 
+-  // Test the certificate exceptions dialog as it is invoked from about:certerror
+-  function step1() {
++  // Test the certificate exceptions dialog
++  function doTest() {
+     let params = {
+       exceptionAdded : false,
+       location: INVALID_CERT_LOCATION,
+-      handlePrivateBrowsing : true,
+       prefetchCert: true,
+     };
+     function testCheckbox() {
+@@ -41,32 +40,6 @@ function test() {
+         ok(!checkbox.hasAttribute("checked"),
+           "the permanent checkbox should not be checked when handling the private browsing mode");
+         win.close();
+-        step2();
+-      }, "cert-exception-ui-ready", false);
+-    }
+-    var win = openDialog(EXCEPTIONS_DLG_URL, "", EXCEPTIONS_DLG_FEATURES, params);
+-    win.addEventListener("load", testCheckbox, false);
+-  }
+-
+-  // Test the certificate excetions dialog as it is invoked from the Preferences dialog
+-  function step2() {
+-    let params = {
+-      exceptionAdded : false,
+-      location: INVALID_CERT_LOCATION,
+-      prefetchCert: true,
+-    };
+-    function testCheckbox() {
+-      win.removeEventListener("load", testCheckbox, false);
+-      Services.obs.addObserver(function (aSubject, aTopic, aData) {
+-        Services.obs.removeObserver(arguments.callee, "cert-exception-ui-ready", false);
+-        ok(win.gCert, "The certificate information should be available now");
+-
+-        let checkbox = win.document.getElementById("permanent");
+-        ok(!checkbox.hasAttribute("disabled"),
+-          "the permanent checkbox should not be disabled when not handling the private browsing mode");
+-        ok(checkbox.hasAttribute("checked"),
+-          "the permanent checkbox should be checked when not handling the private browsing mode");
+-        win.close();
+         cleanup();
+       }, "cert-exception-ui-ready", false);
+     }
+diff --git a/security/manager/pki/resources/content/exceptionDialog.js b/security/manager/pki/resources/content/exceptionDialog.js
+index 6c9e0f8..ef3341e 100644
+--- a/security/manager/pki/resources/content/exceptionDialog.js
++++ b/security/manager/pki/resources/content/exceptionDialog.js
+@@ -14,6 +14,8 @@ var gNeedReset;
+ var gSecHistogram;
+ var gNsISecTel;
+ 
++Components.utils.import("resource://gre/modules/PrivateBrowsingUtils.jsm");
++
+ function badCertListener() {}
+ badCertListener.prototype = {
+   getInterface: function (aIID) {
+@@ -379,22 +381,8 @@ function addException() {
+ }
+ 
+ /**
+- * Returns true if the private browsing mode is currently active and
+- * we have been instructed to handle it.
++ * Returns true if the opener of this dialog was in private browsing mode.
+  */
+ function inPrivateBrowsingMode() {
+-  // first, check to see if we should handle the private browsing mode
+-  var args = window.arguments;
+-  if (args && args[0] && args[0].handlePrivateBrowsing) {
+-    // detect if the private browsing mode is active
+-    try {
+-      var pb = Components.classes["@mozilla.org/privatebrowsing;1"].
+-               getService(Components.interfaces.nsIPrivateBrowsingService);
+-      return pb.privateBrowsingEnabled;
+-    } catch (ex) {
+-      Components.utils.reportError("Could not get the Private Browsing service");
+-    }
+-  }
+-
+-  return false;
++  return PrivateBrowsingUtils.isWindowPrivate(window);
+ }

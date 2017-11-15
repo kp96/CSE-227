@@ -1,0 +1,158 @@
+diff --git a/security/manager/ssl/src/nsCRLManager.cpp b/security/manager/ssl/src/nsCRLManager.cpp
+--- a/security/manager/ssl/src/nsCRLManager.cpp
++++ b/security/manager/ssl/src/nsCRLManager.cpp
+@@ -33,18 +33,16 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "nsCRLManager.h"
+ #include "nsCRLInfo.h"
+ 
+ #include "nsCOMPtr.h"
+-#include "nsIDateTimeFormat.h"
+-#include "nsDateTimeFormatCID.h"
+ #include "nsComponentManagerUtils.h"
+ #include "nsReadableUtils.h"
+ #include "nsNSSComponent.h"
+ #include "nsCOMPtr.h"
+ #include "nsICertificateDialogs.h"
+ #include "nsIMutableArray.h"
+ #include "nsIPrefService.h"
+ #include "nsIPrefBranch.h"
+@@ -254,28 +252,26 @@ done:
+         pref->GetCharPref(updateFreqCntPrefStr.get(),&dayCntStr);
+       }
+       dayCnt = atof(dayCntStr);
+       nsMemory::Free(dayCntStr);
+ 
+       bool toBeRescheduled = false;
+       if(NS_SUCCEEDED(ComputeNextAutoUpdateTime(crlData, timingTypePref, dayCnt, &updateTime))){
+         updateTimeStr.AssignWithConversion(updateTime);
+-        nsMemory::Free(updateTime);
+         pref->SetCharPref(updateTimePrefStr.get(),updateTimeStr.get());
+         //Now, check if this update time is already in the past. This would
+         //imply we have downloaded the same crl, or there is something wrong
+         //with the next update date. We will not reschedule this crl in this
+         //session anymore - or else, we land into a loop. It would anyway be
+         //imported once the browser is restarted.
+-        PRTime nextTime;
+-        PR_ParseTimeString(updateTimeStr.get(),true, &nextTime);
+-        if(LL_CMP(nextTime, > , PR_Now())){
++        if(LL_CMP(updateTime, > , PR_Now())){
+           toBeRescheduled = true;
+         }
++        nsMemory::Free(updateTime);
+       }
+       
+       //Update the url to download from, next time
+       crlData->GetLastFetchURL(updateURL);
+       pref->SetCharPref(updateUrlPrefStr.get(),updateURL.get());
+       
+       pref->SetIntPref(updateErrCntPrefStr.get(),0);
+       
+@@ -414,16 +410,17 @@ nsCRLManager::DeleteCrl(PRUint32 aCrlInd
+ }
+ 
+ NS_IMETHODIMP
+ nsCRLManager::ComputeNextAutoUpdateTime(nsICRLInfo *info, 
+   PRUint32 autoUpdateType, double dayCnt, PRUnichar **nextAutoUpdate)
+ {
+   if (!info)
+     return NS_ERROR_FAILURE;
++  NS_ENSURE_ARG_POINTER(nextAutoUpdate);
+ 
+   PRTime microsecInDayCnt;
+   PRTime now = PR_Now();
+   PRTime tempTime;
+   PRInt64 diff = 0;
+   PRInt64 secsInDay = 86400UL;
+   PRInt64 temp;
+   PRInt64 cycleCnt = 0;
+@@ -469,21 +466,16 @@ nsCRLManager::ComputeNextAutoUpdateTime(
+   //Now, a basic constraing is that the next auto update date can never be after
+   //next update, if one is defined
+   if(LL_CMP(nextUpdate , > , 0 )) {
+     if(LL_CMP(tempTime , > , nextUpdate)) {
+       tempTime = nextUpdate;
+     }
+   }
+ 
+-  nsAutoString nextAutoUpdateDate;
+-  PRExplodedTime explodedTime;
+-  nsCOMPtr<nsIDateTimeFormat> dateFormatter = do_CreateInstance(NS_DATETIMEFORMAT_CONTRACTID, &rv);
+-  if (NS_FAILED(rv))
+-    return rv;
+-  PR_ExplodeTime(tempTime, PR_GMTParameters, &explodedTime);
+-  dateFormatter->FormatPRExplodedTime(nsnull, kDateFormatShort, kTimeFormatSeconds,
+-                                      &explodedTime, nextAutoUpdateDate);
+-  *nextAutoUpdate = ToNewUnicode(nextAutoUpdateDate);
++  // Return value as string; no pref type for Int64/PRTime
++  char *tempTimeStr = PR_smprintf("%lli", tempTime);
++  *nextAutoUpdate = ToNewUnicode(nsDependentCString(tempTimeStr));
++  PR_smprintf_free(tempTimeStr);
+ 
+   return NS_OK;
+ }
+ 
+diff --git a/security/manager/ssl/src/nsNSSComponent.cpp b/security/manager/ssl/src/nsNSSComponent.cpp
+--- a/security/manager/ssl/src/nsNSSComponent.cpp
++++ b/security/manager/ssl/src/nsNSSComponent.cpp
+@@ -1319,24 +1319,51 @@ nsresult nsNSSComponent::getParamsForNex
+     if(crlsScheduledForDownload->Exists(&hashKey)){
+       continue;
+     }
+ 
+     char *tempTimeString;
+     PRTime tempTime;
+     nsCAutoString timingPrefCString(updateTimePref);
+     timingPrefCString.AppendWithConversion(tempCrlKey);
++    // No PRTime/Int64 type in prefs; stored as string; parsed here as PRInt64
+     rv = pref->GetCharPref(timingPrefCString.get(), &tempTimeString);
+     if (NS_FAILED(rv)){
+-      continue;
+-    }
+-    rv = PR_ParseTimeString(tempTimeString,true, &tempTime);
+-    nsMemory::Free(tempTimeString);
+-    if (NS_FAILED(rv)){
+-      continue;
++      // Assume corrupted. Force download. Pref should be reset after download.
++      tempTime = PR_Now();
++      PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
++             ("get %s failed: forcing download\n", timingPrefCString.get()));
++    } else {
++      tempTime = (PRTime)nsCRT::atoll(tempTimeString);
++      nsMemory::Free(tempTimeString);
++      // nsCRT::atoll parses the first token in the string; three possibilities
++      //  -1- Alpha char: returns 0; change to PR_Now() and force update.
++      //  -2- Number (between epoch and PR_Now(), e.g. 0 - 1332280017 for
++      //      Tue Mar 20, 2012, 2:46pm approx): includes formatted date 
++      //      values (previous method of storing update date, e.g year, month 
++      //      or day, 2012, 1-31, 1-12 etc). Less than PR_Now() forces 
++      //      autoupdate.
++      //  -3- Number (larger than PR_Now()): no forced autoupdate
++      // Note: corrupt values within range of -2- will have an implicit 
++      // unflagged recovery. Corrupt values in range of -3- will be unflagged
++      // and unrecovered by this code.
++      if (tempTime == 0)
++        tempTime = PR_Now();
++#ifdef PR_LOGGING
++      PRExplodedTime explodedTime;
++      PR_ExplodeTime(tempTime, PR_GMTParameters, &explodedTime);
++      // Note: tm_month starts from 0 = Jan, hence +1
++      PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
++             ("%s tempTime(%lli) "
++              "(m/d/y h:m:s = %02d/%02d/%d %02d:%02d:%02d GMT\n",
++              timingPrefCString.get(), tempTime,
++              explodedTime.tm_month+1, explodedTime.tm_mday,
++              explodedTime.tm_year, explodedTime.tm_hour,
++              explodedTime.tm_min, explodedTime.tm_sec));
++#endif
+     }
+ 
+     if(nearestUpdateTime == 0 || tempTime < nearestUpdateTime){
+       nsCAutoString urlPrefCString(updateURLPref);
+       urlPrefCString.AppendWithConversion(tempCrlKey);
+       rv = pref->GetCharPref(urlPrefCString.get(), &tempUrl);
+       if (NS_FAILED(rv) || (!tempUrl)){
+         continue;

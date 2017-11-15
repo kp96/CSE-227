@@ -1,0 +1,22 @@
+diff --git a/security/manager/ssl/src/nsNSSCallbacks.cpp b/security/manager/ssl/src/nsNSSCallbacks.cpp
+--- a/security/manager/ssl/src/nsNSSCallbacks.cpp
++++ b/security/manager/ssl/src/nsNSSCallbacks.cpp
+@@ -122,16 +122,18 @@ nsHTTPDownloadEvent::Run()
+ 
+   nsCOMPtr<nsIIOService> ios = do_GetIOService();
+   NS_ENSURE_STATE(ios);
+ 
+   nsCOMPtr<nsIChannel> chan;
+   ios->NewChannel(mRequestSession->mURL, nsnull, nsnull, getter_AddRefs(chan));
+   NS_ENSURE_STATE(chan);
+ 
++  chan->SetLoadFlags(nsIRequest::LOAD_ANONYMOUS);
++
+   // Create a loadgroup for this new channel.  This way if the channel
+   // is redirected, we'll have a way to cancel the resulting channel.
+   nsCOMPtr<nsILoadGroup> lg = do_CreateInstance(NS_LOADGROUP_CONTRACTID);
+   chan->SetLoadGroup(lg);
+ 
+   if (mRequestSession->mHasPostData)
+   {
+     nsCOMPtr<nsIInputStream> uploadStream;

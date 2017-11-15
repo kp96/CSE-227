@@ -1,0 +1,28 @@
+diff --git a/security/manager/locales/en-US/chrome/pippki/certManager.dtd b/security/manager/locales/en-US/chrome/pippki/certManager.dtd
+--- a/security/manager/locales/en-US/chrome/pippki/certManager.dtd
++++ b/security/manager/locales/en-US/chrome/pippki/certManager.dtd
+@@ -133,8 +133,8 @@
+ <!ENTITY certmgr.addException.accesskey       "x">
+ 
+ <!ENTITY exceptionMgr.title                   "Add Security Exception">
+-<!ENTITY exceptionMgr.exceptionButton         "Confirm Security Exception">
+-<!ENTITY exceptionMgr.exceptionButtonAccess   "C">
++<!ENTITY exceptionMgr.exceptionButton.label   "Confirm Security Exception">
++<!ENTITY exceptionMgr.exceptionButton.accesskey "C">
+ <!ENTITY exceptionMgr.supplementalWarning     "Legitimate banks, stores, and other public sites will not ask you to do this.">
+ <!ENTITY exceptionMgr.certlocation.caption2   "Server">
+ <!ENTITY exceptionMgr.certlocation.url        "Location:">
+diff --git a/security/manager/pki/resources/content/exceptionDialog.xul b/security/manager/pki/resources/content/exceptionDialog.xul
+--- a/security/manager/pki/resources/content/exceptionDialog.xul
++++ b/security/manager/pki/resources/content/exceptionDialog.xul
+@@ -47,8 +47,8 @@
+         xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul" 
+         title="&exceptionMgr.title;"
+         buttons="cancel,extra1,extra2"
+-        buttonlabelextra1="&exceptionMgr.exceptionButton;"
+-        buttonaccesskeyextra1="&exceptionMgr.exceptionButtonAccess;"
++        buttonlabelextra1="&exceptionMgr.exceptionButton.label;"
++        buttonaccesskeyextra1="&exceptionMgr.exceptionButton.accesskey;"
+         style="width: 500px; height: 480px;"
+         onload="initExceptionDialog();"
+         ondialogextra1="addException();"

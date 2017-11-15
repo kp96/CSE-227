@@ -1,0 +1,192 @@
+Index: mozilla/docshell/base/nsWebShell.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/docshell/base/nsWebShell.cpp,v
+retrieving revision 1.625
+diff -u -r1.625 nsWebShell.cpp
+--- mozilla/docshell/base/nsWebShell.cpp	9 Jan 2004 23:54:09 -0000	1.625
++++ mozilla/docshell/base/nsWebShell.cpp	12 Jan 2004 22:23:43 -0000
+@@ -549,6 +549,119 @@
+   return *aQueue ? NS_OK : NS_ERROR_FAILURE;
+ }
+ 
++//
++// TestForSpoofURL is a helper function which judges whether the link may be a
++// link that scammers like to send out - i.e. a user pass formatted to resemble
++// a web address such as paypal.com. It returns PR_TRUE if the dubiousness of
++// the nsIURI exceeds a certain threshold.
++//
++// Example:
++//
++// http://www.paypal.com&item%3Dq209354@scammersdomain.com
++
++static PRBool
++TestForSpoofURL(nsIURI *aURI)
++{
++    if (aURI == nsnull)
++    {
++        return PR_FALSE;
++    }
++    PRBool isHttp = PR_FALSE;
++    PRBool isHttps = PR_FALSE;
++    aURI->SchemeIs("http", &isHttp);
++    aURI->SchemeIs("https", &isHttps);
++    if (!isHttp && !isHttps)
++    {
++        return PR_FALSE;
++    }
++
++    // Measure how dubious a URL is by performing a number of tests
++    // and seeing what score we get.
++    PRInt32 dubiousness = 0;
++
++    nsCAutoString userPass;
++    if (NS_FAILED(aURI->GetUserPass(userPass)) || userPass.IsEmpty())
++    {
++        return PR_FALSE;
++    }
++
++    NS_UnescapeURL(userPass);
++
++    // TODO
++    // a very, very long userpass or one containing embedded non-printable chars
++    // is pretty dubious.
++    static const char kDotLike[] = ".,l-_";
++
++    // Count the number of dots or dot-like chars in userpass
++    PRInt32 numDots = 0;
++    nsReadingIterator<char> iter;
++    nsReadingIterator<char> iterEnd;
++    userPass.BeginReading(iter);
++    userPass.EndReading(iterEnd);
++    while (iter != iterEnd) {
++        if (strchr(kDotLike, *iter) != NULL)
++            numDots++;
++        ++iter;
++    }
++    if (numDots > 0) {
++        ++dubiousness;
++    }
++
++    // Look for www && com in userpass
++    if (userPass.Find("www", PR_TRUE) != -1) {
++        ++dubiousness;
++    }
++    PRInt32 comIdx = userPass.Find("com", PR_TRUE);
++    while (comIdx != -1)
++    {
++        // Check if "com" is preceded by a dot character
++        if (comIdx > 0 && strchr(kDotLike, userPass.CharAt(comIdx - 1)) != NULL)
++        {
++            ++dubiousness;
++            break;
++        }
++        comIdx = userPass.Find("com", PR_TRUE, comIdx + 1);
++    }
++    
++    // Look for most common scam victims in userpass
++    const char *kCommonScamSites[] = {
++        "ebay",
++        "paypal",
++        "amazon",
++        "aol",
++        "msn"
++    };
++    for (PRInt32 i = 0; i < sizeof(kCommonScamSites) / sizeof(kCommonScamSites[0]); ++i)
++    {
++        // Search for each instance of the scam word to see if it is dubious
++        PRInt32 scamIdx = userPass.Find(kCommonScamSites[i], PR_TRUE);
++        while (scamIdx != -1)
++        {
++            // Is the name preceded by a dot character?
++            if (scamIdx > 0 && strchr(kDotLike, userPass.CharAt(scamIdx - 1)) != NULL)
++            {
++                dubiousness += 2;
++                goto end_scamsite;
++            }
++            else
++            {
++                // Does a dot character follow the name?
++                const size_t len = strlen(kCommonScamSites[i]);
++                if ((scamIdx + len) < userPass.Length() &&
++                    strchr(kDotLike, userPass.CharAt(scamIdx + len)) != NULL)
++                {
++                    dubiousness += 2;
++                    goto end_scamsite;
++                }
++            }
++            scamIdx = userPass.Find(kCommonScamSites[i], PR_TRUE, scamIdx + 1);
++        }
++    }
++end_scamsite:
++
++    return (dubiousness < 2) ? PR_FALSE : PR_TRUE;
++}
++
+ NS_IMETHODIMP
+ nsWebShell::OnLinkClickSync(nsIContent *aContent,
+                             nsLinkVerb aVerb,
+@@ -583,6 +696,51 @@
+   }
+   if (earlyReturn)
+     return NS_OK;
++
++  // Test for spoof URLs
++  static const char kCheckForSpoofURLsPref[] = "security.check_spoof_urls";
++  PRBool checkForSpoofURLs = PR_TRUE;
++  mPrefs->GetBoolPref(kCheckForSpoofURLsPref, &checkForSpoofURLs);
++  if (checkForSpoofURLs)
++  {
++    PRUint32 appType = 0;
++    // The mail app should set the appType but doesn't... There might be another way
++    // to determine the parent app. For the purposes of testing, this section is commented out
++    // GetAppType(&appType);
++    // if (appType == nsIDocShell::APP_TYPE_MAIL &&
++    if (TestForSpoofURL(aURI))
++    {
++      nsCOMPtr<nsIPrompt> prompter;
++      nsCOMPtr<nsIStringBundle> stringBundle;
++      GetPromptAndStringBundle(getter_AddRefs(prompter), 
++                                getter_AddRefs(stringBundle));
++    
++      if (stringBundle && prompter) {
++        nsXPIDLString messageStr;
++        nsXPIDLString checkMsgStr;
++
++        nsCAutoString spec;
++        aURI->GetSpec(spec);
++        NS_ConvertUTF8toUCS2 specU(spec);
++        const PRUnichar *strs[1];
++        strs[0] = specU.get();
++        nsresult rv = stringBundle->FormatStringFromName(
++            NS_LITERAL_STRING("spoofURL").get(), strs, 1, getter_Copies(messageStr));
++        rv = stringBundle->GetStringFromName(
++            NS_LITERAL_STRING("spoofURLCheck").get(), getter_Copies(checkMsgStr));
++            
++        if (NS_SUCCEEDED(rv) && messageStr) {
++          PRBool proceed = PR_TRUE;
++          PRBool checkValue = PR_FALSE;
++          prompter->ConfirmCheck(nsnull, messageStr, checkMsgStr, &checkValue, &proceed);
++          if (checkValue)
++              mPrefs->SetBoolPref(kCheckForSpoofURLsPref, PR_FALSE);
++          if (!proceed)
++            return NS_OK;
++        }
++      }
++    }
++  }
+ 
+   nsCOMPtr<nsIDOMNode> node(do_QueryInterface(aContent));
+   NS_ENSURE_TRUE(node, NS_ERROR_UNEXPECTED);
+Index: mozilla/docshell/resources/locale/en-US/appstrings.properties
+===================================================================
+RCS file: /cvsroot/mozilla/docshell/resources/locale/en-US/appstrings.properties,v
+retrieving revision 1.8
+diff -u -r1.8 appstrings.properties
+--- mozilla/docshell/resources/locale/en-US/appstrings.properties	7 Nov 2003 22:35:49 -0000	1.8
++++ mozilla/docshell/resources/locale/en-US/appstrings.properties	12 Jan 2004 22:23:43 -0000
+@@ -34,3 +34,5 @@
+ deniedPortAccess=Access to the port number given has been disabled for security reasons.
+ proxyResolveFailure=The proxy server you have configured could not be found. Please check your proxy settings and try again.
+ proxyConnectFailure=The connection was refused when attempting to contact the proxy server you have configured. Please check your proxy settings and try again.
++spoofURL=Please read this carefully.\n\nThe link you have clicked on has been formatted to look like one web address but direct you to another. You should exercise extreme caution before entering any personal information such as your name, credit card details, login or password. It is very uncommon for a reputable institution such as a bank, store or other online service to EVER ask for your details through a link like this.\n\nClick Cancel if you do not wish to load the link at all or click OK to proceed with loading.
++spoofURLCheck=Check here if you do not wish to see this warning again.

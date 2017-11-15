@@ -1,0 +1,116 @@
+diff --git a/security/manager/boot/src/nsSecureBrowserUIImpl.cpp b/security/manager/boot/src/nsSecureBrowserUIImpl.cpp
+--- a/security/manager/boot/src/nsSecureBrowserUIImpl.cpp
++++ b/security/manager/boot/src/nsSecureBrowserUIImpl.cpp
+@@ -721,21 +721,29 @@ nsSecureBrowserUIImpl::OnStateChange(nsI
+   if (!ioService)
+   {
+     ioService = do_GetService(NS_IOSERVICE_CONTRACTID);
+     if (ioService)
+     {
+       nsAutoMonitor lock(mMonitor);
+       mIOService = ioService;
+     }
+   }
+ 
+-  const PRBool isToplevelProgress = (windowForProgress.get() == window.get());
++  PRBool isNoContentResponse = PR_FALSE;
++  nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(aRequest);
++  if (httpChannel) 
++  {
++    PRUint32 response;
++    isNoContentResponse = NS_SUCCEEDED(httpChannel->GetResponseStatus(&response)) &&
++        (response == 204 || response == 205);
++  }
++  const PRBool isToplevelProgress = (windowForProgress.get() == window.get()) && !isNoContentResponse;
+   
+ #ifdef PR_LOGGING
+   if (windowForProgress)
+   {
+     if (isToplevelProgress)
+     {
+       PR_LOG(gSecureDocLog, PR_LOG_DEBUG,
+              ("SecureUI:%p: OnStateChange: progress: for toplevel\n", this));
+     }
+     else
+diff --git a/security/manager/ssl/tests/mochitest/mixedcontent/Makefile.in b/security/manager/ssl/tests/mochitest/mixedcontent/Makefile.in
+--- a/security/manager/ssl/tests/mochitest/mixedcontent/Makefile.in
++++ b/security/manager/ssl/tests/mochitest/mixedcontent/Makefile.in
+@@ -57,27 +57,29 @@ _TEST_FILES = \
+         hugebmp.sjs \
+         iframe.html \
+         iframe2.html \
+         iframeMetaRedirect.html \
+         iframesecredirect.sjs \
+         iframeunsecredirect.sjs \
+         imgsecredirect.sjs \
+         imgunsecredirect.sjs \
+         mixedContentTest.js \
+         moonsurface.jpg \
++        nocontent.sjs \
+         redirecttoemptyimage.sjs \
+         somestyle.css \
+         test_bug329869.html \
+         test_bug383369.html \
+         test_bug455367.html \
+         test_bug472986.html \
+         test_bug477118.html \
++        test_bug521461.html \
+         test_cssBefore1.html \
+         test_cssContent1.html \
+         test_cssContent2.html \
+         test_documentWrite1.html \
+         test_documentWrite2.html \
+         test_dynDelayedUnsecurePicture.html \
+         test_dynDelayedUnsecureXHR.html \
+         test_dynUnsecureBackground.html \
+         test_dynUnsecureIframeRedirect.html \
+         test_dynUnsecurePicture.html \
+diff --git a/security/manager/ssl/tests/mochitest/mixedcontent/nocontent.sjs b/security/manager/ssl/tests/mochitest/mixedcontent/nocontent.sjs
+new file mode 100644
+--- /dev/null
++++ b/security/manager/ssl/tests/mochitest/mixedcontent/nocontent.sjs
+@@ -0,0 +1,4 @@
++function handleRequest(request, response)
++{
++  response.setStatusLine(request.httpVersion, 204, "No Content");
++}
+diff --git a/security/manager/ssl/tests/mochitest/mixedcontent/test_bug521461.html b/security/manager/ssl/tests/mochitest/mixedcontent/test_bug521461.html
+new file mode 100644
+--- /dev/null
++++ b/security/manager/ssl/tests/mochitest/mixedcontent/test_bug521461.html
+@@ -0,0 +1,35 @@
++<!DOCTYPE HTML>
++<html>
++<head>
++  <title>Bug 521461</title>
++  <script type="text/javascript" src="/MochiKit/packed.js"></script>
++  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
++  <script type="text/javascript" src="mixedContentTest.js"></script>
++  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
++
++  <script class="testbody" type="text/javascript">
++    
++  loadAsInsecure = true;
++
++  function runTest()
++  {
++    window.location = "https://example.com/tests/security/ssl/mixedcontent/nocontent.sjs";
++    window.setTimeout(function() {
++      isSecurityState("insecure", "location.href doesn't effect the security state");
++      is(document.body.innerHTML, "This is an unsecure page!", "Document has not changed content");
++      finish();
++    }, 1000);
++  }
++
++  function afterNavigationTest()
++  {
++    isSecurityState("insecure", "still not secure after navigation");
++    is(document.body.innerHTML, "This is an unsecure page!", "Document has not changed content");
++    finish();
++  }
++
++  </script>
++</head>
++
++<body>This is an unsecure page!</body>
++</html>

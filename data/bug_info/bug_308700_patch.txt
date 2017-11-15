@@ -1,0 +1,99 @@
+Index: SecurityDialogs.mm
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/browser/SecurityDialogs.mm,v
+retrieving revision 1.16
+diff -u -1 -4 -r1.16 SecurityDialogs.mm
+--- SecurityDialogs.mm	8 Sep 2005 20:27:09 -0000	1.16
++++ SecurityDialogs.mm	20 Sep 2005 16:45:58 -0000
+@@ -44,28 +44,30 @@
+ #import "MainController.h"
+ 
+ #import "CertificateItem.h"
+ #import "CertificateView.h"
+ #import "ViewCertificateDialogController.h"
+ #import "BrowserSecurityDialogs.h"
+ 
+ #include "nsString.h"
+ #include "nsIPrefBranch.h"
+ #include "nsIPrompt.h"
+ #include "nsIInterfaceRequestor.h"
+ #include "nsIInterfaceRequestorUtils.h"
+ #include "nsIDOMWindowInternal.h"
+ #include "nsIDOMLocation.h"
++#include "nsIEventQueueService.h"
++#include "nsIEventQueue.h"
+ #include "nsServiceManagerUtils.h"
+ 
+ #include "nsIX509Cert.h"
+ #include "nsIX509CertDB.h"
+ 
+ #include "nsIPKCS11ModuleDB.h"
+ #include "nsIPK11TokenDB.h"
+ #include "nsIPK11Token.h"
+ #include "nsIPKCS11Slot.h"
+ 
+ #include "nsICRLInfo.h"
+ 
+ #include "nsIObserver.h"
+ #include "nsIKeygenThread.h"
+@@ -853,42 +855,57 @@
+ NS_IMETHODIMP
+ SecurityDialogs::DisplayGeneratingKeypairInfo(nsIInterfaceRequestor *ctx, nsIKeygenThread *runnable)
+ {
+   if (!runnable)
+     return NS_ERROR_FAILURE;
+   
+   // paranoia -- make sure the thread stays around so that we can call UserCanceled() even after
+   // the thread is complete. Not sure if it goes away or not.
+   nsCOMPtr<nsIKeygenThread> threadDeathGrip = runnable;
+   
+   GenKeyPairDialogController* dialogController = [[[BrowserSecurityUIProvider sharedBrowserSecurityUIProvider] genKeyPairDialogController] retain];
+   if (!dialogController)
+     return NS_ERROR_FAILURE;
+ 
++  // We have to push a new event queue here. This is necessary because
++  // we might be getting called via the handling of a PLEvent, and the observer
++  // call that notifies us that keygen is complete is also called via a PLEvent
++  // (under the hood, it's a proxied XPCOM call). If we don't spin up a new event
++  // queue, that proxied "Observe" wouldn't get handled until the stack unwinds
++  // back to the PLEvent handling code, so we'd never see the event.
++  nsCOMPtr<nsIEventQueueService> eventQueueService = do_GetService(NS_EVENTQUEUESERVICE_CONTRACTID);
++  if (!eventQueueService) return NS_ERROR_FAILURE;
++
++  nsCOMPtr<nsIEventQueue> newQueue;
++  eventQueueService->PushThreadEventQueue(getter_AddRefs(newQueue));
++
+   nsCOMPtr<nsIObserver> completionObserver = new GenKeyPairCompletionObserver(dialogController);
+   runnable->StartKeyGeneration(completionObserver);
+-  
+-  // does this guy have to be modal?
++
+   int result = [NSApp runModalForWindow:[dialogController window]];
+ 
++  eventQueueService->PopThreadEventQueue(newQueue);
++
++  [dialogController release];
++  dialogController = nil;
++  
+   if (result == NSAlertAlternateReturn) // cancelled
+   {
+     PRBool threadAlreadyClosedDialog;
+     runnable->UserCanceled(&threadAlreadyClosedDialog);
+     return NS_ERROR_FAILURE;
+   }
+   
+-  [dialogController release];
+   return NS_OK;
+ }
+ 
+ 
+ // nsISecurityWarningDialogs implementation
+ #define ENTER_SITE_PREF      "security.warn_entering_secure"
+ #define WEAK_SITE_PREF       "security.warn_entering_weak"
+ #define LEAVE_SITE_PREF      "security.warn_leaving_secure"
+                                      
+ #define MIXEDCONTENT_PREF    "security.warn_viewing_mixed"
+ #define INSECURE_SUBMIT_PREF "security.warn_submit_insecure"
+ 
+ // XXXbryner should we make these real confirmation dialogs?
+ 

@@ -1,0 +1,590 @@
+? caps/src/.nsPrincipal.cpp.swp
+? caps/src/2nsScriptSecurityManager.cpp
+? caps/src/nsScriptSecurityManager.cpp-2
+Index: modules/libpref/src/init/all.js
+===================================================================
+RCS file: /cvsroot/mozilla/modules/libpref/src/init/all.js,v
+retrieving revision 3.737
+diff -p -u -9 -r3.737 all.js
+--- modules/libpref/src/init/all.js	14 Mar 2008 08:50:14 -0000	3.737
++++ modules/libpref/src/init/all.js	20 Mar 2008 00:26:12 -0000
+@@ -476,20 +476,20 @@ pref("javascript.enabled",              
+ pref("javascript.allow.mailnews",           false);
+ pref("javascript.options.strict",           false);
+ pref("javascript.options.relimit",          false);
+ 
+ // advanced prefs
+ pref("security.enable_java",                true);
+ pref("advanced.mailftp",                    false);
+ pref("image.animation_mode",                "normal");
+ 
+-// Same-origin policy for file: URIs: 0=self, 1=samedir, 2=subdir, 3=anyfile
+-pref("security.fileuri.origin_policy", 2);
++// Same-origin policy for file URIs, "false" is traditional
++pref("security.fileuri.strict_origin_policy", true);
+ 
+ // If there is ever a security firedrill that requires
+ // us to block certian ports global, this is the pref 
+ // to use.  Is is a comma delimited list of port numbers
+ // for example:
+ //   pref("network.security.ports.banned", "1,2,3,4,5");
+ // prevents necko connecting to ports 1-5 unless the protocol
+ // overrides.
+ 
+Index: docshell/base/nsDocShell.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/docshell/base/nsDocShell.cpp,v
+retrieving revision 1.891
+diff -p -u -9 -r1.891 nsDocShell.cpp
+--- docshell/base/nsDocShell.cpp	19 Mar 2008 23:40:56 -0000	1.891
++++ docshell/base/nsDocShell.cpp	20 Mar 2008 00:26:20 -0000
+@@ -127,18 +127,19 @@
+ 
+ // Interfaces Needed
+ #include "nsIUploadChannel.h"
+ #include "nsIProgressEventSink.h"
+ #include "nsIWebProgress.h"
+ #include "nsILayoutHistoryState.h"
+ #include "nsITimer.h"
+ #include "nsISHistoryInternal.h"
+ #include "nsIPrincipal.h"
++#include "nsIFileURL.h"
+ #include "nsIHistoryEntry.h"
+ #include "nsISHistoryListener.h"
+ #include "nsIWindowWatcher.h"
+ #include "nsIPromptFactory.h"
+ #include "nsIObserver.h"
+ #include "nsINestedURI.h"
+ #include "nsITransportSecurityInfo.h"
+ #include "nsINSSErrorsService.h"
+ 
+@@ -282,18 +283,19 @@ nsDocShell::nsDocShell():
+     mAllowMetaRedirects(PR_TRUE),
+     mAllowImages(PR_TRUE),
+     mFocusDocFirst(PR_FALSE),
+     mHasFocus(PR_FALSE),
+     mCreatingDocument(PR_FALSE),
+     mUseErrorPages(PR_FALSE),
+     mObserveErrorPages(PR_TRUE),
+     mAllowAuth(PR_TRUE),
+     mAllowKeywordFixup(PR_FALSE),
++    mStrictFilePolicy(PR_TRUE);
+     mFiredUnloadEvent(PR_FALSE),
+     mEODForCurrentDocument(PR_FALSE),
+     mURIResultedInDocument(PR_FALSE),
+     mIsBeingDestroyed(PR_FALSE),
+     mIsExecutingOnLoadHandler(PR_FALSE),
+     mIsPrintingOrPP(PR_FALSE),
+     mSavingOldViewer(PR_FALSE),
+     mAppType(nsIDocShell::APP_TYPE_UNKNOWN),
+     mChildOffset(0),
+@@ -3584,34 +3586,38 @@ nsDocShell::Create()
+         // Check pref to see if we should prevent frameset spoofing
+         rv = mPrefs->GetBoolPref("browser.frame.validate_origin", &tmpbool);
+         if (NS_SUCCEEDED(rv)) {
+             gValidateOrigin = tmpbool;
+         } else {
+             gValidateOrigin = PR_TRUE;
+         }
+     }
+ 
++    rv = mPrefs->GetBoolPref("security.fileuri.strict_origin_policy", &tmpbool);
++    if (NS_SUCCEEDED(rv))
++        mStrictFilePolicy = tmpbool;
++
+     // Should we use XUL error pages instead of alerts if possible?
+     rv = mPrefs->GetBoolPref("browser.xul.error_pages.enabled", &tmpbool);
+     if (NS_SUCCEEDED(rv))
+         mUseErrorPages = tmpbool;
+ 
+     nsCOMPtr<nsIPrefBranch2> prefs(do_QueryInterface(mPrefs, &rv));
+     if (NS_SUCCEEDED(rv) && mObserveErrorPages) {
+         prefs->AddObserver("browser.xul.error_pages.enabled", this, PR_FALSE);
+     }
+ 
+     nsCOMPtr<nsIObserverService> serv = do_GetService(NS_OBSERVERSERVICE_CONTRACTID);
+     if (serv) {
+         const char* msg = mItemType == typeContent ?
+             NS_WEBNAVIGATION_CREATE : NS_CHROME_WEBNAVIGATION_CREATE;
+         serv->NotifyObservers(GetAsSupports(this), msg, nsnull);
+-    }    
++    }
+ 
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsDocShell::Destroy()
+ {
+     NS_ASSERTION(mItemType == typeContent || mItemType == typeChrome,
+                  "Unexpected item type in docshell");
+@@ -7329,36 +7335,106 @@ nsDocShell::DoURILoad(nsIURI * aURI,
+     // accordingly.
+     PRBool inherit;
+     // We expect URIInheritsSecurityContext to return success for an
+     // about:blank URI, so don't call IsAboutBlank() if this call fails.
+     rv = URIInheritsSecurityContext(aURI, &inherit);
+     if (NS_SUCCEEDED(rv) && (inherit || IsAboutBlank(aURI))) {
+         channel->SetOwner(aOwner);
+     }
+ 
++    //
++    // file: uri special-casing
++    //
++    // If this is a file: load opened from another file: then it may need
++    // to inherit the owner from the referrer so they can script each other.
++    // If we don't set the owner explicitly then each file: gets an owner
++    // based on its own codebase later.
++    //
++    if (mStrictFilePolicy && URIIsLocalFile(aURI)) {
++        nsCOMPtr<nsIFileURL> fileURL(do_QueryInterface(aURI));
++        nsCOMPtr<nsIPrincipal> ownerPrincipal(do_QueryInterface(aOwner));
++        nsCOMPtr<nsIURI> ownerURI;
++        if (ownerPrincipal) {
++             ownerPrincipal->GetURI(getter_AddRefs(ownerURI));
++        }
++
++        if (!URIIsLocalFile(ownerURI)) {
++            // If the owner is not also a file: uri then forget it
++            // (don't want resource: principals in a file: doc)
++            //
++            // note: we're not de-nesting jar: uris here, we want to
++            // keep archive content bottled up in its own little island
++            ownerURI = nsnull;
++        }
++
++        //
++        // pull out the internal files
++        //
++        nsCOMPtr<nsIFileURL> ownerFileURL(do_QueryInterface(ownerURI));
++        nsCOMPtr<nsIFile> targetFile;
++        nsCOMPtr<nsIFile> ownerFile;
++        if ( ownerFileURL &&
++             NS_SUCCEEDED(fileURL->GetFile(getter_AddRefs(targetFile))) &&
++             NS_SUCCEEDED(ownerFileURL->GetFile(getter_AddRefs(ownerFile))) ) {
++            //
++            // Make sure targetFile is not a directory (bug 209234)
++            // and that it exists w/out unescaping (bug 395343)
++            //
++            PRBool targetIsDir;
++            if ( targetFile && ownerFile && 
++                 NS_SUCCEEDED(targetFile->Normalize()) &&
++                 NS_SUCCEEDED(ownerFile->Normalize()) &&
++                 NS_SUCCEEDED(targetFile->IsDirectory(&targetIsDir)) &&
++                 !targetIsDir ) {
++                //
++                // If the file to be loaded is in a subdirectory of the owner
++                // (or same-dir if owner is not a directory) then it will
++                // inherit its owner principal and be scriptable by that owner.
++                //
++                PRBool ownerIsDir;
++                PRBool contained = PR_FALSE;
++                rv = ownerFile->IsDirectory(&ownerIsDir);
++                if (NS_SUCCEEDED(rv) && ownerIsDir) {
++                    rv = ownerFile->Contains(targetFile, PR_TRUE, &contained);
++                }
++                else {
++                    nsCOMPtr<nsIFile> ownerParent;
++                    rv = ownerFile->GetParent(getter_AddRefs(ownerParent));
++                    if (NS_SUCCEEDED(rv) && ownerParent) {
++                        rv = ownerParent->Contains(targetFile, PR_TRUE, &contained);
++                    }
++                }
++
++                if (NS_SUCCEEDED(rv) && contained) {
++                    channel->SetOwner(aOwner);
++                }
++            }
++        }
++    }
++
+     nsCOMPtr<nsIScriptChannel> scriptChannel = do_QueryInterface(channel);
+     if (scriptChannel) {
+         // Allow execution against our context if the principals match
+         scriptChannel->
+             SetExecutionPolicy(nsIScriptChannel::EXECUTE_NORMAL);
+     }
+ 
+     if (aIsNewWindowTarget) {
+         nsCOMPtr<nsIWritablePropertyBag2> props = do_QueryInterface(channel);
+         if (props) {
+             props->SetPropertyAsBool(
+                 NS_LITERAL_STRING("docshell.newWindowTarget"),
+                 PR_TRUE);
+         }
+     }
+ 
+     rv = DoChannelLoad(channel, uriLoader, aBypassClassifier);
+-    
++
+     //
+     // If the channel load failed, we failed and nsIWebProgress just ain't
+     // gonna happen.
+     //
+     if (NS_SUCCEEDED(rv)) {
+         if (aDocShell) {
+           *aDocShell = this;
+           NS_ADDREF(*aDocShell);
+         }
+@@ -9302,18 +9378,33 @@ nsDocShell::URIInheritsSecurityContext(n
+     // Note: about:blank URIs do NOT inherit the security context from the
+     // current document, which is what this function tests for...
+     return NS_URIChainHasFlags(aURI,
+                                nsIProtocolHandler::URI_INHERITS_SECURITY_CONTEXT,
+                                aResult);
+ }
+ 
+ /* static */
+ PRBool
++nsDocShell::URIIsLocalFile(nsIURI *aURI)
++{
++    nsresult rv;
++    PRBool isFile;
++    nsCOMPtr<nsINetUtil> util = do_GetIOService(&rv);
++
++    return NS_SUCCEEDED(rv) &&
++           NS_SUCCEEDED(util->ProtocolHasFlags(aURI,
++                                nsIProtocolHandler::URI_IS_LOCAL_FILE,
++                                &isFile)) &&
++           isFile;
++}
++
++/* static */
++PRBool
+ nsDocShell::IsAboutBlank(nsIURI* aURI)
+ {
+     NS_PRECONDITION(aURI, "Must have URI");
+     
+     // GetSpec can be expensive for some URIs, so check the scheme first.
+     PRBool isAbout = PR_FALSE;
+     if (NS_FAILED(aURI->SchemeIs("about", &isAbout)) || !isAbout) {
+         return PR_FALSE;
+     }
+Index: docshell/base/nsDocShell.h
+===================================================================
+RCS file: /cvsroot/mozilla/docshell/base/nsDocShell.h,v
+retrieving revision 1.221
+diff -p -u -9 -r1.221 nsDocShell.h
+--- docshell/base/nsDocShell.h	12 Mar 2008 21:52:48 -0000	1.221
++++ docshell/base/nsDocShell.h	20 Mar 2008 00:26:37 -0000
+@@ -508,18 +508,21 @@ protected:
+     nsresult BeginRestoreChildren();
+ 
+     // Method to get our current position and size without flushing
+     void DoGetPositionAndSize(PRInt32 * x, PRInt32 * y, PRInt32 * cx,
+                               PRInt32 * cy);
+     
+     // Check whether aURI should inherit our security context
+     static nsresult URIInheritsSecurityContext(nsIURI* aURI, PRBool* aResult);
+ 
++    // Check whether aURI is a URI_IS_LOCAL_FILE or not
++    static PRBool URIIsLocalFile(nsIURI *aURI);
++
+     // Check whether aURI is about:blank
+     static PRBool IsAboutBlank(nsIURI* aURI);
+ 
+     // Call this when a URI load is handed to us (via OnLinkClick or
+     // InternalLoad).  This makes sure that we're not inside unload, or that if
+     // we are it's still OK to load this URI.
+     PRBool IsOKToLoadURI(nsIURI* aURI);
+     
+ protected:
+@@ -542,18 +545,19 @@ protected:
+     PRPackedBool               mAllowMetaRedirects;
+     PRPackedBool               mAllowImages;
+     PRPackedBool               mFocusDocFirst;
+     PRPackedBool               mHasFocus;
+     PRPackedBool               mCreatingDocument; // (should be) debugging only
+     PRPackedBool               mUseErrorPages;
+     PRPackedBool               mObserveErrorPages;
+     PRPackedBool               mAllowAuth;
+     PRPackedBool               mAllowKeywordFixup;
++    PRPackedBool               mStrictFilePolicy;
+ 
+     // This boolean is set to true right before we fire pagehide and generally
+     // unset when we embed a new content viewer.  While it's true no navigation
+     // is allowed in this docshell.
+     PRPackedBool               mFiredUnloadEvent;
+ 
+     // this flag is for bug #21358. a docshell may load many urls
+     // which don't result in new documents being created (i.e. a new
+     // content viewer) we want to make sure we don't call a on load
+Index: caps/include/nsScriptSecurityManager.h
+===================================================================
+RCS file: /cvsroot/mozilla/caps/include/nsScriptSecurityManager.h,v
+retrieving revision 1.112
+diff -p -u -9 -r1.112 nsScriptSecurityManager.h
+--- caps/include/nsScriptSecurityManager.h	18 Mar 2008 21:14:50 -0000	1.112
++++ caps/include/nsScriptSecurityManager.h	20 Mar 2008 00:26:39 -0000
+@@ -540,22 +540,18 @@ private:
+     nsresult
+     InitDomainPolicy(JSContext* cx, const char* aPolicyName,
+                      DomainPolicy* aDomainPolicy);
+ 
+     nsresult
+     InitPrincipals(PRUint32 prefCount, const char** prefNames,
+                    nsISecurityPref* securityPref);
+ 
+ 
+-    /* encapsulate the file comparison rules */
+-    static PRBool SecurityCompareFileURIs(nsIURI* aSourceURI,
+-                                          nsIURI* aTargetURI);
+-
+ #ifdef XPC_IDISPATCH_SUPPORT
+     // While this header is included outside of caps, this class isn't 
+     // referenced so this should be fine.
+     nsresult
+     CheckComponentPermissions(JSContext *cx, const nsCID &aCID);
+ #endif
+ #ifdef DEBUG_CAPS_HACKER
+     void
+     PrintPolicyDB();
+@@ -584,30 +580,18 @@ private:
+     PRPackedBool mIsJavaScriptEnabled;
+     PRPackedBool mIsMailJavaScriptEnabled;
+     PRPackedBool mIsWritingPrefs;
+     PRPackedBool mPolicyPrefsChanged;
+ #ifdef XPC_IDISPATCH_SUPPORT    
+     PRPackedBool mXPCDefaultGrantAll;
+     static const char sXPCDefaultGrantAllName[];
+ #endif
+ 
+-    static PRInt32 sFileURIOriginPolicy;
++    static PRBool sStrictFileOriginPolicy;
+ 
+     static nsIIOService    *sIOService;
+     static nsIXPConnect    *sXPConnect;
+     static nsIStringBundle *sStrBundle;
+     static JSRuntime       *sRuntime;
+ };
+ 
+-// Levels for file: URI same-origin policy:
+-//   self:        same-origin only with itself
+-//   samedir:     same-origin with files having the same path
+-//   subdir:      same-origin with files having longer paths (asymetric)
+-//   anyfile:     same-origin with any other file: URI (but not directories)
+-//   traditional: any local file, any directory
+-#define FILEURI_SOP_SELF        0
+-#define FILEURI_SOP_SAMEDIR     1
+-#define FILEURI_SOP_SUBDIR      2
+-#define FILEURI_SOP_ANYFILE     3
+-#define FILEURI_SOP_TRADITIONAL 4
+-
+ #endif // nsScriptSecurityManager_h__
+Index: caps/src/nsScriptSecurityManager.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/caps/src/nsScriptSecurityManager.cpp,v
+retrieving revision 1.350
+diff -p -u -9 -r1.350 nsScriptSecurityManager.cpp
+--- caps/src/nsScriptSecurityManager.cpp	19 Mar 2008 00:27:57 -0000	1.350
++++ caps/src/nsScriptSecurityManager.cpp	20 Mar 2008 00:26:43 -0000
+@@ -19,18 +19,19 @@
+  * Portions created by the Initial Developer are Copyright (C) 1998-2000
+  * the Initial Developer. All Rights Reserved.
+  *
+  * Contributor(s):
+  *   Norris Boyd
+  *   Mitch Stoltz
+  *   Steve Morse
+  *   Christopher A. Aillon
+  *   Giorgio Maone
++ *   Daniel Veditz
+  *
+  * Alternatively, the contents of this file may be used under the terms of
+  * either of the GNU General Public License Version 2 or later (the "GPL"),
+  * or the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
+  * in which case the provisions of the GPL or the LGPL are applicable instead
+  * of those above. If you wish to allow use of your version of this file only
+  * under the terms of either the GPL or the LGPL, and not to allow others to
+  * use your version of this file under the terms of the MPL, indicate your
+  * decision by deleting the provisions above and replace them with the notice
+@@ -92,19 +93,19 @@
+ #include "nsIURIFixup.h"
+ #include "nsCDefaultURIFixup.h"
+ 
+ static NS_DEFINE_CID(kZipReaderCID, NS_ZIPREADER_CID);
+ 
+ nsIIOService    *nsScriptSecurityManager::sIOService = nsnull;
+ nsIXPConnect    *nsScriptSecurityManager::sXPConnect = nsnull;
+ nsIStringBundle *nsScriptSecurityManager::sStrBundle = nsnull;
+ JSRuntime       *nsScriptSecurityManager::sRuntime   = 0;
+-PRInt32 nsScriptSecurityManager::sFileURIOriginPolicy = FILEURI_SOP_SELF;
++PRBool nsScriptSecurityManager::sStrictFileOriginPolicy = PR_TRUE;
+ 
+ // Info we need about the JSClasses used by XPConnects wrapped
+ // natives, to avoid having to QI to nsIXPConnectWrappedNative all the
+ // time when doing security checks.
+ static const JSClass *sXPCWrappedNativeJSClass;
+ static JSGetObjectOps sXPCWrappedNativeGetObjOps1;
+ static JSGetObjectOps sXPCWrappedNativeGetObjOps2;
+ 
+ 
+@@ -312,19 +313,28 @@ nsScriptSecurityManager::SecurityCompare
+         NS_FAILED( sourceBaseURI->SchemeIs(targetScheme.get(), &sameScheme) ) ||
+         !sameScheme)
+     {
+         // Not same-origin if schemes differ
+         return PR_FALSE;
+     }
+ 
+     // special handling for file: URIs
+     if (targetScheme.EqualsLiteral("file"))
+-        return SecurityCompareFileURIs( sourceBaseURI, targetBaseURI );
++    {
++        // in traditional unsafe behavior all files are the same origin
++        if (!sStrictFileOriginPolicy)
++            return PR_TRUE;
++
++         // Otherwise they had better match
++         PRBool filesAreEqual = PR_FALSE;
++         nsresult rv = sourceBaseURI->Equals(aTargetURI, &filesAreEqual);
++         return NS_SUCCEEDED(rv) && filesAreEqual;
++    }
+ 
+     // Special handling for mailnews schemes
+     if (targetScheme.EqualsLiteral("imap") ||
+         targetScheme.EqualsLiteral("mailbox") ||
+         targetScheme.EqualsLiteral("news"))
+     {
+         // Each message is a distinct trust domain; use the 
+         // whole spec for comparison
+         nsCAutoString targetSpec;
+@@ -368,95 +378,18 @@ nsScriptSecurityManager::SecurityCompare
+             sourcePort = defaultPort;
+         else if (targetPort == -1)
+             targetPort = defaultPort;
+         result = targetPort == sourcePort;
+     }
+ 
+     return result;
+ }
+ 
+-// helper function for SecurityCompareURIs
+-PRBool
+-nsScriptSecurityManager::SecurityCompareFileURIs(nsIURI* aSourceURI,
+-                                                 nsIURI* aTargetURI)
+-{
+-    // in traditional unsafe behavior all files are the same origin
+-    if (sFileURIOriginPolicy == FILEURI_SOP_TRADITIONAL)
+-        return PR_TRUE;
+-
+-
+-    // Check simplest and default FILEURI_SOP_SELF case first:
+-    // If they're equal or if the policy says they must be, we're done
+-    PRBool filesAreEqual = PR_FALSE;
+-    if (NS_FAILED( aSourceURI->Equals(aTargetURI, &filesAreEqual) ))
+-        return PR_FALSE;
+-    if (filesAreEqual || sFileURIOriginPolicy == FILEURI_SOP_SELF)
+-        return filesAreEqual;
+-
+-
+-    // disallow access to directory listings (bug 209234)
+-    PRBool targetIsDir = PR_TRUE;
+-    nsCOMPtr<nsIFile> targetFile;
+-    nsCOMPtr<nsIFileURL> targetFileURL( do_QueryInterface(aTargetURI) );
+-
+-    if (!targetFileURL ||
+-        NS_FAILED( targetFileURL->GetFile(getter_AddRefs(targetFile)) ) ||
+-        NS_FAILED( targetFile->IsDirectory(&targetIsDir) ) ||
+-        targetIsDir)
+-    {
+-        return PR_FALSE;
+-    }
+-
+-
+-    // For policy ANYFILE we're done
+-    if (sFileURIOriginPolicy == FILEURI_SOP_ANYFILE)
+-        return PR_TRUE;
+-
+-
+-    // source parent directory is needed for remaining policies
+-    nsCOMPtr<nsIFile> sourceFile;
+-    nsCOMPtr<nsIFile> sourceParent;
+-    nsCOMPtr<nsIFileURL> sourceFileURL( do_QueryInterface(aSourceURI) );
+-
+-    if (!sourceFileURL ||
+-        NS_FAILED( sourceFileURL->GetFile(getter_AddRefs(sourceFile)) ) ||
+-        NS_FAILED( sourceFile->GetParent(getter_AddRefs(sourceParent)) ) ||
+-        !sourceParent)
+-    {
+-        // unexpected error
+-        return PR_FALSE;
+-    }
+-
+-    // check remaining policies
+-    if (sFileURIOriginPolicy == FILEURI_SOP_SAMEDIR)
+-    {
+-        // file: URIs in the same directory have the same origin
+-        PRBool sameParent = PR_FALSE;
+-        nsCOMPtr<nsIFile> targetParent;
+-        if (NS_FAILED( targetFile->GetParent(getter_AddRefs(targetParent)) ) ||
+-            NS_FAILED( sourceParent->Equals(targetParent, &sameParent) ))
+-            return PR_FALSE;
+-        return sameParent;
+-    }
+-
+-    if (sFileURIOriginPolicy == FILEURI_SOP_SUBDIR)
+-    {
+-        // file: URIs can access files in the same or lower directories
+-        PRBool isChild = PR_FALSE;
+-        if (NS_FAILED( sourceParent->Contains(targetFile, PR_TRUE, &isChild) ))
+-            return PR_FALSE;
+-        return isChild;
+-    }
+-
+-    NS_NOTREACHED("invalid file uri policy setting");
+-    return PR_FALSE;
+-}
+-
+ NS_IMETHODIMP
+ nsScriptSecurityManager::GetChannelPrincipal(nsIChannel* aChannel,
+                                              nsIPrincipal** aPrincipal)
+ {
+     NS_PRECONDITION(aChannel, "Must have channel!");
+     nsCOMPtr<nsISupports> owner;
+     aChannel->GetOwner(getter_AddRefs(owner));
+     if (owner) {
+         CallQueryInterface(owner, aPrincipal);
+@@ -3891,39 +3824,38 @@ nsScriptSecurityManager::InitPrincipals(
+     }
+     return NS_OK;
+ }
+ 
+ const char nsScriptSecurityManager::sJSEnabledPrefName[] =
+     "javascript.enabled";
+ const char nsScriptSecurityManager::sJSMailEnabledPrefName[] =
+     "javascript.allow.mailnews";
+ const char nsScriptSecurityManager::sFileOriginPolicyPrefName[] =
+-    "security.fileuri.origin_policy";
++    "security.fileuri.strict_origin_policy";
+ #ifdef XPC_IDISPATCH_SUPPORT
+ const char nsScriptSecurityManager::sXPCDefaultGrantAllName[] =
+     "security.classID.allowByDefault";
+ #endif
+ 
+ inline void
+ nsScriptSecurityManager::ScriptSecurityPrefChanged()
+ {
+     PRBool temp;
+     nsresult rv = mSecurityPref->SecurityGetBoolPref(sJSEnabledPrefName, &temp);
+     // JavaScript defaults to enabled in failure cases.
+     mIsJavaScriptEnabled = NS_FAILED(rv) || temp;
+ 
+     rv = mSecurityPref->SecurityGetBoolPref(sJSMailEnabledPrefName, &temp);
+     // JavaScript in Mail defaults to disabled in failure cases.
+     mIsMailJavaScriptEnabled = NS_SUCCEEDED(rv) && temp;
+ 
+-    PRInt32 policy;
+-    rv = mSecurityPref->SecurityGetIntPref(sFileOriginPolicyPrefName, &policy);
+-    sFileURIOriginPolicy = NS_SUCCEEDED(rv) ? policy : FILEURI_SOP_SELF;
++    rv = mSecurityPref->SecurityGetBoolPref(sFileOriginPolicyPrefName, &temp);
++    sStrictFileOriginPolicy = NS_SUCCEEDED(rv) && temp;
+ 
+ #ifdef XPC_IDISPATCH_SUPPORT
+     rv = mSecurityPref->SecurityGetBoolPref(sXPCDefaultGrantAllName, &temp);
+     // Granting XPC Priveleges defaults to disabled in failure cases.
+     mXPCDefaultGrantAll = NS_SUCCEEDED(rv) && temp;
+ #endif
+ }
+ 
+ nsresult

@@ -1,0 +1,70 @@
+Index: mozilla/security/manager/ssl/src/nsNSSComponent.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSComponent.cpp,v
+retrieving revision 1.163
+diff -u -u -8 -p -r1.163 nsNSSComponent.cpp
+--- mozilla/security/manager/ssl/src/nsNSSComponent.cpp	26 Mar 2008 03:06:56 -0000	1.163
++++ mozilla/security/manager/ssl/src/nsNSSComponent.cpp	4 Apr 2008 22:22:26 -0000
+@@ -2257,16 +2257,17 @@ nsNSSComponent::GetErrorClass(nsresult a
+ 
+   switch (aNSPRCode)
+   {
+     case SEC_ERROR_UNKNOWN_ISSUER:
+     case SEC_ERROR_CA_CERT_INVALID:
+     case SEC_ERROR_UNTRUSTED_ISSUER:
+     case SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE:
+     case SEC_ERROR_UNTRUSTED_CERT:
++    case SEC_ERROR_INADEQUATE_KEY_USAGE:
+     case SSL_ERROR_BAD_CERT_DOMAIN:
+     case SEC_ERROR_EXPIRED_CERTIFICATE:
+       *aErrorClass = ERROR_CLASS_BAD_CERT;
+       break;
+     default:
+       *aErrorClass = ERROR_CLASS_SSL_PROTOCOL;
+       break;
+   }
+Index: mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp,v
+retrieving revision 1.156
+diff -u -u -8 -p -r1.156 nsNSSIOLayer.cpp
+--- mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp	26 Mar 2008 03:06:56 -0000	1.156
++++ mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp	4 Apr 2008 22:22:26 -0000
+@@ -770,16 +770,19 @@ AppendErrorTextUntrusted(PRErrorCode err
+     }
+   }
+ 
+   if (!errorID) {
+     switch (errTrust) {
+       case SEC_ERROR_UNKNOWN_ISSUER:
+         errorID = "certErrorTrust_UnknownIssuer";
+         break;
++      case SEC_ERROR_INADEQUATE_KEY_USAGE:
++        // Should get an individual string in the future
++        // For now, use the same as CaInvalid
+       case SEC_ERROR_CA_CERT_INVALID:
+         errorID = "certErrorTrust_CaInvalid";
+         break;
+       case SEC_ERROR_UNTRUSTED_ISSUER:
+         errorID = "certErrorTrust_Issuer";
+         break;
+       case SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE:
+         errorID = "certErrorTrust_ExpiredIssuer";
+@@ -2816,16 +2819,17 @@ nsNSSBadCertHandler(void *arg, PRFileDes
+     {
+       switch (i_node->error)
+       {
+         case SEC_ERROR_UNKNOWN_ISSUER:
+         case SEC_ERROR_CA_CERT_INVALID:
+         case SEC_ERROR_UNTRUSTED_ISSUER:
+         case SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE:
+         case SEC_ERROR_UNTRUSTED_CERT:
++        case SEC_ERROR_INADEQUATE_KEY_USAGE:
+           // We group all these errors as "cert not trusted"
+           collected_errors |= nsICertOverrideService::ERROR_UNTRUSTED;
+           if (errorCodeTrust == SECSuccess) {
+             errorCodeTrust = i_node->error;
+           }
+           break;
+         case SSL_ERROR_BAD_CERT_DOMAIN:
+           collected_errors |= nsICertOverrideService::ERROR_MISMATCH;

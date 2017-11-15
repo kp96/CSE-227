@@ -1,0 +1,23 @@
+Index: bnet.c
+===================================================================
+RCS file: /cvsroot/mozilla/nsprpub/pr/src/md/beos/bnet.c,v
+retrieving revision 3.5.4.7
+diff -u -w -p -r3.5.4.7 bnet.c
+--- bnet.c	18 Jul 2002 06:38:56 -0000	3.5.4.7
++++ bnet.c	5 Jan 2004 15:31:57 -0000
+@@ -744,6 +744,15 @@ _MD_getpeername (PRFileDesc *fd, PRNetAd
+     rv = getpeername(fd->secret->md.osfd,
+                      (struct sockaddr *) addr, (_PRSockLen_t *)addrlen);
+ 
++#ifdef _PR_HAVE_SOCKADDR_LEN
++    if (rv == 0) {
++        /* ignore the sa_len field of struct sockaddr */
++        if (addr) {
++            addr->raw.family = ((struct sockaddr *) addr)->sa_family;
++        }
++    }
++#endif /* _PR_HAVE_SOCKADDR_LEN */
++
+     if (rv < 0) {
+         err = _MD_ERRNO();
+         _PR_MD_MAP_GETPEERNAME_ERROR(err);

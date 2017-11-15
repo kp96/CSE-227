@@ -1,0 +1,334 @@
+# HG changeset patch
+# User Johann Hofmann <jhofmann@mozilla.com>
+# Date 1460465582 -7200
+#      Tue Apr 12 14:53:02 2016 +0200
+# Node ID 498cb9644614a5a19f65ce0bd0716ffa7b74e55e
+# Parent  ab8a76ac7b34db20dd3c220c9846826334f3efdc
+Bug 712612: Display a warning on about:certerror if the system time is wrong. r=Gijs
+
+diff --git a/browser/base/content/aboutNetError.xhtml b/browser/base/content/aboutNetError.xhtml
+--- a/browser/base/content/aboutNetError.xhtml
++++ b/browser/base/content/aboutNetError.xhtml
+@@ -536,16 +536,20 @@
+       <div id="errorLongContent">
+ 
+         <!-- Short Description -->
+         <div id="errorShortDesc">
+           <p id="errorShortDescText" />
+         </div>
+         <p id="badStsCertExplanation" hidden="true">&certerror.whatShouldIDo.badStsCertExplanation;</p>
+ 
++        <div id="wrongSystemTimePanel" style="display: none;">
++          &certerror.wrongSystemTime;
++        </div>
++
+         <!-- Long Description (Note: See netError.dtd for used XHTML tags) -->
+         <div id="errorLongDesc" />
+ 
+         <div id="learnMoreContainer">
+           <p><a href="https://support.mozilla.org/kb/what-does-your-connection-is-not-secure-mean" id="learnMoreLink" target="new">&errorReporting.learnMore;</a></p>
+         </div>
+ 
+         <div id="certErrorButtonContainer" class="button-container">
+diff --git a/browser/base/content/content.js b/browser/base/content/content.js
+--- a/browser/base/content/content.js
++++ b/browser/base/content/content.js
+@@ -216,19 +216,27 @@ Cc["@mozilla.org/eventlistenerservice;1"
+   .addSystemEventListener(global, "contextmenu", handleContentContextMenu, false);
+ 
+ // Values for telemtery bins: see TLS_ERROR_REPORT_UI in Histograms.json
+ const TLS_ERROR_REPORT_TELEMETRY_UI_SHOWN = 0;
+ const TLS_ERROR_REPORT_TELEMETRY_EXPANDED = 1;
+ const TLS_ERROR_REPORT_TELEMETRY_SUCCESS  = 6;
+ const TLS_ERROR_REPORT_TELEMETRY_FAILURE  = 7;
+ 
+-const SEC_ERROR_BASE = Ci.nsINSSErrorsService.NSS_SEC_ERROR_BASE;
++const SEC_ERROR_BASE          = Ci.nsINSSErrorsService.NSS_SEC_ERROR_BASE;
++const MOZILLA_PKIX_ERROR_BASE = Ci.nsINSSErrorsService.MOZILLA_PKIX_ERROR_BASE;
+ 
+-const SEC_ERROR_UNKNOWN_ISSUER = SEC_ERROR_BASE + 13;
++const SEC_ERROR_EXPIRED_CERTIFICATE                = SEC_ERROR_BASE + 11;
++const SEC_ERROR_UNKNOWN_ISSUER                     = SEC_ERROR_BASE + 13;
++const SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE         = SEC_ERROR_BASE + 30;
++const SEC_ERROR_OCSP_FUTURE_RESPONSE               = SEC_ERROR_BASE + 131;
++const SEC_ERROR_OCSP_OLD_RESPONSE                  = SEC_ERROR_BASE + 132;
++const MOZILLA_PKIX_ERROR_NOT_YET_VALID_CERTIFICATE = MOZILLA_PKIX_ERROR_BASE + 5;
++
++const PREF_KINTO_CLOCK_SKEW_SECONDS = "services.kinto.clock_skew_seconds";
+ 
+ var AboutNetAndCertErrorListener = {
+   init: function(chromeGlobal) {
+     addMessageListener("CertErrorDetails", this);
+     chromeGlobal.addEventListener('AboutNetErrorLoad', this, false, true);
+     chromeGlobal.addEventListener('AboutNetErrorSetAutomatic', this, false, true);
+     chromeGlobal.addEventListener('AboutNetErrorOverride', this, false, true);
+   },
+@@ -257,16 +265,51 @@ var AboutNetAndCertErrorListener = {
+     let div = content.document.getElementById("certificateErrorText");
+     div.textContent = msg.data.info;
+ 
+     switch (msg.data.code) {
+       case SEC_ERROR_UNKNOWN_ISSUER:
+         let learnMoreLink = content.document.getElementById("learnMoreLink");
+         learnMoreLink.href = "https://support.mozilla.org/kb/troubleshoot-SEC_ERROR_UNKNOWN_ISSUER";
+         break;
++
++      // in case the certificate expired we make sure the system clock
++      // matches kinto server time
++      case SEC_ERROR_EXPIRED_CERTIFICATE:
++      case SEC_ERROR_EXPIRED_ISSUER_CERTIFICATE:
++      case SEC_ERROR_OCSP_FUTURE_RESPONSE:
++      case SEC_ERROR_OCSP_OLD_RESPONSE:
++      case MOZILLA_PKIX_ERROR_NOT_YET_VALID_CERTIFICATE:
++
++        // use Kinto stats if available
++        if (Services.prefs.getPrefType(PREF_KINTO_CLOCK_SKEW_SECONDS)) {
++          let difference = Services.prefs.getIntPref(PREF_KINTO_CLOCK_SKEW_SECONDS);
++
++          // if the difference is more than a day
++          if (Math.abs(difference) > 60 * 60 * 24) {
++            let formatter = new Intl.DateTimeFormat();
++            let systemDate = formatter.format(new Date());
++            // negative difference means local time is behind server time
++            let actualDate = formatter.format(new Date(Date.now() - difference * 1000));
++
++            content.document.getElementById("wrongSystemTime_URL")
++              .textContent = content.document.location.hostname;
++            content.document.getElementById("wrongSystemTime_systemDate")
++              .textContent = systemDate;
++            content.document.getElementById("wrongSystemTime_actualDate")
++              .textContent = actualDate;
++
++            content.document.getElementById("errorShortDesc")
++              .style.display = "none";
++            content.document.getElementById("wrongSystemTimePanel")
++              .style.display = "block";
++          }
++        }
++
++        break;
+     }
+   },
+ 
+   handleEvent: function(aEvent) {
+     if (!this.isAboutNetError && !this.isAboutCertError) {
+       return;
+     }
+ 
+diff --git a/browser/base/content/test/general/browser_aboutCertError.js b/browser/base/content/test/general/browser_aboutCertError.js
+--- a/browser/base/content/test/general/browser_aboutCertError.js
++++ b/browser/base/content/test/general/browser_aboutCertError.js
+@@ -100,16 +100,115 @@ add_task(function* checkBadStsCert() {
+     let exceptionButton = doc.getElementById("exceptionDialogButton");
+     return exceptionButton.hidden;
+   });
+   ok(exceptionButtonHidden, "Exception button is hidden");
+ 
+   yield BrowserTestUtils.removeTab(gBrowser.selectedTab);
+ });
+ 
++const PREF_KINTO_CLOCK_SKEW_SECONDS = "services.kinto.clock_skew_seconds";
++
++add_task(function* checkWrongSystemTimeWarning() {
++  function* setUpPage() {
++    let browser;
++    let certErrorLoaded;
++    let tab = yield BrowserTestUtils.openNewForegroundTab(gBrowser, () => {
++      gBrowser.selectedTab = gBrowser.addTab(BAD_CERT);
++      browser = gBrowser.selectedBrowser;
++      certErrorLoaded = waitForCertErrorLoad(browser);
++    }, false);
++
++    info("Loading and waiting for the cert error");
++    yield certErrorLoaded;
++
++    return yield ContentTask.spawn(browser, null, function* () {
++      let doc = content.document;
++      let div = doc.getElementById("wrongSystemTimePanel");
++      let systemDateDiv = doc.getElementById("wrongSystemTime_systemDate");
++      let actualDateDiv = doc.getElementById("wrongSystemTime_actualDate");
++
++      return {
++        divDisplay: content.getComputedStyle(div).display,
++        text: div.textContent,
++        systemDate: systemDateDiv.textContent,
++        actualDate: actualDateDiv.textContent
++      };
++    });
++  }
++
++  let formatter = new Intl.DateTimeFormat();
++
++  // pretend we have a positively skewed (ahead) system time
++  let serverDate = new Date("2015/10/27");
++  let serverDateFmt = formatter.format(serverDate);
++  let localDateFmt = formatter.format(new Date());
++
++  let skew = Math.floor((Date.now() - serverDate.getTime()) / 1000);
++  yield new Promise(r => SpecialPowers.pushPrefEnv({set:
++    [[PREF_KINTO_CLOCK_SKEW_SECONDS, skew]]}, r));
++
++  info("Loading a bad cert page with a skewed clock");
++  let message = yield Task.spawn(setUpPage);
++
++  isnot(message.divDisplay, "none", "Wrong time message information is visible");
++  ok(message.text.includes("because your clock appears to show the wrong time"),
++     "Correct error message found");
++  ok(message.text.includes("expired.example.com"), "URL found in error message");
++  ok(message.systemDate.includes(localDateFmt), "correct local date displayed");
++  ok(message.actualDate.includes(serverDateFmt), "correct server date displayed");
++
++  yield BrowserTestUtils.removeTab(gBrowser.selectedTab);
++
++  // pretend we have a negatively skewed (behind) system time
++  serverDate = new Date();
++  serverDate.setYear(serverDate.getFullYear() + 1);
++  serverDateFmt = formatter.format(serverDate);
++
++  skew = Math.floor((Date.now() - serverDate.getTime()) / 1000);
++  yield new Promise(r => SpecialPowers.pushPrefEnv({set:
++    [[PREF_KINTO_CLOCK_SKEW_SECONDS, skew]]}, r));
++
++  info("Loading a bad cert page with a skewed clock");
++  message = yield Task.spawn(setUpPage);
++
++  isnot(message.divDisplay, "none", "Wrong time message information is visible");
++  ok(message.text.includes("because your clock appears to show the wrong time"),
++     "Correct error message found");
++  ok(message.text.includes("expired.example.com"), "URL found in error message");
++  ok(message.systemDate.includes(localDateFmt), "correct local date displayed");
++  ok(message.actualDate.includes(serverDateFmt), "correct server date displayed");
++
++  yield BrowserTestUtils.removeTab(gBrowser.selectedTab);
++
++  // pretend we only have a slightly skewed system time, four hours
++  skew = 60 * 60 * 4;
++  yield new Promise(r => SpecialPowers.pushPrefEnv({set:
++    [[PREF_KINTO_CLOCK_SKEW_SECONDS, skew]]}, r));
++
++  info("Loading a bad cert page with an only slightly skewed clock");
++  message = yield Task.spawn(setUpPage);
++
++  is(message.divDisplay, "none", "Wrong time message information is not visible");
++
++  yield BrowserTestUtils.removeTab(gBrowser.selectedTab);
++
++  // now pretend we have no skewed system time
++  skew = 0;
++  yield new Promise(r => SpecialPowers.pushPrefEnv({set:
++    [[PREF_KINTO_CLOCK_SKEW_SECONDS, skew]]}, r));
++
++  info("Loading a bad cert page with no skewed clock");
++  message = yield Task.spawn(setUpPage);
++
++  is(message.divDisplay, "none", "Wrong time message information is not visible");
++
++  yield BrowserTestUtils.removeTab(gBrowser.selectedTab);
++});
++
+ add_task(function* checkAdvancedDetails() {
+   info("Loading a bad cert page and verifying the advanced details section");
+   let browser;
+   let certErrorLoaded;
+   let tab = yield BrowserTestUtils.openNewForegroundTab(gBrowser, () => {
+     gBrowser.selectedTab = gBrowser.addTab(BAD_CERT);
+     browser = gBrowser.selectedBrowser;
+     certErrorLoaded = waitForCertErrorLoad(browser);
+@@ -141,22 +240,22 @@ add_task(function* checkAdvancedDetails(
+                           .QueryInterface(Ci.nsIDocShell);
+     let serhelper = Cc["@mozilla.org/network/serialization-helper;1"]
+                      .getService(Ci.nsISerializationHelper);
+     let serializable =  docShell.failedChannel.securityInfo
+                                 .QueryInterface(Ci.nsITransportSecurityInfo)
+                                 .QueryInterface(Ci.nsISerializable);
+     let serializedSecurityInfo = serhelper.serializeToString(serializable);
+     return {
+-      divDisplay: div.style.display,
++      divDisplay: content.getComputedStyle(div).display,
+       text: text.textContent,
+       securityInfoAsString: serializedSecurityInfo
+     };
+   });
+-  is(message.divDisplay, "block", "Debug information is visible");
++  isnot(message.divDisplay, "none", "Debug information is visible");
+   ok(message.text.includes(BAD_CERT), "Correct URL found");
+   ok(message.text.includes("Certificate has expired"),
+      "Correct error message found");
+   ok(message.text.includes("HTTP Strict Transport Security: false"),
+      "Correct HSTS value found");
+   ok(message.text.includes("HTTP Public Key Pinning: false"),
+      "Correct HPKP value found");
+   let certChain = getCertChain(message.securityInfoAsString);
+@@ -213,22 +312,22 @@ add_task(function* checkAdvancedDetailsF
+                           .QueryInterface(Ci.nsIDocShell);
+     let serhelper = Cc["@mozilla.org/network/serialization-helper;1"]
+                      .getService(Ci.nsISerializationHelper);
+     let serializable =  docShell.failedChannel.securityInfo
+                                 .QueryInterface(Ci.nsITransportSecurityInfo)
+                                 .QueryInterface(Ci.nsISerializable);
+     let serializedSecurityInfo = serhelper.serializeToString(serializable);
+     return {
+-      divDisplay: div.style.display,
++      divDisplay: content.getComputedStyle(div).display,
+       text: text.textContent,
+       securityInfoAsString: serializedSecurityInfo
+     };
+   });
+-  is(message.divDisplay, "block", "Debug information is visible");
++  isnot(message.divDisplay, "none", "Debug information is visible");
+   ok(message.text.includes(badStsUri.spec), "Correct URL found");
+   ok(message.text.includes("requested domain name does not match the server's certificate"),
+      "Correct error message found");
+   ok(message.text.includes("HTTP Strict Transport Security: false"),
+      "Correct HSTS value found");
+   ok(message.text.includes("HTTP Public Key Pinning: true"),
+      "Correct HPKP value found");
+   let certChain = getCertChain(message.securityInfoAsString);
+diff --git a/browser/base/content/test/general/browser_misused_characters_in_strings.js b/browser/base/content/test/general/browser_misused_characters_in_strings.js
+--- a/browser/base/content/test/general/browser_misused_characters_in_strings.js
++++ b/browser/base/content/test/general/browser_misused_characters_in_strings.js
+@@ -24,16 +24,20 @@ let gWhitelist = [{
+     file: "netError.dtd",
+     key: "weakCryptoAdvanced.longDesc",
+     type: "single-quote"
+   }, {
+     file: "netError.dtd",
+     key: "weakCryptoAdvanced.override",
+     type: "single-quote"
+   }, {
++    file: "netError.dtd",
++    key: "certerror.wrongSystemTime",
++    type: "single-quote"
++  }, {
+     file: "phishing-afterload-warning-message.dtd",
+     key: "safeb.blocked.malwarePage.shortDesc",
+     type: "single-quote"
+   }, {
+     file: "phishing-afterload-warning-message.dtd",
+     key: "safeb.blocked.unwantedPage.shortDesc",
+     type: "single-quote"
+   }, {
+diff --git a/browser/locales/en-US/chrome/overrides/netError.dtd b/browser/locales/en-US/chrome/overrides/netError.dtd
+--- a/browser/locales/en-US/chrome/overrides/netError.dtd
++++ b/browser/locales/en-US/chrome/overrides/netError.dtd
+@@ -185,14 +185,18 @@ was trying to connect. -->
+ <!ENTITY weakCryptoUsed.title "Your connection is not secure">
+ <!-- LOCALIZATION NOTE (weakCryptoUsed.longDesc2) - Do not translate
+      "SSL_ERROR_NO_CYPHER_OVERLAP". -->
+ <!ENTITY weakCryptoUsed.longDesc2 "Advanced info: SSL_ERROR_NO_CYPHER_OVERLAP">
+ <!ENTITY weakCryptoAdvanced.title "Advanced">
+ <!ENTITY weakCryptoAdvanced.longDesc "<span class='hostname'></span> uses security technology that is outdated and vulnerable to attack. An attacker could easily reveal information which you thought to be safe.">
+ <!ENTITY weakCryptoAdvanced.override "(Not secure) Try loading <span class='hostname'></span> using outdated security">
+ 
++<!-- LOCALIZATION NOTE (certerror.wrongSystemTime) - The <span id='..' /> tags will be injected with actual values,
++     please leave them unchanged. -->
++<!ENTITY certerror.wrongSystemTime "<p>A secure connection to <span id='wrongSystemTime_URL'/> isn’t possible because your clock appears to show the wrong time.</p> <p>Your computer thinks it is <span id='wrongSystemTime_systemDate'/>, when it should be <span id='wrongSystemTime_actualDate'/>. To fix this problem, change your date and time settings to match the correct time.</p>">
++
+ <!ENTITY certerror.pagetitle1  "Insecure Connection">
+ <!ENTITY certerror.whatShouldIDo.badStsCertExplanation "This site uses HTTP
+ Strict Transport Security (HSTS) to specify that &brandShortName; only connect
+ to it securely. As a result, it is not possible to add an exception for this
+ certificate.">
+-<!ENTITY certerror.copyToClipboard.label "Copy text to clipboard">
+\ No newline at end of file
++<!ENTITY certerror.copyToClipboard.label "Copy text to clipboard">

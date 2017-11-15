@@ -1,0 +1,135 @@
+Index: pk11auth.c
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/pk11wrap/pk11auth.c,v
+retrieving revision 1.3
+diff -u -r1.3 pk11auth.c
+--- pk11auth.c	3 Aug 2005 01:22:07 -0000	1.3
++++ pk11auth.c	29 Sep 2005 17:09:06 -0000
+@@ -80,7 +80,7 @@
+ SECStatus
+ pk11_CheckPassword(PK11SlotInfo *slot,char *pw)
+ {
+-    int len = PORT_Strlen(pw);
++    int len = 0;
+     CK_RV crv;
+     SECStatus rv;
+     int64 currtime = PR_Now();
+@@ -88,6 +88,11 @@
+     if (slot->protectedAuthPath) {
+ 	len = 0;
+ 	pw = NULL;
++    } else if (pw == NULL) {
++	PORT_SetError(SEC_ERROR_INVALID_ARGS);
++	return SECFailure;
++    } else {
++	len = PORT_Strlen(pw);
+     }
+ 
+     PK11_EnterSlotMonitor(slot);
+@@ -121,7 +126,7 @@
+ SECStatus
+ PK11_CheckUserPassword(PK11SlotInfo *slot,char *pw)
+ {
+-    int len = PORT_Strlen(pw);
++    int len = 0;
+     CK_RV crv;
+     SECStatus rv;
+     int64 currtime = PR_Now();
+@@ -129,6 +134,11 @@
+     if (slot->protectedAuthPath) {
+ 	len = 0;
+ 	pw = NULL;
++    } else if (pw == NULL) {
++	PORT_SetError(SEC_ERROR_INVALID_ARGS);
++	return SECFailure;
++    } else {
++	len = PORT_Strlen(pw);
+     }
+ 
+     /* force a logout */
+@@ -312,7 +322,7 @@
+     CK_SESSION_HANDLE rwsession;
+     CK_RV crv;
+     SECStatus rv = SECFailure;
+-    int len = PORT_Strlen(ssopw);
++    int len = 0;
+ 
+     /* get a rwsession */
+     rwsession = PK11_GetRWSession(slot);
+@@ -324,6 +334,11 @@
+     if (slot->protectedAuthPath) {
+ 	len = 0;
+ 	ssopw = NULL;
++    } else if (ssopw == NULL) {
++	PORT_SetError(SEC_ERROR_INVALID_ARGS);
++	return SECFailure;
++    } else {
++	len = PORT_Strlen(ssopw);
+     }
+ 
+     /* check the password */
+@@ -545,7 +560,33 @@
+      *	(3) the password was successful.
+      */
+     while ((password = pk11_GetPassword(slot, attempt, wincx)) != NULL) {
++	/* if the token has a protectedAuthPath, the application may have
++         * already issued the C_Login as part of it's pk11_GetPassword call.
++         * In this case the application will tell us what the results were in 
++         * the password value (retry or the authentication was successful) so
++	 * we can skip our own C_Login call (which would force the token to
++	 * try to login again).
++	 * 
++	 * Applications that don't know about protectedPinAuth will return a 
++	 * password, which we will ignore and trigger the token to 
++	 * 'authenticate' itself anyway. Hopefully the blinking display on 
++	 * the reader, or the flashing light under the thumbprint reader will 
++	 * attract the user's attention */
+ 	attempt = PR_TRUE;
++	if (slot->protectedAuthPath) {
++	    /* application tried to authenticate and failed. it wants to try
++	     * again, continue looping */
++	    if (strcmp(password, PK11_PW_RETRY) == 0) {
++		rv = SECWouldBlock;
++		PORT_Free(password);
++		break;
++	     /* applicaton tried to authenticate and succeeded we're done */
++	     } else if (strcmp(password, PK11_PW_AUTHENTICATED) == 0) {
++		rv = SECSuccess;
++		PORT_Free(password);
++		break;
++	     }
++	}
+ 	rv = pk11_CheckPassword(slot,password);
+ 	PORT_Memset(password, 0, PORT_Strlen(password));
+ 	PORT_Free(password);
+Index: secmodt.h
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/pk11wrap/secmodt.h,v
+retrieving revision 1.28
+diff -u -r1.28 secmodt.h
+--- secmodt.h	20 Sep 2005 20:56:07 -0000	1.28
++++ secmodt.h	29 Sep 2005 17:09:06 -0000
+@@ -389,6 +389,23 @@
+ typedef PRBool (PR_CALLBACK *PK11IsLoggedInFunc)(PK11SlotInfo *slot, void *arg);
+ 
+ /*
++ * Special strings the password callback function can return only if
++ * the slot is an protected pin path slot.
++ */ 
++#define PK11_PW_RETRY		"RETRY"	/* an failed attempt to authenticate
++					 * has already been made, just retry
++					 * the operation */
++#define PK11_PW_AUTHENTICATED	"AUTH"  /* a successful attempt to authenticate
++					 * has completed. Continue without
++					 * another call to C_Login */
++/* All other non-null values mean that that NSS could call C_Login to force
++ * the authentication. The following define is to add applications in 
++ * documenting that is what it's trying to do */
++#define PK11_PW_TRY		""      /* Default: a prompt has been presented
++					 * to the user, initiate a C_Login
++					 * to authenticate the token */
++
++/*
+  * PKCS #11 key structures
+  */
+ 

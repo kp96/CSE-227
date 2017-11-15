@@ -1,0 +1,27 @@
+Index: nsIScriptSecurityManager.idl
+===================================================================
+RCS file: /cvsroot/mozilla/caps/idl/nsIScriptSecurityManager.idl,v
+retrieving revision 1.60
+diff -u -r1.60 nsIScriptSecurityManager.idl
+--- nsIScriptSecurityManager.idl	21 Oct 2003 22:11:40 -0000	1.60
++++ nsIScriptSecurityManager.idl	7 Dec 2003 21:48:13 -0000
+@@ -204,7 +204,7 @@
+      * Returns true if the principal of the currently running script is the
+      * system principal, false otherwise.
+      */
+-    boolean subjectPrincipalIsSystem();
++    [noscript] boolean subjectPrincipalIsSystem();
+ 
+     /**
+      * Returns OK if aJSContext and target have the same "origin"
+@@ -217,8 +217,8 @@
+      * Returns OK if aSourceURI and target have the same "origin"
+      * (scheme, host, and port).
+      */
+-    [noscript] void checkSameOriginURI(in nsIURI aSourceURI,
+-                                       in nsIURI aTargetURI);
++    void checkSameOriginURI(in nsIURI aSourceURI,
++                            in nsIURI aTargetURI);
+ 
+     /**
+      * Returns OK if aSourcePrincipal and aTargetPrincipal

@@ -1,0 +1,50 @@
+# HG changeset patch
+# User timeless@mozdev.org
+# Date 1278853042 -10800
+# Node ID 83767632b40a96c33a17d3a92818b07433df2cf3
+# Parent 81a631bc4cec964db5004900b12bdc7c17a405ca
+Bug 577919 mark DEBUG only variables as ifdef DEBUG in security
+r=kaie
+
+diff --git a/security/manager/ssl/src/nsStreamCipher.cpp b/security/manager/ssl/src/nsStreamCipher.cpp
+--- a/security/manager/ssl/src/nsStreamCipher.cpp
++++ b/security/manager/ssl/src/nsStreamCipher.cpp
+@@ -126,7 +126,11 @@ NS_IMETHODIMP nsStreamCipher::Update(con
+   unsigned char* input = (unsigned char*)aData;
+   
+   PRInt32 setLen;
+-  SECStatus rv = PK11_CipherOp(mContext, output, &setLen, aLen, input, aLen);
++
++#ifdef DEBUG
++  SECStatus rv =
++#endif
++    PK11_CipherOp(mContext, output, &setLen, aLen, input, aLen);
+   NS_ASSERTION(rv == SECSuccess, "failed to encrypt");
+   NS_ASSERTION((PRUint32)setLen == aLen, "data length should not change");
+ 
+@@ -164,7 +168,11 @@ NS_IMETHODIMP nsStreamCipher::UpdateFrom
+     return NS_ERROR_OUT_OF_MEMORY;
+ 
+   PRInt32 setLen;
+-  SECStatus rv = PK11_CipherOp(mContext, output, &setLen, len, input, len);
++
++#ifdef DEBUG
++  SECStatus rv =
++#endif
++    PK11_CipherOp(mContext, output, &setLen, len, input, len);
+   NS_ASSERTION(rv == SECSuccess, "failed to encrypt");
+   NS_ASSERTION((PRUint32)setLen == len, "data length should not change");
+ 
+@@ -207,7 +215,11 @@ NS_IMETHODIMP nsStreamCipher::Discard(PR
+   }
+ 
+   PRInt32 setLen;
+-  SECStatus rv = PK11_CipherOp(mContext, output, &setLen, aLen, input, aLen);
++
++#ifdef DEBUG
++  SECStatus rv =
++#endif
++    PK11_CipherOp(mContext, output, &setLen, aLen, input, aLen);
+   NS_ASSERTION(rv == SECSuccess, "failed to encrypt");
+   NS_ASSERTION(setLen == aLen, "data length should not change");
+   

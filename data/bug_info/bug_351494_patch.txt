@@ -1,0 +1,16 @@
+Index: mozilla/client.mk
+===================================================================
+RCS file: /cvsroot/mozilla/client.mk,v
+retrieving revision 1.292
+diff -u -r1.292 client.mk
+--- mozilla/client.mk	31 Aug 2006 21:12:19 -0000	1.292
++++ mozilla/client.mk	6 Sep 2006 00:31:12 -0000
+@@ -383,7 +383,7 @@
+ # and commit this file on that tag.
+ #MOZ_CO_TAG          = <tag>
+ NSPR_CO_TAG          = NSPRPUB_PRE_4_2_CLIENT_BRANCH
+-NSS_CO_TAG           = NSS_3_11_20060831_TAG
++NSS_CO_TAG           = NSS_3_11_20060905_TAG
+ LDAPCSDK_CO_TAG      = ldapcsdk_5_17_client_branch
+ LOCALES_CO_TAG       =
+ 

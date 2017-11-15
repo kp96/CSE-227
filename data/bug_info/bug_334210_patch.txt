@@ -1,0 +1,33 @@
+Index: caps/src/nsScriptSecurityManager.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/caps/src/nsScriptSecurityManager.cpp,v
+retrieving revision 1.292
+diff -u -p -d -8 -r1.292 nsScriptSecurityManager.cpp
+--- caps/src/nsScriptSecurityManager.cpp	5 Apr 2006 16:48:51 -0000	1.292
++++ caps/src/nsScriptSecurityManager.cpp	16 Apr 2006 17:34:56 -0000
+@@ -325,20 +325,24 @@ nsScriptSecurityManager::SecurityCompare
+                 rv = targetBaseURI->GetPort(&targetPort);
+                 PRInt32 sourcePort;
+                 if (NS_SUCCEEDED(rv))
+                     rv = sourceBaseURI->GetPort(&sourcePort);
+                 *result = NS_SUCCEEDED(rv) && targetPort == sourcePort;
+                 // If the port comparison failed, see if either URL has a
+                 // port of -1. If so, replace -1 with the default port
+                 // for that scheme.
+-                if (!*result && (sourcePort == -1 || targetPort == -1))
++                if (NS_SUCCEEDED(rv) && !*result &&
++                    (sourcePort == -1 || targetPort == -1))
+                 {
+                     NS_ENSURE_STATE(sIOService);
+ 
++                    NS_ASSERTION(targetScheme.Equals(sourceScheme),
++                                 "Schemes should be equal here");
++                    
+                     PRInt32 defaultPort;
+                     nsCOMPtr<nsIProtocolHandler> protocolHandler;
+                     rv = sIOService->GetProtocolHandler(sourceScheme.get(),
+                                                         getter_AddRefs(protocolHandler));
+                     if (NS_FAILED(rv))
+                     {
+                         *result = PR_FALSE;
+                         return NS_OK;

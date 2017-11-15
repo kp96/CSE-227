@@ -1,0 +1,24 @@
+Index: caps/src/nsScriptSecurityManager.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/caps/src/nsScriptSecurityManager.cpp,v
+retrieving revision 1.308
+diff -u -p -6 -r1.308 nsScriptSecurityManager.cpp
+--- caps/src/nsScriptSecurityManager.cpp	15 Aug 2006 17:31:15 -0000	1.308
++++ caps/src/nsScriptSecurityManager.cpp	17 Aug 2006 05:04:09 -0000
+@@ -3590,14 +3590,14 @@ nsScriptSecurityManager::JSEnabledPrefCh
+     PRBool temp;
+     nsresult rv = mSecurityPref->SecurityGetBoolPref(sJSEnabledPrefName, &temp);
+     // JavaScript defaults to enabled in failure cases.
+     mIsJavaScriptEnabled = NS_FAILED(rv) || temp;
+ 
+     rv = mSecurityPref->SecurityGetBoolPref(sJSMailEnabledPrefName, &temp);
+-    // JavaScript in Mail defaults to enabled in failure cases.
+-    mIsMailJavaScriptEnabled = NS_FAILED(rv) || temp;
++    // JavaScript in Mail defaults to disabled in failure cases.
++    mIsMailJavaScriptEnabled = NS_SUCCEEDED(rv) && temp;
+ 
+ #ifdef XPC_IDISPATCH_SUPPORT
+     rv = mSecurityPref->SecurityGetBoolPref(sXPCDefaultGrantAllName, &temp);
+     // Granting XPC Priveleges defaults to disabled in failure cases.
+     mXPCDefaultGrantAll = NS_SUCCEEDED(rv) && temp;
+ #endif

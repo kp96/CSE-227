@@ -1,0 +1,26 @@
+Index: nsIJVMManager.idl
+===================================================================
+RCS file: /cvsroot/mozilla/modules/oji/public/nsIJVMManager.idl,v
+retrieving revision 1.12
+diff -u -6 -p -r1.12 nsIJVMManager.idl
+--- nsIJVMManager.idl	18 Apr 2004 22:00:47 -0000	1.12
++++ nsIJVMManager.idl	31 May 2006 20:19:37 -0000
+@@ -108,15 +108,15 @@ interface nsIJVMManager : nsISupports {
+ 	                            in string rootFingerprint,in string rootCommonName);
+ 
+     /**
+ 	 * isAppletTrusted
+ 	 */
+ 
+-    nsIPrincipal isAppletTrusted(in string aRSABuf, in PRUint32 aRSABufLen, 
+-                         in string aPlaintext, in PRUint32 aPlaintextLen,    
+-                         out boolean isTrusted);
++    [noscript] nsIPrincipal isAppletTrusted(in string aRSABuf,
++                         in PRUint32 aRSABufLen, in string aPlaintext,
++                         in PRUint32 aPlaintextLen, out boolean isTrusted);
+ 
+     /**
+      * The JavaEnabled variable to see if Java is Enabled or not
+      */
+ 
+     readonly attribute boolean JavaEnabled;

@@ -1,0 +1,29 @@
+Index: xpcconvert.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/js/src/xpconnect/src/xpcconvert.cpp,v
+retrieving revision 1.85
+retrieving revision 1.86
+diff -p -u -8 -r1.85 -r1.86
+--- xpcconvert.cpp	8 Mar 2004 20:51:40 -0000	1.85
++++ xpcconvert.cpp	9 Mar 2004 04:25:12 -0000	1.86
+@@ -1684,18 +1684,18 @@ XPCConvert::JSArray2Native(XPCCallContex
+     }
+ 
+     if(pErr)
+         *pErr = NS_ERROR_XPC_BAD_CONVERT_JS;
+ 
+ #define POPULATE(_mode, _t)                                                  \
+     PR_BEGIN_MACRO                                                           \
+         cleanupMode = _mode;                                                 \
+-        size_t size_ = capacity * sizeof(_t);                                \
+-        if (size_ < capacity || nsnull == (array = nsMemory::Alloc(size_)))  \
++        if (capacity > ~(size_t)0 / sizeof(_t) ||                            \
++            nsnull == (array = nsMemory::Alloc(capacity * sizeof(_t))))      \
+         {                                                                    \
+             if(pErr)                                                         \
+                 *pErr = NS_ERROR_OUT_OF_MEMORY;                              \
+             goto failure;                                                    \
+         }                                                                    \
+         for(initedCount = 0; initedCount < count; initedCount++)             \
+         {                                                                    \
+             if(!JS_GetElement(cx, jsarray, initedCount, &current) ||         \

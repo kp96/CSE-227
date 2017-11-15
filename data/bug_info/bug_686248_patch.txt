@@ -1,0 +1,909 @@
+# HG changeset patch
+# Parent 767693e248aa388febeb987291aece0ab7269c6e
+# User Brian Smith <bsmith@mozilla.com>
+Bug 686248: Add isExtendedValidation to nsISSLStatus so it can be used by mobile, r?meyhemer
+
+diff --git a/dom/ipc/TabParent.cpp b/dom/ipc/TabParent.cpp
+--- a/dom/ipc/TabParent.cpp
++++ b/dom/ipc/TabParent.cpp
+@@ -47,17 +47,16 @@
+ #include "nsFocusManager.h"
+ #include "nsCOMPtr.h"
+ #include "nsServiceManagerUtils.h"
+ #include "nsIDOMElement.h"
+ #include "nsEventDispatcher.h"
+ #include "nsIDOMEventTarget.h"
+ #include "nsIWindowWatcher.h"
+ #include "nsIDOMWindow.h"
+-#include "nsIIdentityInfo.h"
+ #include "nsPIDOMWindow.h"
+ #include "TabChild.h"
+ #include "nsIDOMEvent.h"
+ #include "nsIPrivateDOMEvent.h"
+ #include "nsFrameLoader.h"
+ #include "nsNetUtil.h"
+ #include "nsContentUtils.h"
+ #include "nsContentPermissionHelper.h"
+diff --git a/mobile/chrome/content/bindings/browser.xml b/mobile/chrome/content/bindings/browser.xml
+--- a/mobile/chrome/content/bindings/browser.xml
++++ b/mobile/chrome/content/bindings/browser.xml
+@@ -233,21 +233,19 @@
+                 break;
+ 
+               case "Content:SecurityChange":
+                 let serhelper = Components.classes["@mozilla.org/network/serialization-helper;1"]
+                                 .getService(Components.interfaces.nsISerializationHelper);
+                 let SSLStatus = json.SSLStatusAsString ? serhelper.deserializeObject(json.SSLStatusAsString) : null;
+                 if (SSLStatus) {
+                   SSLStatus.QueryInterface(Components.interfaces.nsISSLStatus);
+-                  if (SSLStatus) {
+-                    // We must check the Extended Validation (EV) state here, on the chrome
+-                    // process, because NSS is needed for that determination.
+-                    let ii = SSLStatus.serverCert.QueryInterface(Components.interfaces.nsIIdentityInfo);
+-                    if (ii && ii.isExtendedValidation)
++                  // We must check the Extended Validation (EV) state here, on the chrome
++                  // process, because NSS is needed for that determination.
++                  if (SSLStatus && SSLStatus.isExtendedValidation) {
+                       json.state |= Components.interfaces.nsIWebProgressListener.STATE_IDENTITY_EV_TOPLEVEL;
+                   }
+                 }
+ 
+                 let data = this._getIdentityData(SSLStatus);
+                 this._browser._securityUI = {
+                   SSLStatus: SSLStatus ? {serverCert: data} : null,
+                   state: json.state
+diff --git a/security/manager/boot/public/nsISSLStatusProvider.idl b/security/manager/boot/public/nsISSLStatusProvider.idl
+--- a/security/manager/boot/public/nsISSLStatusProvider.idl
++++ b/security/manager/boot/public/nsISSLStatusProvider.idl
+@@ -33,12 +33,14 @@
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "nsISupports.idl"
+ 
+-[scriptable, uuid(8de811f0-1dd2-11b2-8bf1-e9aa324984b2)]
++interface nsISSLStatus;
++
++[scriptable, uuid(179b1ab1-0950-4427-9556-6f496dc4a27f)]
+ interface nsISSLStatusProvider : nsISupports {
+-  readonly attribute nsISupports SSLStatus;
++  readonly attribute nsISSLStatus SSLStatus;
+ };
+diff --git a/security/manager/boot/src/nsSecureBrowserUIImpl.cpp b/security/manager/boot/src/nsSecureBrowserUIImpl.cpp
+--- a/security/manager/boot/src/nsSecureBrowserUIImpl.cpp
++++ b/security/manager/boot/src/nsSecureBrowserUIImpl.cpp
+@@ -66,17 +66,17 @@
+ #include "nsIWebProgress.h"
+ #include "nsIWebProgressListener.h"
+ #include "nsIChannel.h"
+ #include "nsIHttpChannel.h"
+ #include "nsIFileChannel.h"
+ #include "nsIWyciwygChannel.h"
+ #include "nsIFTPChannel.h"
+ #include "nsITransportSecurityInfo.h"
+-#include "nsIIdentityInfo.h"
++#include "nsISSLStatus.h"
+ #include "nsIURI.h"
+ #include "nsISecurityEventSink.h"
+ #include "nsIPrompt.h"
+ #include "nsIFormSubmitObserver.h"
+ #include "nsISecurityWarningDialogs.h"
+ #include "nsISecurityInfoProvider.h"
+ #include "nsIProxyObjectManager.h"
+ #include "imgIRequest.h"
+@@ -514,48 +514,46 @@ nsSecureBrowserUIImpl::EvaluateAndUpdate
+   /* I explicitly ignore the camelCase variable naming style here,
+      I want to make it clear these are temp variables that relate to the 
+      member variables with the same suffix.*/
+ 
+   PRUint32 temp_NewToplevelSecurityState = nsIWebProgressListener::STATE_IS_INSECURE;
+   bool temp_NewToplevelIsEV = false;
+ 
+   bool updateStatus = false;
+-  nsCOMPtr<nsISupports> temp_SSLStatus;
++  nsCOMPtr<nsISSLStatus> temp_SSLStatus;
+ 
+   bool updateTooltip = false;
+   nsXPIDLString temp_InfoTooltip;
+ 
+     temp_NewToplevelSecurityState = GetSecurityStateFromSecurityInfo(info);
+ 
+     PR_LOG(gSecureDocLog, PR_LOG_DEBUG,
+            ("SecureUI:%p: OnStateChange: remember mNewToplevelSecurityState => %x\n", this,
+             temp_NewToplevelSecurityState));
+ 
+     nsCOMPtr<nsISSLStatusProvider> sp = do_QueryInterface(info);
+     if (sp) {
+       // Ignore result
+       updateStatus = true;
+-      sp->GetSSLStatus(getter_AddRefs(temp_SSLStatus));
++      (void) sp->GetSSLStatus(getter_AddRefs(temp_SSLStatus));
++      if (temp_SSLStatus) {
++        bool aTemp;
++        if (NS_SUCCEEDED(temp_SSLStatus->GetIsExtendedValidation(&aTemp))) {
++          temp_NewToplevelIsEV = aTemp;
++        }
++      }
+     }
+ 
+     if (info) {
+       nsCOMPtr<nsITransportSecurityInfo> secInfo(do_QueryInterface(info));
+       if (secInfo) {
+         updateTooltip = true;
+         secInfo->GetShortSecurityDescription(getter_Copies(temp_InfoTooltip));
+       }
+-
+-      nsCOMPtr<nsIIdentityInfo> idinfo = do_QueryInterface(info);
+-      if (idinfo) {
+-        bool aTemp;
+-        if (NS_SUCCEEDED(idinfo->GetIsExtendedValidation(&aTemp))) {
+-          temp_NewToplevelIsEV = aTemp;
+-        }
+-      }
+     }
+ 
+   // assume temp_NewToplevelSecurityState was set in this scope!
+   // see code that is directly above
+ 
+   {
+     ReentrantMonitorAutoEnter lock(mReentrantMonitor);
+     mNewToplevelSecurityStateKnown = true;
+@@ -1635,17 +1633,17 @@ nsSecureBrowserUIImpl::OnSecurityChange(
+   }
+ #endif
+ 
+   return NS_OK;
+ }
+ 
+ // nsISSLStatusProvider methods
+ NS_IMETHODIMP
+-nsSecureBrowserUIImpl::GetSSLStatus(nsISupports** _result)
++nsSecureBrowserUIImpl::GetSSLStatus(nsISSLStatus** _result)
+ {
+   NS_ENSURE_ARG_POINTER(_result);
+ 
+   ReentrantMonitorAutoEnter lock(mReentrantMonitor);
+ 
+   switch (mNotifiedSecurityState)
+   {
+     case lis_mixed_security:
+diff --git a/security/manager/boot/src/nsSecureBrowserUIImpl.h b/security/manager/boot/src/nsSecureBrowserUIImpl.h
+--- a/security/manager/boot/src/nsSecureBrowserUIImpl.h
++++ b/security/manager/boot/src/nsSecureBrowserUIImpl.h
+@@ -58,16 +58,17 @@
+ #include "nsIURI.h"
+ #include "nsISecurityEventSink.h"
+ #include "nsWeakReference.h"
+ #include "nsISSLStatusProvider.h"
+ #include "nsIAssociatedContentSecurity.h"
+ #include "pldhash.h"
+ #include "nsINetUtil.h"
+ 
++class nsISSLStatus;
+ class nsITransportSecurityInfo;
+ class nsISecurityWarningDialogs;
+ class nsIChannel;
+ 
+ #define NS_SECURE_BROWSER_UI_CID \
+ { 0xcc75499a, 0x1dd1, 0x11b2, {0x8a, 0x82, 0xca, 0x41, 0x0a, 0xc9, 0x07, 0xb8}}
+ 
+ 
+@@ -144,17 +145,17 @@ protected:
+ 
+   nsresult EvaluateAndUpdateSecurityState(nsIRequest* aRequest, nsISupports *info,
+                                           bool withNewLocation);
+   void UpdateSubrequestMembers(nsISupports *securityInfo);
+ 
+   void ObtainEventSink(nsIChannel *channel, 
+                        nsCOMPtr<nsISecurityEventSink> &sink);
+ 
+-  nsCOMPtr<nsISupports> mSSLStatus;
++  nsCOMPtr<nsISSLStatus> mSSLStatus;
+   nsCOMPtr<nsISupports> mCurrentToplevelSecurityInfo;
+ 
+   void GetBundleString(const PRUnichar* name, nsAString &outString);
+   
+   nsresult CheckPost(nsIURI *formURI, nsIURI *actionURL, bool *okayToPost);
+   nsresult IsURLHTTPS(nsIURI* aURL, bool *value);
+   nsresult IsURLJavaScript(nsIURI* aURL, bool *value);
+ 
+diff --git a/security/manager/boot/src/nsStrictTransportSecurityService.cpp b/security/manager/boot/src/nsStrictTransportSecurityService.cpp
+--- a/security/manager/boot/src/nsStrictTransportSecurityService.cpp
++++ b/security/manager/boot/src/nsStrictTransportSecurityService.cpp
+@@ -359,21 +359,19 @@ NS_IMETHODIMP
+ nsStrictTransportSecurityService::ShouldIgnoreStsHeader(nsISupports* aSecurityInfo,
+                                                         bool* aResult)
+ {
+   nsresult rv;
+   bool tlsIsBroken = false;
+   nsCOMPtr<nsISSLStatusProvider> sslprov = do_QueryInterface(aSecurityInfo);
+   NS_ENSURE_TRUE(sslprov, NS_ERROR_FAILURE);
+ 
+-  nsCOMPtr<nsISupports> isupstat;
+-  rv = sslprov->GetSSLStatus(getter_AddRefs(isupstat));
++  nsCOMPtr<nsISSLStatus> sslstat;
++  rv = sslprov->GetSSLStatus(getter_AddRefs(sslstat));
+   NS_ENSURE_SUCCESS(rv, rv);
+-
+-  nsCOMPtr<nsISSLStatus> sslstat = do_QueryInterface(isupstat);
+   NS_ENSURE_TRUE(sslstat, NS_ERROR_FAILURE);
+ 
+   bool trustcheck;
+   rv = sslstat->GetIsDomainMismatch(&trustcheck);
+   NS_ENSURE_SUCCESS(rv, rv);
+   tlsIsBroken = tlsIsBroken || trustcheck;
+ 
+   rv = sslstat->GetIsNotValidAtThisTime(&trustcheck);
+diff --git a/security/manager/ssl/public/nsISSLStatus.idl b/security/manager/ssl/public/nsISSLStatus.idl
+--- a/security/manager/ssl/public/nsISSLStatus.idl
++++ b/security/manager/ssl/public/nsISSLStatus.idl
+@@ -36,17 +36,17 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "nsISupports.idl"
+ 
+ interface nsIX509Cert;
+ 
+-[scriptable, uuid(cfede939-def1-49be-81ed-d401b3a07d1c)]
++[scriptable, uuid(3f1fcd83-c5a9-4cd1-a250-7676ca7c7e34)]
+ interface nsISSLStatus : nsISupports {
+   readonly attribute nsIX509Cert serverCert;
+ 
+   readonly attribute string cipherName;
+   readonly attribute unsigned long keyLength;
+   readonly attribute unsigned long secretKeyLength;
+ 
+   readonly attribute boolean isDomainMismatch;
+@@ -54,9 +54,11 @@ interface nsISSLStatus : nsISupports {
+ 
+   /* Note: To distinguish between 
+    *         "unstrusted because missing or untrusted issuer"
+    *       and 
+    *         "untrusted because self signed"
+    *       query nsIX509Cert3::isSelfSigned 
+    */
+   readonly attribute boolean isUntrusted;
++
++  readonly attribute boolean isExtendedValidation;
+ };
+diff --git a/security/manager/ssl/src/nsIdentityChecking.cpp b/security/manager/ssl/src/nsIdentityChecking.cpp
+--- a/security/manager/ssl/src/nsIdentityChecking.cpp
++++ b/security/manager/ssl/src/nsIdentityChecking.cpp
+@@ -1081,65 +1081,36 @@ static SECStatus getFirstEVPolicy(CERTCe
+       if (found)
+         return SECSuccess;
+     }
+   }
+ 
+   return SECFailure;
+ }
+ 
+-bool
+-nsNSSSocketInfo::hasCertErrors()
++NS_IMETHODIMP
++nsSSLStatus::GetIsExtendedValidation(bool* aIsEV)
+ {
+-  if (!mSSLStatus) {
+-    // if the status is unknown, assume the cert is bad, better safe than sorry
+-    return true;
+-  }
+-
+-  return mSSLStatus->mHaveCertErrorBits;
+-}
+-
+-NS_IMETHODIMP
+-nsNSSSocketInfo::GetIsExtendedValidation(bool* aIsEV)
+-{
+-  NS_ENSURE_ARG(aIsEV);
++  NS_ENSURE_ARG_POINTER(aIsEV);
+   *aIsEV = false;
+ 
+-  if (!mCert)
+-    return NS_OK;
++  nsCOMPtr<nsIX509Cert> cert = mServerCert;
+ 
+-  // Never allow bad certs for EV, regardless of overrides.
+-  if (hasCertErrors())
+-    return NS_OK;
++  // Never allow missing or bad certs for EV,
++  // regardless of overrides.
++  NS_ENSURE_TRUE(cert && !mHaveCertErrorBits, NS_OK);
+ 
+   nsresult rv;
+-  nsCOMPtr<nsIIdentityInfo> idinfo = do_QueryInterface(mCert, &rv);
++  nsCOMPtr<nsIIdentityInfo> idinfo = do_QueryInterface(cert, &rv);
+   if (NS_FAILED(rv))
+     return rv;
+ 
+   return idinfo->GetIsExtendedValidation(aIsEV);
+ }
+ 
+-NS_IMETHODIMP
+-nsNSSSocketInfo::GetValidEVPolicyOid(nsACString &outDottedOid)
+-{
+-  if (!mCert)
+-    return NS_OK;
+-
+-  if (hasCertErrors())
+-    return NS_OK;
+-
+-  nsresult rv;
+-  nsCOMPtr<nsIIdentityInfo> idinfo = do_QueryInterface(mCert, &rv);
+-  if (NS_FAILED(rv))
+-    return rv;
+-
+-  return idinfo->GetValidEVPolicyOid(outDottedOid);
+-}
+-
+ nsresult
+ nsNSSCertificate::hasValidEVOidTag(SECOidTag &resultOidTag, bool &validEV)
+ {
+   nsNSSShutDownPreventionLock locker;
+   if (isAlreadyShutDown())
+     return NS_ERROR_NOT_AVAILABLE;
+ 
+   nsresult nrv;
+diff --git a/security/manager/ssl/src/nsNSSCallbacks.cpp b/security/manager/ssl/src/nsNSSCallbacks.cpp
+--- a/security/manager/ssl/src/nsNSSCallbacks.cpp
++++ b/security/manager/ssl/src/nsNSSCallbacks.cpp
+@@ -929,29 +929,26 @@ void PR_CALLBACK HandshakeCallback(PRFil
+         if (NS_FAILED(rv)) {
+           equals_previous = false;
+         }
+       }
+ 
+       if (equals_previous) {
+         PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
+                ("HandshakeCallback using PREV cert %p\n", prevcert.get()));
+-        infoObject->SetCert(prevcert);
+         status->mServerCert = prevcert;
+       }
+       else {
+         if (status->mServerCert) {
+           PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
+                  ("HandshakeCallback KEEPING cert %p\n", status->mServerCert.get()));
+-          infoObject->SetCert(status->mServerCert);
+         }
+         else {
+           PR_LOG(gPIPNSSLog, PR_LOG_DEBUG,
+                  ("HandshakeCallback using NEW cert %p\n", nssc.get()));
+-          infoObject->SetCert(nssc);
+           status->mServerCert = nssc;
+         }
+       }
+     }
+ 
+     status->mHaveKeyLengthAndCipher = true;
+     status->mKeyLength = keyLength;
+     status->mSecretKeyLength = encryptBits;
+diff --git a/security/manager/ssl/src/nsNSSCertificateFakeTransport.cpp b/security/manager/ssl/src/nsNSSCertificateFakeTransport.cpp
+--- a/security/manager/ssl/src/nsNSSCertificateFakeTransport.cpp
++++ b/security/manager/ssl/src/nsNSSCertificateFakeTransport.cpp
+@@ -32,73 +32,46 @@
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "nsNSSCertificateFakeTransport.h"
+ #include "nsCOMPtr.h"
+-#include "nsIMutableArray.h"
+ #include "nsNSSCertificate.h"
+ #include "nsIX509Cert.h"
+-#include "nsIX509Cert3.h"
+-#include "nsISMimeCert.h"
+-#include "nsNSSASN1Object.h"
+ #include "nsString.h"
+ #include "nsXPIDLString.h"
+ #include "nsISupportsPrimitives.h"
+ #include "nsIProgrammingLanguage.h"
+ #include "nsIObjectOutputStream.h"
+ #include "nsIObjectInputStream.h"
+ 
+ #ifdef PR_LOGGING
+ extern PRLogModuleInfo* gPIPNSSLog;
+ #endif
+ 
+ /* nsNSSCertificateFakeTransport */
+ 
+-NS_IMPL_THREADSAFE_ISUPPORTS5(nsNSSCertificateFakeTransport, nsIX509Cert,
+-                                                nsIX509Cert2,
+-                                                nsIX509Cert3,
++NS_IMPL_THREADSAFE_ISUPPORTS3(nsNSSCertificateFakeTransport, nsIX509Cert,
+                                                 nsISerializable,
+                                                 nsIClassInfo)
+ 
+ nsNSSCertificateFakeTransport::nsNSSCertificateFakeTransport() :
+   mCertSerialization(nsnull)
+ {
+ }
+ 
+ nsNSSCertificateFakeTransport::~nsNSSCertificateFakeTransport()
+ {
+   if (mCertSerialization)
+     SECITEM_FreeItem(mCertSerialization, true);
+ }
+ 
+-NS_IMETHODIMP
+-nsNSSCertificateFakeTransport::GetCertType(PRUint32 *aCertType)
+-{
+-  NS_NOTREACHED("Unimplemented on content process");
+-  return NS_ERROR_NOT_IMPLEMENTED;
+-}
+-
+-NS_IMETHODIMP
+-nsNSSCertificateFakeTransport::GetIsSelfSigned(bool *aIsSelfSigned)
+-{
+-  NS_NOTREACHED("Unimplemented on content process");
+-  return NS_ERROR_NOT_IMPLEMENTED;
+-}
+-
+-NS_IMETHODIMP
+-nsNSSCertificateFakeTransport::MarkForPermDeletion()
+-{
+-  NS_NOTREACHED("Unimplemented on content process");
+-  return NS_ERROR_NOT_IMPLEMENTED;
+-}
+-
+ /* readonly attribute string dbKey; */
+ NS_IMETHODIMP
+ nsNSSCertificateFakeTransport::GetDbKey(char * *aDbKey)
+ {
+   NS_NOTREACHED("Unimplemented on content process");
+   return NS_ERROR_NOT_IMPLEMENTED;
+ }
+ 
+@@ -194,23 +167,16 @@ nsNSSCertificateFakeTransport::GetOrgani
+ NS_IMETHODIMP
+ nsNSSCertificateFakeTransport::GetChain(nsIArray **_rvChain)
+ {
+   NS_NOTREACHED("Unimplemented on content process");
+   return NS_ERROR_NOT_IMPLEMENTED;
+ }
+ 
+ NS_IMETHODIMP
+-nsNSSCertificateFakeTransport::GetAllTokenNames(PRUint32 *aLength, PRUnichar*** aTokenNames)
+-{
+-  NS_NOTREACHED("Unimplemented on content process");
+-  return NS_ERROR_NOT_IMPLEMENTED;
+-}
+-
+-NS_IMETHODIMP
+ nsNSSCertificateFakeTransport::GetSubjectName(nsAString &_subjectName)
+ {
+   NS_NOTREACHED("Unimplemented on content process");
+   return NS_ERROR_NOT_IMPLEMENTED;
+ }
+ 
+ NS_IMETHODIMP
+ nsNSSCertificateFakeTransport::GetIssuerName(nsAString &_issuerName)
+@@ -250,31 +216,16 @@ nsNSSCertificateFakeTransport::GetTokenN
+ NS_IMETHODIMP
+ nsNSSCertificateFakeTransport::GetRawDER(PRUint32 *aLength, PRUint8 **aArray)
+ {
+   NS_NOTREACHED("Unimplemented on content process");
+   return NS_ERROR_NOT_IMPLEMENTED;
+ }
+ 
+ NS_IMETHODIMP
+-nsNSSCertificateFakeTransport::ExportAsCMS(PRUint32 chainMode,
+-                              PRUint32 *aLength, PRUint8 **aArray)
+-{
+-  NS_NOTREACHED("Unimplemented on content process");
+-  return NS_ERROR_NOT_IMPLEMENTED;
+-}
+-
+-CERTCertificate *
+-nsNSSCertificateFakeTransport::GetCert()
+-{
+-  NS_NOTREACHED("Unimplemented on content process");
+-  return nsnull;
+-}
+-
+-NS_IMETHODIMP
+ nsNSSCertificateFakeTransport::GetValidity(nsIX509CertValidity **aValidity)
+ {
+   NS_NOTREACHED("Unimplemented on content process");
+   return NS_ERROR_NOT_IMPLEMENTED;
+ }
+ 
+ NS_IMETHODIMP
+ nsNSSCertificateFakeTransport::VerifyForUsage(PRUint32 usage, PRUint32 *verificationResult)
+@@ -289,23 +240,16 @@ nsNSSCertificateFakeTransport::GetUsages
+                                  PRUint32 *_count,
+                                  PRUnichar ***_usages)
+ {
+   NS_NOTREACHED("Unimplemented on content process");
+   return NS_ERROR_NOT_IMPLEMENTED;
+ }
+ 
+ NS_IMETHODIMP
+-nsNSSCertificateFakeTransport::RequestUsagesArrayAsync(nsICertVerificationListener *aResultListener)
+-{
+-  NS_NOTREACHED("Unimplemented on content process");
+-  return NS_ERROR_NOT_IMPLEMENTED;
+-}
+-
+-NS_IMETHODIMP
+ nsNSSCertificateFakeTransport::GetUsagesString(bool localOnly,
+                                   PRUint32   *_verified,
+                                   nsAString &_usages)
+ {
+   NS_NOTREACHED("Unimplemented on content process");
+   return NS_ERROR_NOT_IMPLEMENTED;
+ }
+ 
+diff --git a/security/manager/ssl/src/nsNSSCertificateFakeTransport.h b/security/manager/ssl/src/nsNSSCertificateFakeTransport.h
+--- a/security/manager/ssl/src/nsNSSCertificateFakeTransport.h
++++ b/security/manager/ssl/src/nsNSSCertificateFakeTransport.h
+@@ -34,43 +34,33 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #ifndef _NS_NSSCERTIFICATECHILD_H_
+ #define _NS_NSSCERTIFICATECHILD_H_
+ 
+ #include "nsIX509Cert.h"
+-#include "nsIX509Cert2.h"
+-#include "nsIX509Cert3.h"
+-#include "nsIX509CertDB.h"
+-#include "nsIX509CertList.h"
+-#include "nsIASN1Object.h"
+-#include "nsISMimeCert.h"
+-#include "nsIIdentityInfo.h"
+ #include "nsNSSShutDown.h"
+-#include "nsISimpleEnumerator.h"
+ #include "nsISerializable.h"
+ #include "nsIClassInfo.h"
+ 
+ #include "nsNSSCertHeader.h"
+ 
+ class nsINSSComponent;
+ class nsIASN1Sequence;
+ 
+ /* Certificate */
+-class nsNSSCertificateFakeTransport : public nsIX509Cert3,
++class nsNSSCertificateFakeTransport : public nsIX509Cert,
+                               public nsISerializable,
+                               public nsIClassInfo
+ {
+ public:
+   NS_DECL_ISUPPORTS
+   NS_DECL_NSIX509CERT
+-  NS_DECL_NSIX509CERT2
+-  NS_DECL_NSIX509CERT3
+   NS_DECL_NSISERIALIZABLE
+   NS_DECL_NSICLASSINFO
+ 
+   nsNSSCertificateFakeTransport();
+   virtual ~nsNSSCertificateFakeTransport();
+ 
+ private:
+   SECItem *mCertSerialization;
+diff --git a/security/manager/ssl/src/nsNSSIOLayer.cpp b/security/manager/ssl/src/nsNSSIOLayer.cpp
+--- a/security/manager/ssl/src/nsNSSIOLayer.cpp
++++ b/security/manager/ssl/src/nsNSSIOLayer.cpp
+@@ -244,22 +244,21 @@ nsNSSSocketInfo::~nsNSSSocketInfo()
+ 
+   shutdown(calledFromObject);
+ }
+ 
+ void nsNSSSocketInfo::virtualDestroyNSSReference()
+ {
+ }
+ 
+-NS_IMPL_THREADSAFE_ISUPPORTS9(nsNSSSocketInfo,
++NS_IMPL_THREADSAFE_ISUPPORTS8(nsNSSSocketInfo,
+                               nsITransportSecurityInfo,
+                               nsISSLSocketControl,
+                               nsIInterfaceRequestor,
+                               nsISSLStatusProvider,
+-                              nsIIdentityInfo,
+                               nsIAssociatedContentSecurity,
+                               nsISerializable,
+                               nsIClassInfo,
+                               nsIClientAuthUserDecision)
+ 
+ nsresult
+ nsNSSSocketInfo::GetHandshakePending(bool *aHandshakePending)
+ {
+@@ -424,23 +423,20 @@ nsNSSSocketInfo::EnsureDocShellDependent
+     mExternalErrorReporting = true;
+ 
+     // If this socket is associated to a docshell, let's try to remember
+     // the currently used cert. If this socket gets a notification from NSS
+     // having the same raw socket, we can keep the PSM wrapper object
+     // and all the data it has cached (like verification results).
+     nsCOMPtr<nsISSLStatusProvider> statprov = do_QueryInterface(secureUI);
+     if (statprov) {
+-      nsCOMPtr<nsISupports> isup_stat;
+-      statprov->GetSSLStatus(getter_AddRefs(isup_stat));
+-      if (isup_stat) {
+-        nsCOMPtr<nsISSLStatus> sslstat = do_QueryInterface(isup_stat);
+-        if (sslstat) {
+-          sslstat->GetServerCert(getter_AddRefs(mPreviousCert));
+-        }
++      nsCOMPtr<nsISSLStatus> sslstat;
++      statprov->GetSSLStatus(getter_AddRefs(sslstat));
++      if (sslstat) {
++        sslstat->GetServerCert(getter_AddRefs(mPreviousCert));
+       }
+     }
+   }
+ 
+   return NS_OK;
+ }
+ 
+ bool
+@@ -605,23 +601,40 @@ static NS_DEFINE_CID(kNSSCertificateCID,
+ #define NSSSOCKETINFOMAGIC { 0xa9863a23, 0x26b8, 0x4a9c, \
+   { 0x83, 0xf1, 0xe9, 0xda, 0xdb, 0x36, 0xb8, 0x30 } }
+ static NS_DEFINE_CID(kNSSSocketInfoMagic, NSSSOCKETINFOMAGIC);
+ 
+ NS_IMETHODIMP
+ nsNSSSocketInfo::Write(nsIObjectOutputStream* stream) {
+   stream->WriteID(kNSSSocketInfoMagic);
+ 
+-  // Store the flag if there is the certificate present
+-  stream->WriteBoolean(!!mCert);
+-
++  nsRefPtr<nsSSLStatus> status = mSSLStatus;
++  nsCOMPtr<nsISerializable> certSerializable;
++
++  // Write a redundant copy of the certificate for backward compatibility
++  // with previous versions, which also unnecessarily wrote it.
++  //
+   // As we are reading the object our self, not using ReadObject, we have
+   // to store it here 'manually' as well, mimicking our object stream
+   // implementation.
+-  nsCOMPtr<nsISerializable> certSerializable = do_QueryInterface(mCert);
++
++  if (status) {
++    nsCOMPtr<nsIX509Cert> cert = status->mServerCert;
++    certSerializable = do_QueryInterface(cert);
++
++    if (!certSerializable) {
++      NS_ERROR("certificate is missing or isn't serializable");
++      return NS_ERROR_UNEXPECTED;
++    }
++  } else {
++    NS_WARNING("Serializing nsNSSSocketInfo without mSSLStatus");
++  }
++
++  // Store the flag if there is the certificate present
++  stream->WriteBoolean(certSerializable);
+   if (certSerializable) {
+     stream->WriteID(kNSSCertificateCID);
+     stream->WriteID(NS_GET_IID(nsISupports));
+     certSerializable->Write(stream);
+   }
+ 
+   // Store the version number of the binary stream data format.
+   // The 0xFFFF0000 mask is included to the version number
+@@ -630,17 +643,17 @@ nsNSSSocketInfo::Write(nsIObjectOutputSt
+   // This mask value has been chosen as mSecurityState could
+   // never be assigned such value.
+   PRUint32 version = 3;
+   stream->Write32(version | 0xFFFF0000);
+   stream->Write32(mSecurityState);
+   stream->WriteWStringZ(mShortDesc.get());
+   stream->WriteWStringZ(mErrorMessage.get());
+ 
+-  stream->WriteCompoundObject(NS_ISUPPORTS_CAST(nsISSLStatus*, mSSLStatus),
++  stream->WriteCompoundObject(NS_ISUPPORTS_CAST(nsISSLStatus*, status),
+                               NS_GET_IID(nsISupports), true);
+ 
+   stream->Write32((PRUint32)mSubRequestsHighSecurity);
+   stream->Write32((PRUint32)mSubRequestsLowSecurity);
+   stream->Write32((PRUint32)mSubRequestsBrokenSecurity);
+   stream->Write32((PRUint32)mSubRequestsNoSecurity);
+   return NS_OK;
+ }
+@@ -696,27 +709,26 @@ nsNSSSocketInfo::Read(nsIObjectInputStre
+     stream->ReadID(&tempID);
+     if (!tempID.Equals(NS_GET_IID(nsISupports)))
+       return NS_ERROR_FAILURE;
+ 
+     nsCOMPtr<nsISerializable> serializable =
+         do_CreateInstance(kNSSCertificateCID, &rv);
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
++    // This is the redundant copy of the certificate; just ignore it
+     serializable->Read(stream);
+-    mCert = do_QueryInterface(serializable);
+ 
+     // We are done with reading the certificate, now read the version
+     // as we did before.
+     stream->Read32(&version);
+   }
+   else {
+     // There seems not to be the certificate present in the stream.
+     version = UUID_0;
+-    mCert = nsnull;
+   }
+ 
+   // If the version field we have just read is not masked with 0xFFFF0000
+   // then it is stored mSecurityState field and this is version 1 of
+   // the binary data stream format.
+   if ((version & 0xFFFF0000) == 0xFFFF0000) {
+     version &= ~0xFFFF0000;
+     stream->Read32(&mSecurityState);
+@@ -725,18 +737,23 @@ nsNSSSocketInfo::Read(nsIObjectInputStre
+     mSecurityState = version;
+     version = 1;
+   }
+   stream->ReadString(mShortDesc);
+   stream->ReadString(mErrorMessage);
+ 
+   nsCOMPtr<nsISupports> obj;
+   stream->ReadObject(true, getter_AddRefs(obj));
++  
+   mSSLStatus = reinterpret_cast<nsSSLStatus*>(obj.get());
+ 
++  if (!mSSLStatus) {
++    NS_WARNING("deserializing nsNSSSocketInfo without mSSLStatus");
++  }
++
+   if (version >= 2) {
+     stream->Read32((PRUint32*)&mSubRequestsHighSecurity);
+     stream->Read32((PRUint32*)&mSubRequestsLowSecurity);
+     stream->Read32((PRUint32*)&mSubRequestsBrokenSecurity);
+     stream->Read32((PRUint32*)&mSubRequestsNoSecurity);
+   }
+   else {
+     mSubRequestsHighSecurity = 0;
+@@ -843,38 +860,21 @@ nsresult nsNSSSocketInfo::GetPreviousCer
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   *_result = mPreviousCert;
+   NS_IF_ADDREF(*_result);
+ 
+   return NS_OK;
+ }
+ 
+-nsresult nsNSSSocketInfo::GetCert(nsIX509Cert** _result)
++nsresult nsNSSSocketInfo::GetSSLStatus(nsISSLStatus** _result)
+ {
+   NS_ENSURE_ARG_POINTER(_result);
+ 
+-  *_result = mCert;
+-  NS_IF_ADDREF(*_result);
+-
+-  return NS_OK;
+-}
+-
+-nsresult nsNSSSocketInfo::SetCert(nsIX509Cert *aCert)
+-{
+-  mCert = aCert;
+-
+-  return NS_OK;
+-}
+-
+-nsresult nsNSSSocketInfo::GetSSLStatus(nsISupports** _result)
+-{
+-  NS_ENSURE_ARG_POINTER(_result);
+-
+-  *_result = NS_ISUPPORTS_CAST(nsISSLStatus*, mSSLStatus);
++  *_result = mSSLStatus;
+   NS_IF_ADDREF(*_result);
+ 
+   return NS_OK;
+ }
+ 
+ nsresult nsNSSSocketInfo::SetSSLStatus(nsSSLStatus *aSSLStatus)
+ {
+   mSSLStatus = aSSLStatus;
+diff --git a/security/manager/ssl/src/nsNSSIOLayer.h b/security/manager/ssl/src/nsNSSIOLayer.h
+--- a/security/manager/ssl/src/nsNSSIOLayer.h
++++ b/security/manager/ssl/src/nsNSSIOLayer.h
+@@ -47,17 +47,16 @@
+ #include "mozilla/Mutex.h"
+ #include "nsString.h"
+ #include "nsIInterfaceRequestor.h"
+ #include "nsIInterfaceRequestorUtils.h"
+ #include "nsITransportSecurityInfo.h"
+ #include "nsISSLSocketControl.h"
+ #include "nsSSLStatus.h"
+ #include "nsISSLStatusProvider.h"
+-#include "nsIIdentityInfo.h"
+ #include "nsIAssociatedContentSecurity.h"
+ #include "nsXPIDLString.h"
+ #include "nsNSSShutDown.h"
+ #include "nsIClientAuthDialogs.h"
+ #include "nsAutoPtr.h"
+ #include "nsNSSCertificate.h"
+ #include "nsDataHashtable.h"
+ 
+@@ -126,34 +125,32 @@ public:
+   unsigned char mThePendingByte;
+   PRInt32 mOriginalRequestedTransferAmount;
+ };
+ 
+ class nsNSSSocketInfo : public nsITransportSecurityInfo,
+                         public nsISSLSocketControl,
+                         public nsIInterfaceRequestor,
+                         public nsISSLStatusProvider,
+-                        public nsIIdentityInfo,
+                         public nsIAssociatedContentSecurity,
+                         public nsISerializable,
+                         public nsIClassInfo,
+                         public nsIClientAuthUserDecision,
+                         public nsNSSShutDownObject,
+                         public nsOnPK11LogoutCancelObject
+ {
+ public:
+   nsNSSSocketInfo();
+   virtual ~nsNSSSocketInfo();
+   
+   NS_DECL_ISUPPORTS
+   NS_DECL_NSITRANSPORTSECURITYINFO
+   NS_DECL_NSISSLSOCKETCONTROL
+   NS_DECL_NSIINTERFACEREQUESTOR
+   NS_DECL_NSISSLSTATUSPROVIDER
+-  NS_DECL_NSIIDENTITYINFO
+   NS_DECL_NSIASSOCIATEDCONTENTSECURITY
+   NS_DECL_NSISERIALIZABLE
+   NS_DECL_NSICLASSINFO
+   NS_DECL_NSICLIENTAUTHUSERDECISION
+ 
+   nsresult SetSecurityState(PRUint32 aState);
+   nsresult SetShortSecurityDescription(const PRUnichar *aText);
+   void SetErrorMessage(const PRUnichar *aText);
+@@ -168,19 +165,16 @@ public:
+   nsresult SetHandshakePending(bool aHandshakePending);
+ 
+   nsresult GetHostName(char **aHostName);
+   nsresult SetHostName(const char *aHostName);
+ 
+   nsresult GetPort(PRInt32 *aPort);
+   nsresult SetPort(PRInt32 aPort);
+ 
+-  nsresult GetCert(nsIX509Cert** _result);
+-  nsresult SetCert(nsIX509Cert *aCert);
+-
+   nsresult GetPreviousCert(nsIX509Cert** _result);
+ 
+   void SetCanceled(bool aCanceled);
+   bool GetCanceled();
+   
+   void SetHasCleartextPhase(bool aHasCleartextPhase);
+   bool GetHasCleartextPhase();
+   
+@@ -192,30 +186,28 @@ public:
+ 
+   bool GetExternalErrorReporting();
+ 
+   nsresult RememberCAChain(CERTCertList *aCertList);
+ 
+   /* Set SSL Status values */
+   nsresult SetSSLStatus(nsSSLStatus *aSSLStatus);
+   nsSSLStatus* SSLStatus() { return mSSLStatus; }
+-  bool hasCertErrors();
+   
+   PRStatus CloseSocketAndDestroy();
+   
+   bool IsCertIssuerBlacklisted() const {
+     return mIsCertIssuerBlacklisted;
+   }
+   void SetCertIssuerBlacklisted() {
+     mIsCertIssuerBlacklisted = true;
+   }
+ protected:
+   nsCOMPtr<nsIInterfaceRequestor> mCallbacks;
+   PRFileDesc* mFd;
+-  nsCOMPtr<nsIX509Cert> mCert;
+   nsCOMPtr<nsIX509Cert> mPreviousCert; // DocShellDependent
+   enum { 
+     blocking_state_unknown, is_nonblocking_socket, is_blocking_socket 
+   } mBlockingState;
+   PRUint32 mSecurityState;
+   PRInt32 mSubRequestsHighSecurity;
+   PRInt32 mSubRequestsLowSecurity;
+   PRInt32 mSubRequestsBrokenSecurity;

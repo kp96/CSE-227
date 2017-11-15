@@ -1,0 +1,30 @@
+? mozilla/security/manager/pki/resources/content/certerror.js
+? mozilla/security/manager/pki/resources/content/certerror.xul
+? mozilla/security/manager/ssl/public/nsIBadCertListener2.idl
+Index: mozilla/security/manager/ssl/src/nsNSSCertificateDB.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSCertificateDB.cpp,v
+retrieving revision 1.24
+diff -u -u -r1.24 nsNSSCertificateDB.cpp
+--- mozilla/security/manager/ssl/src/nsNSSCertificateDB.cpp	10 Aug 2006 19:26:06 -0000	1.24
++++ mozilla/security/manager/ssl/src/nsNSSCertificateDB.cpp	13 Nov 2006 04:17:38 -0000
+@@ -826,6 +826,10 @@
+   nsPSMUITracker tracker;
+   if (!tracker.isUIForbidden()) {
+ 
++    nsCOMPtr<nsIInterfaceRequestor> my_cxt = ctx;
++    if (!my_cxt)
++      my_cxt = new PipUIContext();
++
+     // This shall be replaced by embedding ovverridable prompts
+     // as discussed in bug 310446, and should make use of certToShow.
+ 
+@@ -841,7 +845,7 @@
+       nsCOMPtr<nsIInterfaceRequestor> proxiedCallbacks;
+       NS_GetProxyForObject(NS_PROXY_TO_MAIN_THREAD,
+                            NS_GET_IID(nsIInterfaceRequestor),
+-                           ctx,
++                           my_cxt,
+                            NS_PROXY_SYNC,
+                            getter_AddRefs(proxiedCallbacks));
+     

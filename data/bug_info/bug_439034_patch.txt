@@ -1,0 +1,121 @@
+Index: content/xml/document/src/nsXMLDocument.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/content/xml/document/src/nsXMLDocument.cpp,v
+retrieving revision 1.225.4.4
+diff -u -9 -p -r1.225.4.4 nsXMLDocument.cpp
+--- content/xml/document/src/nsXMLDocument.cpp	30 Jan 2008 20:36:25 -0000	1.225.4.4
++++ content/xml/document/src/nsXMLDocument.cpp	15 Aug 2008 21:29:46 -0000
+@@ -288,49 +288,28 @@ nsXMLDocument::GetInterface(const nsIID&
+ 
+ // nsIChannelEventSink
+ NS_IMETHODIMP
+ nsXMLDocument::OnChannelRedirect(nsIChannel *aOldChannel,
+                                  nsIChannel *aNewChannel,
+                                  PRUint32 aFlags)
+ {
+   NS_PRECONDITION(aNewChannel, "Redirecting to null channel?");
+ 
+-  nsCOMPtr<nsIURI> newLocation;
+-  nsresult rv = aNewChannel->GetURI(getter_AddRefs(newLocation)); // The redirected URI
+-  if (NS_FAILED(rv)) 
+-    return rv;
+-
+-  nsIScriptSecurityManager *secMan = nsContentUtils::GetSecurityManager();
+-
+-  if (mScriptContext && !mCrossSiteAccessEnabled) {
+-    nsCOMPtr<nsIJSContextStack> stack(do_GetService("@mozilla.org/js/xpc/ContextStack;1", & rv));
+-    if (NS_FAILED(rv))
+-      return rv;
+-
+-    JSContext *cx = (JSContext *)mScriptContext->GetNativeContext();
+-    if (!cx)
+-      return NS_ERROR_UNEXPECTED;
+-
+-    stack->Push(cx);
+-
+-    rv = secMan->CheckSameOrigin(nsnull, newLocation);
++  nsCOMPtr<nsIURI> oldURI;
++  nsresult rv = aOldChannel->GetURI(getter_AddRefs(oldURI));
++  NS_ENSURE_SUCCESS(rv, rv);
+ 
+-    stack->Pop(&cx);
+-  
+-    if (NS_FAILED(rv)) {
+-      // The security manager set a pending exception.  Since we're
+-      // running under the event loop, we need to report it.
+-      ::JS_ReportPendingException(cx);
+-      return rv;
+-    }
+-  }
++  nsCOMPtr<nsIURI> newURI;
++  rv = aNewChannel->GetURI(getter_AddRefs(newURI));
++  NS_ENSURE_SUCCESS(rv, rv);
+ 
+-  return secMan->GetCodebasePrincipal(newLocation, getter_AddRefs(mPrincipal));
++  return nsContentUtils::GetSecurityManager()->
++    CheckSameOriginURI(oldURI, newURI);
+ }
+ 
+ NS_IMETHODIMP
+ nsXMLDocument::EvaluateFIXptr(const nsAString& aExpression, nsIDOMRange **aRange)
+ {
+   nsresult rv;
+   nsCOMPtr<nsIFIXptrEvaluator> e =
+     do_CreateInstance("@mozilla.org/xmlextras/fixptrevaluator;1", &rv);
+   NS_ENSURE_SUCCESS(rv, rv);
+@@ -461,29 +440,18 @@ nsXMLDocument::Load(const nsAString& aUr
+     // this code the exception might be lost.
+     return NS_OK;
+   }
+ 
+   // Store script context, if any, in case we encounter redirect
+   // (because we need it there)
+ 
+   mScriptContext = callingContext;
+ 
+-  // Find out if UniversalBrowserRead privileges are enabled - we will
+-  // need this in case of a redirect
+-  PRBool crossSiteAccessEnabled;
+-  rv = secMan->IsCapabilityEnabled("UniversalBrowserRead",
+-                                   &crossSiteAccessEnabled);
+-  if (NS_FAILED(rv)) {
+-    return rv;
+-  }
+-
+-  mCrossSiteAccessEnabled = crossSiteAccessEnabled;
+-
+   // Create a channel
+   // When we are called from JS we can find the load group for the page,
+   // and add ourselves to it. This way any pending requests
+   // will be automatically aborted if the user leaves the page.
+   nsCOMPtr<nsILoadGroup> loadGroup;
+   GetLoadGroup(getter_AddRefs(loadGroup));
+ 
+   nsCOMPtr<nsIChannel> channel;
+   // nsIRequest::LOAD_BACKGROUND prevents throbber from becoming active,
+Index: content/xml/document/src/nsXMLDocument.h
+===================================================================
+RCS file: /cvsroot/mozilla/content/xml/document/src/nsXMLDocument.h,v
+retrieving revision 1.81.4.1
+diff -u -9 -p -r1.81.4.1 nsXMLDocument.h
+--- content/xml/document/src/nsXMLDocument.h	22 Jan 2008 23:04:05 -0000	1.81.4.1
++++ content/xml/document/src/nsXMLDocument.h	15 Aug 2008 21:29:46 -0000
+@@ -105,18 +105,17 @@ protected:
+   nsCOMPtr<nsIScriptContext> mScriptContext;
+ 
+   // mChannelIsPending indicates whether we're currently asynchronously loading
+   // data from mChannel (via document.load() or normal load).  It's set to true
+   // when we first find out about the channel (StartDocumentLoad) and set to
+   // false in EndLoad or if ResetToURI() is called.  In the latter case our
+   // mChannel is also cancelled.  Note that if this member is true, mChannel
+   // cannot be null.
+   PRPackedBool mChannelIsPending;
+-  PRPackedBool mCrossSiteAccessEnabled;
+   PRPackedBool mLoadedAsData;
+   PRPackedBool mLoadedAsInteractiveData;
+   PRPackedBool mAsync;
+   PRPackedBool mLoopingForSyncLoad;
+ };
+ 
+ 
+ #endif // nsXMLDocument_h___

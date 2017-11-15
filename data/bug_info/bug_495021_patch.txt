@@ -1,0 +1,43 @@
+diff --git a/caps/Makefile.in b/caps/Makefile.in
+--- a/caps/Makefile.in
++++ b/caps/Makefile.in
+@@ -38,12 +38,16 @@
+ DEPTH		= ..
+ topsrcdir	= @top_srcdir@
+ srcdir		= @srcdir@
+ VPATH		= @srcdir@
+ 
+ include $(DEPTH)/config/autoconf.mk
+ 
+ MODULE		= caps
+-DIRS		= idl include src tests
++DIRS		= idl include src
++
++ifdef ENABLE_TESTS
++DIRS		+= tests
++endif
+ 
+ include $(topsrcdir)/config/rules.mk
+ 
+diff --git a/toolkit/toolkit-makefiles.sh b/toolkit/toolkit-makefiles.sh
+--- a/toolkit/toolkit-makefiles.sh
++++ b/toolkit/toolkit-makefiles.sh
+@@ -438,16 +438,18 @@ MAKEFILES_rdf="
+   rdf/tests/rdfpoll/Makefile
+ "
+ 
+ MAKEFILES_caps="
+   caps/Makefile
+   caps/idl/Makefile
+   caps/include/Makefile
+   caps/src/Makefile
++  caps/tests/Makefile
++  caps/tests/mochitest/Makefile
+ "
+ 
+ MAKEFILES_chrome="
+   chrome/Makefile
+   chrome/public/Makefile
+   chrome/src/Makefile
+ "
+ 

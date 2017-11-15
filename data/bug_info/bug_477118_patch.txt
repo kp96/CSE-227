@@ -1,0 +1,97 @@
+From: Honza Bambas <honzab.moz@firemni.cz>
+
+Bug 477118 - https webpage with data: images trigger a 'Page contains unencrypted information' with Firefox 3.1
+
+diff --git a/security/manager/boot/src/nsSecureBrowserUIImpl.cpp b/security/manager/boot/src/nsSecureBrowserUIImpl.cpp
+--- a/security/manager/boot/src/nsSecureBrowserUIImpl.cpp
++++ b/security/manager/boot/src/nsSecureBrowserUIImpl.cpp
+@@ -840,26 +840,27 @@ nsSecureBrowserUIImpl::OnStateChange(nsI
+           if (!ftpRequest) {
+             PR_LOG(gSecureDocLog, PR_LOG_DEBUG,
+                    ("SecureUI:%p: OnStateChange: not relevant for sub content\n", this));
+             isSubDocumentRelevant = PR_FALSE;
+           }
+         }
+       }
+     }
+   }
+ 
+-  // ignore all resource:// URIs
++  // This will ignore all resource, chrome, data, file, moz-icon, and anno
++  // protocols. Local resources are treated as trusted.
+   if (uri && ioService) {
+     PRBool hasFlag;
+     nsresult rv = 
+       ioService->URIChainHasFlags(uri, 
+-                                  nsIProtocolHandler::URI_IS_UI_RESOURCE, 
++                                  nsIProtocolHandler::URI_IS_LOCAL_RESOURCE,
+                                   &hasFlag);
+     if (NS_SUCCEEDED(rv) && hasFlag) {
+       isSubDocumentRelevant = PR_FALSE;
+     }
+   }
+ 
+ #if defined(DEBUG)
+   nsCString info2;
+   PRUint32 testFlags = loadFlags;
+ 
+diff --git a/security/manager/ssl/tests/mochitest/mixedcontent/Makefile.in b/security/manager/ssl/tests/mochitest/mixedcontent/Makefile.in
+--- a/security/manager/ssl/tests/mochitest/mixedcontent/Makefile.in
++++ b/security/manager/ssl/tests/mochitest/mixedcontent/Makefile.in
+@@ -60,20 +60,21 @@ _TEST_FILES = \
+         iframe2.html \
+         iframeMetaRedirect.html \
+         mixedContentTest.js \
+         moonsurface.jpg \
+         redirect.sjs \
+         somestyle.css \
+         test_bug329869.html \
+         test_bug383369.html \
+         test_bug455367.html \
+         test_bug472986.html \
++        test_bug477118.html \
+         test_bug506008.html \
+         test_cssBefore1.html \
+         test_cssContent1.html \
+         test_cssContent2.html \
+         test_documentWrite1.html \
+         test_documentWrite2.html \
+         test_dynDelayedUnsecurePicture.html \
+         test_dynDelayedUnsecureXHR.html \
+         test_dynUnsecureBackground.html \
+         test_dynUnsecureIframeRedirect.html \
+diff --git a/security/manager/ssl/tests/mochitest/mixedcontent/test_bug477118.html b/security/manager/ssl/tests/mochitest/mixedcontent/test_bug477118.html
+new file mode 100644
+--- /dev/null
++++ b/security/manager/ssl/tests/mochitest/mixedcontent/test_bug477118.html
+@@ -0,0 +1,30 @@
++<!DOCTYPE HTML>
++<html>
++<head>
++  <title>Bug 477118</title>
++  <script type="text/javascript" src="/MochiKit/packed.js"></script>
++  <script type="text/javascript" src="/tests/SimpleTest/SimpleTest.js"></script>
++  <script type="text/javascript" src="mixedContentTest.js"></script>
++  <link rel="stylesheet" type="text/css" href="/tests/SimpleTest/test.css" />
++
++  <script class="testbody" type="text/javascript">
++
++  function runTest()
++  {
++    isSecurityState("secure", "data <img> doesn't break security");
++    finish();
++  }
++
++  function afterNavigationTest()
++  {
++    isSecurityState("secure", "still secure after navigation");
++    finish();
++  }
++
++  </script>
++</head>
++
++<body>
++  <img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAAXNSR0IArs4c6QAAAAZiS0dEAP8A/wD/oL2nkwAAAAlwSFlzAAAN1wAADdcBQiibeAAAAAd0SU1FB9kBDxIAOdxBIbcAAAI+SURBVDjLxZO7TxRhFMV/M/PN7EPYhS02yytggo+ERAgxERsNhYnGzsQojaHT3r9F0cTaUjs6NUQLBRKDi4I8FEwkLMgO+5rdeX3XAoVYiZWnP797cu69Bv8gqZ+0QTqIdRpl1VHGvnV884CJwQgwicVtoB/ku/H4ycOnURgP/Q1g21Fw4+r0RjbbNmaq4ayO35UkXp9S2UzHxK2bE4QNl82FVwD0D49jn+hERBCRgwTiIX7pvGUGYF/BlO327d3ENfV7wuL0AyjPICIsfPvAmev3qdVqlMtlCoUCGxurDPT1kEnPomQKkRTFpXOjh4DN4kvGLuSJ/JC38y/ouXyXYrGIiBDHMVtbu1SrvXTlbfp6HcQcoVwp5hRAaWedPXFYfL+E1lAKswSRy+joKEEQICLkcjm01hiGgRcksW0b4SMKYHb+OSt6ma+VffxWRF3S5OeeMX7pHkqpwy5EBK31H90ogFODF1lbm8OtlEhloDORpbdnhDAMaTabhwbbtkkkEkRRhGVZR4BCfojJO4+o1VwQAItEIolpmliWRVtbG7s/dlDKotGo47U8CvkuAEwA3/eJoxhE0WyGuO4+nucRBAHVahXDMKg3agRhQBAGVKsVtNZHCRzHwTAMcrnc0eX9it3e3g7A6cGzhx0AKHWwQOV5jdXXb2ZOaa3BOP5ffF5ZptVqflG+3xpbWv5kh2FolEo7dnmv7Lium6zXG0nf95MiguM4QTqd9jPZTCvX2eF393QHqVRKZ7KZkP+unzPGLX8Jr7F8AAAAAElFTkSuQmCC" />
++</body>
++</html>

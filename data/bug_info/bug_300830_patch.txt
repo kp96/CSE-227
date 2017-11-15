@@ -1,0 +1,23 @@
+Index: caps/src/nsScriptSecurityManager.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/caps/src/nsScriptSecurityManager.cpp,v
+retrieving revision 1.266
+diff -u -p -6 -r1.266 nsScriptSecurityManager.cpp
+--- caps/src/nsScriptSecurityManager.cpp	22 Jul 2005 19:05:40 -0000	1.266
++++ caps/src/nsScriptSecurityManager.cpp	28 Jul 2005 23:32:13 -0000
+@@ -1167,13 +1167,14 @@ nsScriptSecurityManager::GetBaseURISchem
+             return NS_ERROR_FAILURE;
+         if (path.EqualsLiteral("blank")   ||
+             path.EqualsLiteral("mozilla") ||
+             path.EqualsLiteral("logo")    ||
+             path.EqualsLiteral("license") ||
+             path.EqualsLiteral("licence") ||
+-            path.EqualsLiteral("credits"))
++            path.EqualsLiteral("credits") ||
++            Substring(path,0,9).EqualsLiteral("neterror?"))
+         {
+             aScheme = NS_LITERAL_CSTRING("about safe");
+             return NS_OK;
+         }
+     }
+ 

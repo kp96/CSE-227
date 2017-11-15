@@ -1,0 +1,119 @@
+Index: toolkit/content/commonDialog.js
+===================================================================
+RCS file: /cvsroot/mozilla/toolkit/content/commonDialog.js,v
+retrieving revision 1.8
+diff -u -p -8 -r1.8 commonDialog.js
+--- toolkit/content/commonDialog.js	20 Feb 2005 21:51:30 -0000	1.8
++++ toolkit/content/commonDialog.js	24 Jul 2005 15:10:23 -0000
+@@ -94,17 +94,21 @@ function setLabelForNode(aNode, aLabel, 
+   } else {    // Set text for other xul elements
+     aNode.label = aLabel;
+   }
+ }
+ 
+ function commonDialogOnLoad()
+ {
+   // set the document title
++#ifdef XP_MACOSX
++  setElementText("info.title", gCommonDialogParam.GetString(12), true);
++#else
+   document.title = gCommonDialogParam.GetString(12);
++#endif
+ 
+   // set the number of command buttons
+   var nButtons = gCommonDialogParam.GetInt(2);
+   var dialog = document.documentElement;
+   switch (nButtons) {
+     case 1:
+       dialog.getButton("cancel").hidden = true;
+       break;
+Index: toolkit/content/commonDialog.xul
+===================================================================
+RCS file: /cvsroot/mozilla/toolkit/content/commonDialog.xul,v
+retrieving revision 1.5
+diff -u -p -8 -r1.5 commonDialog.xul
+--- toolkit/content/commonDialog.xul	18 Dec 2004 22:51:04 -0000	1.5
++++ toolkit/content/commonDialog.xul	24 Jul 2005 15:10:24 -0000
+@@ -16,16 +16,21 @@
+   <script type="application/x-javascript" src="chrome://global/content/commonDialog.js"/>
+ 
+   <hbox flex="1">
+     <hbox align="start">
+       <image id="info.icon" class="spaced"/>
+     </hbox>
+     
+     <vbox flex="1" style="max-width: 45em;">
++#ifdef XP_MACOSX
++# On mac, we're exposing the dialog title inside the dialog
++      <!-- Dialog title -->
++      <description id="info.title" class="dialogTitle"/>
++#endif
+       <!-- text -->
+       <description id="info.header" class="header"/>
+       <vbox id="info.box"/>
+ 
+       <!-- textboxes -->
+       <vbox id="loginContainer" hidden="true">
+         <label id="loginLabel" value="&editfield0.label;" control="loginTextbox"/>
+         <textbox id="loginTextbox"/>
+Index: toolkit/content/jar.mn
+===================================================================
+RCS file: /cvsroot/mozilla/toolkit/content/jar.mn,v
+retrieving revision 1.16
+diff -u -p -8 -r1.16 jar.mn
+--- toolkit/content/jar.mn	17 Jun 2005 18:11:00 -0000	1.16
++++ toolkit/content/jar.mn	24 Jul 2005 15:10:24 -0000
+@@ -5,18 +5,18 @@ toolkit.jar:
+ +  content/global/MPL-1.1.html                (MPL-1.1.html)
+    content/global/NPL-1.1.html                (NPL-1.1.html)
+    content/global/XPCNativeWrapper.js         (XPCNativeWrapper.js)
+ *  content/global/xul.css                     (xul.css)
+ *  content/global/about.xhtml                 (about.xhtml)
+ +  content/global/buildconfig.html            (buildconfig.html)
+ +  content/global/charsetOverlay.js           (charsetOverlay.js)
+ +  content/global/charsetOverlay.xul          (charsetOverlay.xul)
+-+  content/global/commonDialog.js             (commonDialog.js)
+-+  content/global/commonDialog.xul            (commonDialog.xul)
++*+  content/global/commonDialog.js             (commonDialog.js)
++*+  content/global/commonDialog.xul            (commonDialog.xul)
+ *  content/global/contentAreaUtils.js         (contentAreaUtils.js)
+ *  content/global/customizeCharset.js         (customizeCharset.js)
+ *  content/global/customizeCharset.xul        (customizeCharset.xul)
+    content/global/customizeToolbar.css        (customizeToolbar.css)
+ *  content/global/customizeToolbar.js         (customizeToolbar.js)
+ *  content/global/customizeToolbar.xul        (customizeToolbar.xul)
+ +  content/global/editMenuOverlay.js          (editMenuOverlay.js)
+ *+ content/global/editMenuOverlay.xul         (editMenuOverlay.xul)
+Index: toolkit/themes/pinstripe/global/formatting.css
+===================================================================
+RCS file: /cvsroot/mozilla/toolkit/themes/pinstripe/global/formatting.css,v
+retrieving revision 1.3
+diff -u -p -8 -r1.3 formatting.css
+--- toolkit/themes/pinstripe/global/formatting.css	27 Mar 2005 11:36:01 -0000	1.3
++++ toolkit/themes/pinstripe/global/formatting.css	24 Jul 2005 15:10:29 -0000
+@@ -219,21 +219,23 @@
+ 
+   .caption-text
+     {
+       margin: 0px 2px 0px 1px !important;
+     }
+ 
+ #commonDialog > hbox > vbox > description, #commonDialog > hbox > vbox > vbox > description {
+ 	font: menu;
+-	font-weight: bold !important;
+-        line-height: 16px;
++    line-height: 16px;
+ 	margin-bottom: 6px;
+ }
+ 
++#commonDialog .dialogTitle {
++  font-weight: bold !important;
++}
+ 
+ /* class for text with a 'link' appearance */
+   .text-link
+     {
+       color                 : blue;
+       text-decoration       : underline;
+     }
+   

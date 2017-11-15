@@ -1,0 +1,334 @@
+Index: embed-replacements/skin/classic/global/netError.css
+===================================================================
+RCS file: /cvsroot/mozilla/camino/embed-replacements/skin/classic/global/netError.css,v
+retrieving revision 1.8
+diff -u -8 -r1.8 netError.css
+--- embed-replacements/skin/classic/global/netError.css	27 Jul 2009 17:48:59 -0000	1.8
++++ embed-replacements/skin/classic/global/netError.css	6 Aug 2009 05:09:50 -0000
+@@ -144,39 +144,42 @@
+ #securityOverrideContent > button {
+   margin: 0;
+ }
+ 
+ /* Custom styling for 'blacklist' error class - bug 380932  */
+ :root.blacklist #errorTitle, :root.blacklist #errorLongContent,
+ :root.blacklist #errorShortDesc, :root.blacklist #errorLongDesc,
+ :root.blacklist a {
+-  background-color: #763033;
+-  color: white;
++  background-color: #e8e8e8;
++  color: black;
+ }
+ 
+ :root.blacklist #errorPageContainer {
+   background-image: url("chrome://global/skin/icons/blacklist.png");
+-  background-color: #763033;
++  background-color: #e8e8e8;
++  border: 2px solid black;
+ }
+ 
+ :root.blacklist {
+-  background: #353535;
++  background: #722;
+ }
+ 
+ :root.blacklist #errorTryAgain {
+   display: none;
+ }
+ 
+ :root.blacklist #errorShortDesc > p {
+-  color: #ffdc00;
++  color: black;
++  font-weight: bold;
++  border-bottom: 1px solid black;
+ }
+ 
+ :root.blacklist #errorTitle h1 {
+-  color: white;
++  color: #722;
+ }
+ 
+ :root.blacklist #buttons {
+   padding-top: 10px;
+ }
+ 
+ ul strong {
+ 	color: #000;
+Index: resources/application/blockedSite.xhtml
+===================================================================
+RCS file: /cvsroot/mozilla/camino/resources/application/blockedSite.xhtml,v
+retrieving revision 1.1
+diff -u -8 -r1.1 blockedSite.xhtml
+--- resources/application/blockedSite.xhtml	9 Mar 2009 04:19:55 -0000	1.1
++++ resources/application/blockedSite.xhtml	6 Aug 2009 05:09:50 -0000
+@@ -27,16 +27,18 @@
+    -
+    - Contributor(s):
+    -   Adam Lock <adamlock@netscape.com>
+    -   William R. Price <wrprice@alumni.rice.edu>
+    -   Henrik Skupin <mozilla@hskupin.info>
+    -   Jeff Walden <jwalden+code@mit.edu>
+    -   Johnathan Nightingale <johnath@mozilla.com>
+    -   Sean Murphy <murph@seanmurph.com>
++   -   Smokey Ardisson <alqahira@ardisson.org>
++   -   Christopher Henderson <trendyhendy2000@gmail.com>
+    -
+    - Alternatively, the contents of this file may be used under the terms of
+    - either the GNU General Public License Version 2 or later (the "GPL"), or
+    - the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
+    - in which case the provisions of the GPL or the LGPL are applicable instead
+    - of those above. If you wish to allow use of your version of this file only
+    - under the terms of either the GPL or the LGPL, and not to allow others to
+    - use your version of this file under the terms of the MPL, indicate your
+@@ -98,16 +100,18 @@
+         switch(getErrorCode()) {
+           case "malwareBlocked" :
+             initPage_malware();
+             break;
+           case "phishingBlocked" :
+             initPage_phishing();
+             break;
+         }
++        // Give the overlay a sane initial focus, the default button
++        document.getElementById("getMeOutButton").focus();
+       }        
+       
+       /**
+        * Initialize custom strings and functionality for blocked malware case
+        */
+       function initPage_malware()
+       {
+         // Remove phishing strings
+@@ -141,44 +145,58 @@
+         el = document.getElementById("errorLongDescText_malware");
+         el.parentNode.removeChild(el);
+ 
+         // Set sitename
+         document.getElementById("phishing_sitename").textContent = getHostString();
+         document.title = document.getElementById("errorTitleText_phishing")
+                                  .innerHTML;
+       }
++
++      /**
++       * Handle keypress events in the overlay. Click the default button
++       * if the enter/return key was pressed.
++       */
++      function handleKeypress(anEvent)
++      {
++        var outButton = document.getElementById("getMeOutButton");
++        if (anEvent.which == 13) {
++          outButton.click();
++          return true;
++        }
++        return false;
++      }
+     ]]></script>
+     <style type="text/css">
+-      /* Style warning button to look like a small text link in the
+-         bottom right. This is preferable to just using a text link
+-         since there is already a mechanism in browser.js for trapping
+-         oncommand events from unprivileged chrome pages (BrowserOnCommand).*/
++      /* CSS rules to make the buttons appear somewhat like a Mac OS X dialog.
++         These probably belong in netError.css, but Firefox had similar weird 
++         style rules here. */
+       #ignoreWarningButton {
+-        -moz-appearance: none;
+-        background: transparent;
+-        border: none;
+-        color: white;  /* Hard coded because netError.css forces this page's background to dark red */
+-        text-decoration: underline;
+-        margin: 0;
+-        padding: 0;
+-        position: relative;
+-        top: 23px;
+-        left: 20px;
+-        font-size: smaller;
+-        cursor: pointer;
++        /* Per HIG, there should be 24px between dangerous buttons and other
++           buttons. The buttons have a 6px margin on each side by default
++           (beginning after the 1px shadow) and the whitespace node between the
++           buttons takes 4px. Since Cocoa does not consider the shadow to be
++           part of the button’s width, use 12px as margin-right to achieve 24px
++           of space between the two buttons. */
++        margin-right: 12px;
++      }
++
++      #getMeOutButton {
++        /* Align the button’s right edge with the right edge of the 
++           border-bottom from the errorShortDesc div. */
++        margin-right: -2px;
+       }
+-      
+-      #ignoreWarning {
++
++      #buttons {
+         text-align: right;
+       }
+     </style>
+   </head>
+ 
+-  <body>
++  <body onkeypress="handleKeypress(event)">
+     <div id="errorPageContainer">
+     
+       <!-- Error Title -->
+       <div id="errorTitle">
+         <h1 id="errorTitleText_phishing">PhishingTitleText</h1>
+         <h1 id="errorTitleText_malware">MalwareTitleText</h1>
+       </div>
+       
+@@ -189,31 +207,28 @@
+           <p id="errorShortDescText_phishing">PhishingShortDescText</p>
+           <p id="errorShortDescText_malware">MalwareShortDescText</p>
+         </div>
+ 
+         <!-- Long Description -->
+         <div id="errorLongDesc">
+           <p id="errorLongDescText_phishing">PhishingLongDescText</p>
+           <p id="errorLongDescText_malware">MalwareLongDescText</p>
++          <p id="errorLongDescText_whyBlocked">MoreInformationText</p>
+         </div>
+         
+         <!-- Action buttons -->
+         <div id="buttons">
+-          <!-- Commands handled in browser.js -->
++          <!-- Commands handled in BrowserWrapper -->
+           <xul:button xmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+-                      id="getMeOutButton" label="GetMeOutButtonLabel"/>
++                      id="ignoreWarningButton" label="IgnoreWarningButtonLabel"/>
+           <xul:button xmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+-                      id="whyBlockedButton" label="MoreInformationButtonLabel"/>
++                      id="getMeOutButton" label="GetMeOutButtonLabel" default="true"/>
+         </div>
+       </div>
+-      <div id="ignoreWarning">
+-        <xul:button xmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+-                    id="ignoreWarningButton" label="IgnoreWarningButtonLabel"/>
+-      </div>
+     </div>
+     <!--
+     - Note: It is important to run the script this way, instead of using
+     - an onload handler. This is because error pages are loaded as
+     - LOAD_BACKGROUND, which means that onload handlers will not be executed.
+     -->
+     <script type="application/javascript">initPage();</script>
+   </body>
+Index: resources/application/all-camino.js.in
+===================================================================
+RCS file: /cvsroot/mozilla/camino/resources/application/all-camino.js.in,v
+retrieving revision 1.24
+diff -u -8 -r1.24 all-camino.js.in
+--- resources/application/all-camino.js.in	6 Jul 2009 20:33:19 -0000	1.24
++++ resources/application/all-camino.js.in	6 Aug 2009 05:09:50 -0000
+@@ -234,18 +234,18 @@
+ pref("browser.safebrowsing.provider.0.reportPhishingURL", "http://www.google.com/safebrowsing/report_phish/?tpl=generic&continue=%CONTINUE_TO_URL%&url=%REPORTED_URL%&hl=%LANGUAGE%");
+ pref("browser.safebrowsing.provider.0.reportPhishingErrorURL", "http://www.google.com/safebrowsing/report_error/?tpl=generic&continue=%CONTINUE_TO_URL%&url=%REPORTED_URL%&hl=%LANGUAGE%");
+ pref("browser.safebrowsing.provider.0.reportMalwareURL", "http://www.google.com/safebrowsing/report_badware/?tpl=generic&continue=%CONTINUE_TO_URL%&url=%REPORTED_URL%&hl=%LANGUAGE%");
+ pref("browser.safebrowsing.provider.0.reportMalwareErrorURL", "http://google.com/safebrowsing/diagnostic?tpl={moz:client}&site=%REPORTED_URL%&hl=%LANGUAGE%");
+ 
+ // URL the user is forwarded to after submitting an error report
+ pref("browser.safebrowsing.sendToURLAfterReporting", "http://caminobrowser.org/security/report-submitted.php");
+ 
+-// Location to more information about the safe browsing feature
+-pref("browser.safebrowsing.warning.infoURL", "http://en-us.www.mozilla.com/en-US/firefox/phishing-protection/");
++// Location of more information about the safe browsing feature
++pref("browser.safebrowsing.warning.infoURL", "http://caminobrowser.org/documentation/security/#safebrowsing");
+ 
+ // Name of the about: page contributed by safebrowsing to handle display of error
+ // pages on phishing/malware hits.
+ pref("urlclassifier.alternate_error_page", "safebrowsingblocked");
+ 
+ // The number of random entries to send with a gethash request.
+ pref("urlclassifier.gethashnoise", 4);
+ 
+Index: resources/localized/English.lproj/Localizable.strings.in
+===================================================================
+RCS file: /cvsroot/mozilla/camino/resources/localized/English.lproj/Localizable.strings.in,v
+retrieving revision 1.39
+diff -u -8 -r1.39 Localizable.strings.in
+--- resources/localized/English.lproj/Localizable.strings.in	2 Jun 2009 03:44:48 -0000	1.39
++++ resources/localized/English.lproj/Localizable.strings.in	6 Aug 2009 05:09:53 -0000
+@@ -514,20 +514,30 @@
+ 
+ /* Growl */
+ "GrowlDownloadStarted" = "Download Started";
+ "GrowlDownloadFailed" = "Download Failed";
+ "GrowlDownloadComplete" = "Download Complete";
+ "GrowlShortDownloadComplete" = "Short Download Complete";
+ 
+ /* Safe Browsing */
+-"PhishingTitleText" = "Reported Web Forgery!";
+-"MalwareTitleText" = "Reported Attack Site!";
++/* Please translate these strings with care, because we are required to
++   indicate that the protection provided by this feature is not perfect.
++   Specifically, not all malicious sites will be identified, and some sites may
++   falsely be indentifed as malicious, so warning messages should indicate
++   these are “suspected” or “reported” to be dangerous and that they “possibly” or
++   “may” steal your data. */
++"PhishingTitleText" = "Reported Phishing Site";
++"MalwareTitleText" = "Reported Malware Site";
+ /* For the short descriptions, please do not translate the contents of the <span> tags. 
+    They will be replaced at runtime with a domain name. */
+-"PhishingShortDescText" = "This web site at <span id='phishing_sitename'/> has been reported as a web forgery and has been blocked based on your security preferences.";
+-"MalwareShortDescText" = "This web site at <span id='malware_sitename'/> has been reported as an attack site and has been blocked based on your security preferences.";
+-/* To create paragraphs within the long description text, please wrap each paragraph in <p></p> tags */
+-"PhishingLongDescText" = "<p>Web forgeries are designed to trick you into revealing personal or financial information by imitating sources you may trust.</p><p>Entering any information on this web page may result in identity theft or other fraud.</p>";
+-"MalwareLongDescText" = "<p>Attack sites try to install programs that steal private information, use your computer to attack others, or damage your system.</p><p>Some attack sites intentionally distribute harmful software, but many are compromised without the knowledge or permission of their owners.</p>";
++"PhishingShortDescText" = "This web site at <span id='phishing_sitename'/> has been reported as a phishing site and has been blocked for your protection.";
++"MalwareShortDescText" = "This web site at <span id='malware_sitename'/> has been reported as a malware site and has been blocked for your protection.";
++/* To create paragraphs within the long description text, please wrap each 
++   paragraph in <p></p> tags.  Because these strings appear in an XHTML page, 
++   each LongDescText string must begin with a <p> and end with a </p> or the 
++   safe browsing page will not display. */
++"PhishingLongDescText" = "<p>Phishing sites are designed to trick you into revealing personal or financial information by creating copies of trusted websites.</p><p>Entering any information on this web page may result in identity theft or other fraud.</p>";
++"MalwareLongDescText" = "<p>Malware sites try to install programs that steal private information, use your computer to attack others, or damage your system.</p><p>Some malware sites intentionally distribute harmful software, but many are compromised without the knowledge or permission of their owners.</p><p>Your computer can be infected just by proceeding to this site, without any further action on your part.</p>";
++/* Really would like to pull the URL for MoreInformationText from browser.safebrowsing.warning.infoURL in all-camino.js */
++"MoreInformationText" = "For more information about why this site was blocked, see Camino’s <a href='http://caminobrowser.org/documentation/security/#safebrowsing'>Safe Browsing Documentation</a>.";
+ "GetMeOutButtonLabel" = "Get me out of here!";
+-"MoreInformationButtonLabel" = "Why was this site blocked?";
+ "IgnoreWarningButtonLabel" = "Ignore this warning";
+Index: src/safebrowsing/SafeBrowsingAboutModule.mm
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/safebrowsing/SafeBrowsingAboutModule.mm,v
+retrieving revision 1.2
+diff -u -8 -r1.2 SafeBrowsingAboutModule.mm
+--- src/safebrowsing/SafeBrowsingAboutModule.mm	9 Mar 2009 04:20:04 -0000	1.2
++++ src/safebrowsing/SafeBrowsingAboutModule.mm	6 Aug 2009 05:09:53 -0000
+@@ -51,17 +51,17 @@
+ 
+ // Placeholders in the blocked site HTML page to replace with localized strings.
+ static NSString *const kPhishingTitleText = @"PhishingTitleText";
+ static NSString *const kMalwareTitleText = @"MalwareTitleText";
+ static NSString *const kPhishingShortDescText = @"PhishingShortDescText";
+ static NSString *const kMalwareShortDescText = @"MalwareShortDescText";
+ static NSString *const kPhishingLongDescText = @"PhishingLongDescText";
+ static NSString *const kMalwareLongDescText = @"MalwareLongDescText";
+-static NSString *const kMoreInformationButtonLabel = @"MoreInformationButtonLabel";
++static NSString *const kMoreInformationText = @"MoreInformationText";
+ static NSString *const kGetMeOutButtonLabel = @"GetMeOutButtonLabel";
+ static NSString *const kIgnoreWarningButtonLabel = @"IgnoreWarningButtonLabel";
+ 
+ NS_IMPL_ISUPPORTS1(CHSafeBrowsingAboutModule, nsIAboutModule)
+ 
+ NS_IMETHODIMP
+ CHSafeBrowsingAboutModule::NewChannel(nsIURI *aURI, nsIChannel **result)
+ {
+@@ -138,17 +138,17 @@
+ 
+   // Localize the blocked page by swapping out placeholder strings.
+   NSArray *stringPlaceholdersInPage = [NSArray arrayWithObjects:kPhishingTitleText,
+                                                                 kMalwareTitleText,
+                                                                 kPhishingShortDescText,
+                                                                 kMalwareShortDescText,
+                                                                 kPhishingLongDescText,
+                                                                 kMalwareLongDescText,
+-                                                                kMoreInformationButtonLabel,
++                                                                kMoreInformationText,
+                                                                 kGetMeOutButtonLabel,
+                                                                 kIgnoreWarningButtonLabel,
+                                                                 nil];
+ 
+   NSEnumerator *placeholderEnum = [stringPlaceholdersInPage objectEnumerator];
+   NSString *currentPlaceholder = nil;
+   while ((currentPlaceholder = [placeholderEnum nextObject])) {
+     [blockedSitePageSource replaceOccurrencesOfString:currentPlaceholder

@@ -1,0 +1,95 @@
+Index: nsIJAR.idl
+===================================================================
+RCS file: /cvsroot/mozilla/modules/libjar/nsIJAR.idl,v
+retrieving revision 1.9
+diff -u -r1.9 nsIJAR.idl
+--- nsIJAR.idl	20 Sep 2001 00:01:58 -0000	1.9
++++ nsIJAR.idl	11 Nov 2002 23:30:24 -0000
+@@ -79,6 +79,8 @@
+      * be called before getPrincipal.
+      */
+     void getCertificatePrincipal(in string aEntryName, out nsIPrincipal aPrincipal);   
++    
++    readonly attribute PRUInt32 manifestEntriesCount;
+ 
+ };
+ 
+Index: nsJAR.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/modules/libjar/nsJAR.cpp,v
+retrieving revision 1.98
+diff -u -r1.98 nsJAR.cpp
+--- nsJAR.cpp	31 Oct 2002 06:23:52 -0000	1.98
++++ nsJAR.cpp	11 Nov 2002 23:30:27 -0000
+@@ -151,7 +151,8 @@
+ // The following initialization makes a guess of 10 entries per jarfile.
+ nsJAR::nsJAR(): mManifestData(nsnull, nsnull, DeleteManifestEntry, nsnull, 10),
+                 mParsedManifest(PR_FALSE), mGlobalStatus(nsIJAR::NOT_SIGNED),
+-                mReleaseTime(PR_INTERVAL_NO_TIMEOUT), mCache(nsnull), mLock(nsnull)
++                mReleaseTime(PR_INTERVAL_NO_TIMEOUT), mCache(nsnull), mLock(nsnull),
++                mTotalItemsInManifest(0)
+ {
+   NS_INIT_ISUPPORTS();
+ }
+@@ -407,6 +408,13 @@
+   return NS_OK;
+ }
+ 
++NS_IMETHODIMP 
++nsJAR::GetManifestEntriesCount(PRUint32* count)
++{
++  *count = mTotalItemsInManifest;
++  return NS_OK;
++}
++
+ //----------------------------------------------
+ // nsJAR private implementation
+ //----------------------------------------------
+@@ -565,7 +573,7 @@
+     mParsedManifest = PR_TRUE;
+     return NS_OK;
+   }
+-  
++
+   //-- Verify that the signature file is a valid signature of the SF file
+   PRInt32 verifyError;
+   rv = verifier->VerifySignature(sigBuffer, sigLen, manifestBuffer, manifestLen, 
+@@ -629,6 +637,7 @@
+     {
+       if (aFileType == JAR_MF)
+       {
++        mTotalItemsInManifest++;
+         if (curItemMF->mType != JAR_INVALID)
+         { 
+           //-- Did this section have a name: line?
+Index: nsJAR.h
+===================================================================
+RCS file: /cvsroot/mozilla/modules/libjar/nsJAR.h,v
+retrieving revision 1.41
+diff -u -r1.41 nsJAR.h
+--- nsJAR.h	19 Oct 2001 20:52:24 -0000	1.41
++++ nsJAR.h	11 Nov 2002 23:30:28 -0000
+@@ -116,7 +116,7 @@
+     PRIntervalTime           mReleaseTime;    // used by nsZipReaderCache for flushing entries
+     nsZipReaderCache*        mCache;          // if cached, this points to the cache it's contained in
+ 	PRLock*					 mLock;	
+-
++    PRInt32                  mTotalItemsInManifest;
+     //-- Private functions
+     nsresult ParseManifest(nsISignatureVerifier* verifier);
+     void     ReportError(const char* aFilename, PRInt16 errorCode);
+Index: objs.mk
+===================================================================
+RCS file: /cvsroot/mozilla/modules/libjar/objs.mk,v
+retrieving revision 1.3
+diff -u -r1.3 objs.mk
+--- objs.mk	4 Apr 2002 22:28:08 -0000	1.3
++++ objs.mk	11 Nov 2002 23:30:28 -0000
+@@ -31,6 +31,7 @@
+ MODULES_LIBJAR_LEXPORTS = \
+ 		zipfile.h \
+ 		zipstub.h \
++		zipstruct.h \
+ 		$(NULL)
+ 
+ MODULES_LIBJAR_LXPIDLSRCS = \

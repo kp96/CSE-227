@@ -1,0 +1,26 @@
+Index: mozilla/security/manager/ssl/src/nsNSSComponent.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSComponent.cpp,v
+retrieving revision 1.167
+diff -u -u -r1.167 nsNSSComponent.cpp
+--- mozilla/security/manager/ssl/src/nsNSSComponent.cpp	16 Sep 2008 20:44:53 -0000	1.167
++++ mozilla/security/manager/ssl/src/nsNSSComponent.cpp	29 Oct 2008 06:11:27 -0000
+@@ -1516,9 +1516,15 @@
+       return rv;
+   #endif
+ 
+-    rv = profilePath->GetNativePath(profileStr);
+-    if (NS_FAILED(rv)) 
+-      return rv;
++    const char *dbdir_override = getenv("MOZPSM_NSSDBDIR_OVERRIDE");
++    if (dbdir_override && strlen(dbdir_override)) {
++      profileStr = dbdir_override;
++    }
++    else {
++      rv = profilePath->GetNativePath(profileStr);
++      if (NS_FAILED(rv)) 
++        return rv;
++    }
+ 
+   #if defined(XP_MACOSX)
+     // function may modify the parameters

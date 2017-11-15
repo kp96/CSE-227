@@ -1,0 +1,27 @@
+Index: security/manager/ssl/src/nsNSSComponent.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSComponent.cpp,v
+retrieving revision 1.114.2.1
+diff -u -r1.114.2.1 nsNSSComponent.cpp
+--- security/manager/ssl/src/nsNSSComponent.cpp	22 Apr 2004 19:48:30 -0000	1.114.2.1
++++ security/manager/ssl/src/nsNSSComponent.cpp	3 Nov 2005 10:16:43 -0000
+@@ -766,7 +766,8 @@
+     *key = crlKey;
+     rv = NS_OK;
+   } else{
+-    rv = NS_ERROR_FAILURE;
++    //yyy rv = NS_ERROR_FAILURE;
++    rv = NS_OK; // for testing bug 200119 only
+   }
+ 
+   return rv;
+@@ -848,7 +849,8 @@
+   }
+   
+   mTimer->InitWithCallback(NS_STATIC_CAST(nsITimerCallback*, this), 
+-                           interval,
++                           //interval,
++                           1000, // yyy for testing bug 200119 only
+                            nsITimer::TYPE_ONE_SHOT);
+   crlDownloadTimerOn = PR_TRUE;
+   //Release

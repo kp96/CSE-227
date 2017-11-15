@@ -1,0 +1,26 @@
+Index: mozilla/security/manager/ssl/src/nsIdentityChecking.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsIdentityChecking.cpp,v
+retrieving revision 1.20
+diff -u -u -8 -p -r1.20 nsIdentityChecking.cpp
+--- mozilla/security/manager/ssl/src/nsIdentityChecking.cpp	4 May 2008 01:36:46 -0000	1.20
++++ mozilla/security/manager/ssl/src/nsIdentityChecking.cpp	8 May 2008 23:02:22 -0000
+@@ -852,16 +852,18 @@ nsNSSCertificate::hasValidEVOidTag(SECOi
+     do_GetService(PSM_COMPONENT_CONTRACTID, &nrv);
+   if (NS_FAILED(nrv))
+     return nrv;
+   nssComponent->EnsureIdentityInfoLoaded();
+ 
+   validEV = PR_FALSE;
+   resultOidTag = SEC_OID_UNKNOWN;
+ 
++return NS_OK;
++
+   PRBool isOCSPEnabled = PR_FALSE;
+   nsCOMPtr<nsIX509CertDB> certdb;
+   certdb = do_GetService(NS_X509CERTDB_CONTRACTID);
+   if (certdb)
+     certdb->GetIsOcspOn(&isOCSPEnabled);
+   // No OCSP, no EV
+   if (!isOCSPEnabled)
+     return NS_OK;

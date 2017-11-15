@@ -1,0 +1,64 @@
+diff --git a/netwerk/base/public/security-prefs.js b/netwerk/base/public/security-prefs.js
+--- a/netwerk/base/public/security-prefs.js
++++ b/netwerk/base/public/security-prefs.js
+@@ -3,16 +3,17 @@ pref("security.enable_ssl3",            
+ pref("security.enable_tls",		 true);
+ pref("security.enable_tls_session_tickets", true);
+ 
+ pref("security.ssl.allow_unrestricted_renego_everywhere__temporarily_available_pref", false);
+ pref("security.ssl.renego_unrestricted_hosts", "");
+ pref("security.ssl.treat_unsafe_negotiation_as_broken", false);
+ pref("security.ssl.require_safe_negotiation",  false);
+ pref("security.ssl.warn_missing_rfc5746",  1);
++pref("security.ssl.enable_false_start", true);
+ 
+ pref("security.ssl2.rc4_128", false);
+ pref("security.ssl2.rc2_128", false);
+ pref("security.ssl2.des_ede3_192", false);
+ pref("security.ssl2.des_64", false);
+ pref("security.ssl2.rc4_40", false);
+ pref("security.ssl2.rc2_40", false);
+ pref("security.ssl3.rsa_rc4_128_md5", true);
+diff --git a/security/manager/ssl/src/nsNSSComponent.cpp b/security/manager/ssl/src/nsNSSComponent.cpp
+--- a/security/manager/ssl/src/nsNSSComponent.cpp
++++ b/security/manager/ssl/src/nsNSSComponent.cpp
+@@ -1703,16 +1703,19 @@ nsNSSComponent::InitializeNSS(PRBool sho
+       SSL_OptionSetDefault(SSL_REQUIRE_SAFE_NEGOTIATION, enabled);
+ 
+       mPrefBranch->GetBoolPref(
+         "security.ssl.allow_unrestricted_renego_everywhere__temporarily_available_pref", 
+         &enabled);
+       SSL_OptionSetDefault(SSL_ENABLE_RENEGOTIATION, 
+         enabled ? SSL_RENEGOTIATE_UNRESTRICTED : SSL_RENEGOTIATE_REQUIRES_XTN);
+ 
++      mPrefBranch->GetBoolPref("security.ssl.enable_false_start", &enabled);
++      SSL_OptionSetDefault(SSL_ENABLE_FALSE_START, enabled);
++
+       // Disable any ciphers that NSS might have enabled by default
+       for (PRUint16 i = 0; i < SSL_NumImplementedCiphers; ++i)
+       {
+         PRUint16 cipher_id = SSL_ImplementedCiphers[i];
+         SSL_CipherPrefSetDefault(cipher_id, PR_FALSE);
+       }
+ 
+       // Now only set SSL/TLS ciphers we knew about at compile time
+@@ -2230,16 +2233,19 @@ nsNSSComponent::Observe(nsISupports *aSu
+       }
+     } else if (prefName.Equals("security.ssl.treat_unsafe_negotiation_as_broken")) {
+       mPrefBranch->GetBoolPref("security.ssl.treat_unsafe_negotiation_as_broken", &enabled);
+       nsSSLIOLayerHelpers::setTreatUnsafeNegotiationAsBroken(enabled);
+     } else if (prefName.Equals("security.ssl.warn_missing_rfc5746")) {
+       PRInt32 warnLevel = 1;
+       mPrefBranch->GetIntPref("security.ssl.warn_missing_rfc5746", &warnLevel);
+       nsSSLIOLayerHelpers::setWarnLevelMissingRFC5746(warnLevel);
++    } else if (prefName.Equals("security.ssl.enable_false_start")) {
++      mPrefBranch->GetBoolPref("security.ssl.enable_false_start", &enabled);
++      SSL_OptionSetDefault(SSL_ENABLE_FALSE_START, enabled);
+     } else if (prefName.Equals("security.OCSP.enabled")
+                || prefName.Equals("security.OCSP.require")) {
+       setOCSPOptions(mPrefBranch);
+     } else {
+       /* Look through the cipher table and set according to pref setting */
+       for (CipherPref* cp = CipherPrefs; cp->pref; ++cp) {
+         if (prefName.Equals(cp->pref)) {
+           mPrefBranch->GetBoolPref(cp->pref, &enabled);

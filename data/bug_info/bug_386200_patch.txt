@@ -1,0 +1,26 @@
+Index: suite/common/helpSecurityOverlay.xul
+===================================================================
+RCS file: /cvsroot/mozilla/suite/common/helpSecurityOverlay.xul,v
+retrieving revision 1.1
+diff -u -8 -r1.1 helpSecurityOverlay.xul
+--- suite/common/helpSecurityOverlay.xul	1 Nov 2006 17:07:23 -0000	1.1
++++ suite/common/helpSecurityOverlay.xul	3 Jul 2007 20:26:24 -0000
+@@ -142,17 +142,17 @@
+           buttons="accept,cancel,help"
+           ondialoghelp="openHelp('my_certs');"/>
+ 
+   <dialog id="setp12password"
+           buttons="accept,cancel,help"
+           ondialoghelp="openHelp('cert_backup_pwd');"/>
+ 
+   <dialog id="newServerDialog"
+-          buttons="accept,cancel,help"
++          buttons="accept,cancel,help,extra2"
+           ondialoghelp="openHelp('new_web_cert');"/>
+ 
+   <dialog id="crlUpdatePref"
+           buttons="accept,cancel,help"
+           ondialoghelp="openHelp('validation-crl-auto-update-prefs');"/>
+ 
+   <dialog id="serverCertExpired"
+           spacerflex="1"

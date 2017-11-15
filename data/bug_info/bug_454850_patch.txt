@@ -1,0 +1,253 @@
+diff --git a/caps/include/nsScriptSecurityManager.h b/caps/include/nsScriptSecurityManager.h
+--- a/caps/include/nsScriptSecurityManager.h
++++ b/caps/include/nsScriptSecurityManager.h
+@@ -397,24 +397,28 @@ public:
+ 
+     /**
+      * Utility method for comparing two URIs.  For security purposes, two URIs
+      * are equivalent if their schemes, hosts, and ports (if any) match.  This
+      * method returns true if aSubjectURI and aObjectURI have the same origin,
+      * false otherwise.
+      */
+     static PRBool SecurityCompareURIs(nsIURI* aSourceURI, nsIURI* aTargetURI);
++    static PRUint32 SecurityHashURI(nsIURI* aURI);
+ 
+     static nsresult 
+     ReportError(JSContext* cx, const nsAString& messageTag,
+                 nsIURI* aSource, nsIURI* aTarget);
++
+     static nsresult
+     CheckSameOriginPrincipal(nsIPrincipal* aSubject,
+                              nsIPrincipal* aObject,
+                              PRBool aIsCheckConnect);
++    static PRUint32
++    HashPrincipalByOrigin(nsIPrincipal* aPrincipal);
+ 
+     static PRBool
+     GetStrictFileOriginPolicy()
+     {
+         return sStrictFileOriginPolicy;
+     }
+ 
+ private:
+diff --git a/caps/src/nsPrincipal.cpp b/caps/src/nsPrincipal.cpp
+--- a/caps/src/nsPrincipal.cpp
++++ b/caps/src/nsPrincipal.cpp
+@@ -714,19 +714,17 @@ nsPrincipal::GetHashValue(PRUint32* aVal
+ {
+   NS_PRECONDITION(mCert || mCodebase, "Need a cert or codebase");
+ 
+   // If there is a certificate, it takes precendence over the codebase.
+   if (mCert) {
+     *aValue = nsCRT::HashCode(mCert->fingerprint.get());
+   }
+   else {
+-    nsCAutoString str;
+-    mCodebase->GetSpec(str);
+-    *aValue = nsCRT::HashCode(str.get());
++    *aValue = nsScriptSecurityManager::HashPrincipalByOrigin(this);
+   }
+ 
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsPrincipal::GetDomain(nsIURI** aDomain)
+ {
+diff --git a/caps/src/nsScriptSecurityManager.cpp b/caps/src/nsScriptSecurityManager.cpp
+--- a/caps/src/nsScriptSecurityManager.cpp
++++ b/caps/src/nsScriptSecurityManager.cpp
+@@ -312,16 +312,24 @@ nsScriptSecurityManager::GetSafeJSContex
+ }
+ 
+ /* static */
+ PRBool
+ nsScriptSecurityManager::SecurityCompareURIs(nsIURI* aSourceURI,
+                                              nsIURI* aTargetURI)
+ {
+     return NS_SecurityCompareURIs(aSourceURI, aTargetURI, sStrictFileOriginPolicy);
++}
++
++// SecurityHashURI is consistent with SecurityCompareURIs because NS_SecurityHashURI
++// is consistent with NS_SecurityCompareURIs.  See nsNetUtil.h.
++PRUint32
++nsScriptSecurityManager::SecurityHashURI(nsIURI* aURI)
++{
++    return NS_SecurityHashURI(aURI);
+ }
+ 
+ NS_IMETHODIMP
+ nsScriptSecurityManager::GetChannelPrincipal(nsIChannel* aChannel,
+                                              nsIPrincipal** aPrincipal)
+ {
+     NS_PRECONDITION(aChannel, "Must have channel!");
+     nsCOMPtr<nsISupports> owner;
+@@ -895,16 +903,37 @@ nsScriptSecurityManager::CheckSameOrigin
+     }
+ 
+     /*
+     ** Access tests failed, so now report error.
+     */
+     return NS_ERROR_DOM_PROP_ACCESS_DENIED;
+ }
+ 
++// It's important that
++//
++//   CheckSameOriginPrincipal(A, B, PR_FALSE) == NS_OK
++//
++// imply
++//
++//   HashPrincipalByOrigin(A) == HashPrincipalByOrigin(B)
++//
++// if principals A and B could ever be used as keys in a hashtable.
++// Violation of this invariant leads to spurious failures of hashtable
++// lookups.  See bug 454850.
++
++/*static*/ PRUint32
++nsScriptSecurityManager::HashPrincipalByOrigin(nsIPrincipal* aPrincipal)
++{
++    nsCOMPtr<nsIURI> uri;
++    aPrincipal->GetDomain(getter_AddRefs(uri));
++    if (!uri)
++        aPrincipal->GetURI(getter_AddRefs(uri));
++    return SecurityHashURI(uri);
++}
+ 
+ nsresult
+ nsScriptSecurityManager::CheckSameOriginDOMProp(nsIPrincipal* aSubject,
+                                                 nsIPrincipal* aObject,
+                                                 PRUint32 aAction,
+                                                 PRBool aIsCheckConnect)
+ {
+     nsresult rv;
+diff --git a/netwerk/base/public/nsNetUtil.h b/netwerk/base/public/nsNetUtil.h
+--- a/netwerk/base/public/nsNetUtil.h
++++ b/netwerk/base/public/nsNetUtil.h
+@@ -43,16 +43,17 @@
+ 
+ #include "nsNetError.h"
+ #include "nsNetCID.h"
+ #include "nsStringGlue.h"
+ #include "nsMemory.h"
+ #include "nsCOMPtr.h"
+ #include "prio.h" // for read/write flags, permissions, etc.
+ 
++#include "nsCRT.h"
+ #include "nsIURI.h"
+ #include "nsIInputStream.h"
+ #include "nsIOutputStream.h"
+ #include "nsISafeOutputStream.h"
+ #include "nsIStreamListener.h"
+ #include "nsIRequestObserverProxy.h"
+ #include "nsISimpleStreamListener.h"
+ #include "nsILoadGroup.h"
+@@ -1461,16 +1462,70 @@ NS_OfflineAppAllowed(nsIURI *aURI, nsIPr
+ 
+     PRBool allowed;
+     rv = util->OfflineAppAllowed(aURI, aPrefBranch, &allowed);
+     NS_ENSURE_SUCCESS(rv, PR_FALSE);
+ 
+     return allowed;
+ }
+ 
++static inline PRInt32
++GetEffectivePort(nsIURI* aURI)
++{
++    PRInt32 port;
++
++    nsCOMPtr<nsIURI> baseURI = NS_GetInnermostURI(aURI);
++    if (NS_SUCCEEDED(baseURI->GetPort(&port)) && port != -1)
++        return port;
++
++    nsCAutoString scheme;
++    if (NS_FAILED(baseURI->GetScheme(scheme)))
++        return -1;
++
++    return NS_GetDefaultPort(scheme.get());
++}
++
++// NS_SecurityHashURI must return the same hash value for any two URIs that
++// compare equal according to NS_SecurityCompareURIs.  Unfortunately, in the
++// case of files, it's not clear we can do anything better than returning
++// the schemeHash, so hashing files degenerates to storing them in a list.
++inline PRUint32
++NS_SecurityHashURI(nsIURI* aURI)
++{
++    nsCOMPtr<nsIURI> baseURI = NS_GetInnermostURI(aURI);
++
++    nsCAutoString scheme;
++    PRUint32 schemeHash = 0;
++    if (NS_SUCCEEDED(baseURI->GetScheme(scheme)))
++        schemeHash = nsCRT::HashCode(scheme.get());
++
++    // TODO figure out how to hash file:// URIs
++    if (scheme.EqualsLiteral("file"))
++        return schemeHash; // sad face
++
++    if (scheme.EqualsLiteral("imap") ||
++        scheme.EqualsLiteral("mailbox") ||
++        scheme.EqualsLiteral("news"))
++    {
++        nsCAutoString spec;
++        PRUint32 specHash = baseURI->GetSpec(spec);
++        if (NS_SUCCEEDED(specHash))
++            specHash = nsCRT::HashCode(spec.get());
++        return specHash;
++    }
++
++    nsCAutoString host;
++    PRUint32 hostHash = 0;
++    if (NS_SUCCEEDED(baseURI->GetHost(host)))
++        hostHash = nsCRT::HashCode(host.get());
++
++    // XOR to combine hash values
++    return schemeHash ^ hostHash ^ GetEffectivePort(aURI);
++}
++
+ inline PRBool
+ NS_SecurityCompareURIs(nsIURI* aSourceURI,
+                        nsIURI* aTargetURI,
+                        PRBool aStrictFileOriginPolicy)
+ {
+     // Note that this is not an Equals() test on purpose -- for URIs that don't
+     // support host/port, we want equality to basically be object identity, for
+     // security purposes.  Otherwise, for example, two javascript: URIs that
+@@ -1558,36 +1613,13 @@ NS_SecurityCompareURIs(nsIURI* aSourceUR
+     if (!targetHost.Equals(sourceHost, nsCaseInsensitiveCStringComparator() ))
+ #else
+     if (!targetHost.Equals(sourceHost, CaseInsensitiveCompare))
+ #endif
+     {
+         return PR_FALSE;
+     }
+ 
+-    // Compare ports
+-    PRInt32 targetPort;
+-    nsresult rv = targetBaseURI->GetPort(&targetPort);
+-    PRInt32 sourcePort;
+-    if (NS_SUCCEEDED(rv))
+-        rv = sourceBaseURI->GetPort(&sourcePort);
+-    PRBool result = NS_SUCCEEDED(rv) && targetPort == sourcePort;
+-    // If the port comparison failed, see if either URL has a
+-    // port of -1. If so, replace -1 with the default port
+-    // for that scheme.
+-    if (NS_SUCCEEDED(rv) && !result &&
+-        (sourcePort == -1 || targetPort == -1))
+-    {
+-        PRInt32 defaultPort = NS_GetDefaultPort(targetScheme.get());
+-        if (defaultPort == -1)
+-            return PR_FALSE; // No default port for this scheme
+-
+-        if (sourcePort == -1)
+-            sourcePort = defaultPort;
+-        else if (targetPort == -1)
+-            targetPort = defaultPort;
+-        result = targetPort == sourcePort;
+-    }
+-
+-    return result;
++    return GetEffectivePort(targetBaseURI)
++        == GetEffectivePort(sourceBaseURI);
+ }
+ 
+ #endif // !nsNetUtil_h__

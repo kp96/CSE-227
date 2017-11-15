@@ -1,0 +1,13 @@
+Index: mozilla/netwerk/base/public/security-prefs.js
+===================================================================
+RCS file: /cvsroot/mozilla/netwerk/base/public/security-prefs.js,v
+retrieving revision 1.15
+diff -u -r1.15 security-prefs.js
+--- mozilla/netwerk/base/public/security-prefs.js	16 May 2006 00:33:43 -0000	1.15
++++ mozilla/netwerk/base/public/security-prefs.js	10 May 2007 04:19:14 -0000
+@@ -62,4 +62,4 @@
+ pref("security.warn_viewing_mixed",      true);
+ pref("security.warn_submit_insecure",    true);
+ 
+-pref("security.OCSP.enabled",		0);
++pref("security.OCSP.enabled",		1);

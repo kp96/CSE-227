@@ -1,0 +1,61 @@
+? mozilla/security/manager/ssl/src/nsNSSComponent.cpp.x
+Index: mozilla/security/manager/ssl/src/nsNSSComponent.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSComponent.cpp,v
+retrieving revision 1.142
+diff -u -1 -0 -r1.142 nsNSSComponent.cpp
+--- mozilla/security/manager/ssl/src/nsNSSComponent.cpp	7 Dec 2006 13:02:28 -0000	1.142
++++ mozilla/security/manager/ssl/src/nsNSSComponent.cpp	15 Jan 2007 17:50:38 -0000
+@@ -1973,45 +1973,52 @@
+     }
+   }
+   else if ((nsCRT::strcmp(aTopic, SESSION_LOGOUT_TOPIC) == 0) && mNSSInitialized) {
+     nsNSSShutDownPreventionLock locker;
+     PK11_LogoutAll();
+     SSL_ClearSessionCache();
+     LogoutAuthenticatedPK11();
+   }
+   else if (nsCRT::strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID) == 0) { 
+     nsNSSShutDownPreventionLock locker;
++    PRBool clearSessionCache = PR_FALSE;
+     PRBool enabled;
+     NS_ConvertUTF16toUTF8  prefName(someData);
+ 
+     if (prefName.Equals("security.enable_ssl2")) {
+       mPrefBranch->GetBoolPref("security.enable_ssl2", &enabled);
+       SSL_OptionSetDefault(SSL_ENABLE_SSL2, enabled);
+       SSL_OptionSetDefault(SSL_V2_COMPATIBLE_HELLO, enabled);
++      clearSessionCache = PR_TRUE;
+     } else if (prefName.Equals("security.enable_ssl3")) {
+       mPrefBranch->GetBoolPref("security.enable_ssl3", &enabled);
+       SSL_OptionSetDefault(SSL_ENABLE_SSL3, enabled);
++      clearSessionCache = PR_TRUE;
+     } else if (prefName.Equals("security.enable_tls")) {
+       mPrefBranch->GetBoolPref("security.enable_tls", &enabled);
+       SSL_OptionSetDefault(SSL_ENABLE_TLS, enabled);
++      clearSessionCache = PR_TRUE;
+     } else if (prefName.Equals("security.OCSP.enabled")) {
+       setOCSPOptions(mPrefBranch);
+     } else {
+       /* Look through the cipher table and set according to pref setting */
+       for (CipherPref* cp = CipherPrefs; cp->pref; ++cp) {
+         if (prefName.Equals(cp->pref)) {
+           mPrefBranch->GetBoolPref(cp->pref, &enabled);
+           SSL_CipherPrefSetDefault(cp->id, enabled);
++          clearSessionCache = PR_TRUE;
+           break;
+         }
+       }
+     }
++    if (clearSessionCache)
++      SSL_ClearSessionCache();
+   }
+   else if (nsCRT::strcmp(aTopic, PROFILE_CHANGE_NET_TEARDOWN_TOPIC) == 0) {
+     PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("receiving network teardown topic\n"));
+     if (mSSLThread)
+       mSSLThread->requestExit();
+     if (mCertVerificationThread)
+       mCertVerificationThread->requestExit();
+     mIsNetworkDown = PR_TRUE;
+   }
+   else if (nsCRT::strcmp(aTopic, PROFILE_CHANGE_NET_RESTORE_TOPIC) == 0) {

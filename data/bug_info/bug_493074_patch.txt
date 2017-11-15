@@ -1,0 +1,213 @@
+Bug 493074 - Compute fewer things to try to clear up a performance regression.
+
+diff --git a/caps/include/nsScriptSecurityManager.h b/caps/include/nsScriptSecurityManager.h
+--- a/caps/include/nsScriptSecurityManager.h
++++ b/caps/include/nsScriptSecurityManager.h
+@@ -532,42 +532,32 @@ private:
+     /**
+      * Check capability levels for an |aObj| that implements
+      * nsISecurityCheckedComponent.
+      *
+      * NB: This function also checks to see if aObj is a plugin and the user
+      * has set the "security.xpconnect.plugin.unrestricted" pref to allow
+      * anybody to script plugin objects from anywhere.
+      *
+-     * @param cx The context we're running on.
+-     *           NB: If null, "sameOrigin" does not have any effect.
+      * @param aObj The nsISupports representation of the object in question
+      *             object, possibly null.
+-     * @param aJSObject The JSObject representation of the object in question
+-     *                  if |cx| is non-null and |aObjectSecurityLevel| is
+-     *                  "sameOrigin". If null will be calculated from aObj (if
+-     *                  non-null) if and only if aObj is an XPCWrappedJS. The
+-     *                  rationale behind this is that if we're creating a JS
+-     *                  wrapper for an XPCWrappedJS, this object definitely
+-     *                  expects to be exposed to JS.
++     * @param aJSObject The JSObject representation of the object in question.
++     *                  Only used if |aObjectSecurityLevel| is "sameOrigin".
+      * @param aSubjectPrincipal The nominal subject principal used when
+-     *                          aObjectSecurityLevel is "sameOrigin". If null,
+-     *                          this is calculated if it's needed.
++     *                          aObjectSecurityLevel is "sameOrigin".
+      * @param aObjectSecurityLevel Can be one of three values:
+      *                  - allAccess: Allow access no matter what.
+      *                  - noAccess: Deny access no matter what.
+-     *                  - sameOrigin: If |cx| is null, behave like noAccess.
+-     *                                Otherwise, possibly compute a subject
+-     *                                and object principal and return true if
+-     *                                and only if the subject has greater than
+-     *                                or equal privileges to the object.
++     *                  - sameOrigin: If both a subject principal and JS
++     *                                object have been passed in, returns
++     *                                true if the subject subsumes the object,
++     *                                otherwise, behaves like noAccess.
+      */
+     nsresult
+-    CheckXPCPermissions(JSContext* cx,
+-                        nsISupports* aObj, JSObject* aJSObject,
++    CheckXPCPermissions(nsISupports* aObj, JSObject* aJSObject,
+                         nsIPrincipal* aSubjectPrincipal,
+                         const char* aObjectSecurityLevel);
+ 
+     nsresult
+     Init();
+ 
+     nsresult
+     InitPrefs();
+diff --git a/caps/src/nsScriptSecurityManager.cpp b/caps/src/nsScriptSecurityManager.cpp
+--- a/caps/src/nsScriptSecurityManager.cpp
++++ b/caps/src/nsScriptSecurityManager.cpp
+@@ -779,17 +779,17 @@ nsScriptSecurityManager::CheckPropertyAc
+                 break;
+             case nsIXPCSecurityManager::ACCESS_CALL_METHOD:
+                 checkedComponent->CanCallMethod(objIID,
+                                                 JSValIDToString(cx, aProperty),
+                                                 getter_Copies(objectSecurityLevel));
+             }
+         }
+     }
+-    rv = CheckXPCPermissions(cx, aObj, aJSObject, subjectPrincipal,
++    rv = CheckXPCPermissions(aObj, aJSObject, subjectPrincipal,
+                              objectSecurityLevel);
+ #ifdef DEBUG_CAPS_CheckPropertyAccessImpl
+     if(NS_SUCCEEDED(rv))
+         printf("CheckXPCPerms GRANTED.\n");
+     else
+         printf("CheckXPCPerms DENIED.\n");
+ #endif
+ 
+@@ -2854,17 +2854,17 @@ nsScriptSecurityManager::CanCreateWrappe
+     //  using nsISecurityCheckedComponent
+     nsCOMPtr<nsISecurityCheckedComponent> checkedComponent =
+         do_QueryInterface(aObj);
+ 
+     nsXPIDLCString objectSecurityLevel;
+     if (checkedComponent)
+         checkedComponent->CanCreateWrapper((nsIID *)&aIID, getter_Copies(objectSecurityLevel));
+ 
+-    nsresult rv = CheckXPCPermissions(cx, aObj, nsnull, nsnull, objectSecurityLevel);
++    nsresult rv = CheckXPCPermissions(aObj, nsnull, nsnull, objectSecurityLevel);
+     if (NS_FAILED(rv))
+     {
+         //-- Access denied, report an error
+         NS_ConvertUTF8toUTF16 strName("CreateWrapperDenied");
+         nsCAutoString origin;
+         nsresult rv2;
+         nsIPrincipal* subjectPrincipal = doGetSubjectPrincipal(&rv2);
+         if (NS_SUCCEEDED(rv2) && subjectPrincipal) {
+@@ -2965,17 +2965,17 @@ nsScriptSecurityManager::CanCreateInstan
+                                            const nsCID &aCID)
+ {
+ #ifdef DEBUG_CAPS_CanCreateInstance
+     char* cidStr = aCID.ToString();
+     printf("### CanCreateInstance(%s) ", cidStr);
+     nsCRT::free(cidStr);
+ #endif
+ 
+-    nsresult rv = CheckXPCPermissions(nsnull, nsnull, nsnull, nsnull, nsnull);
++    nsresult rv = CheckXPCPermissions(nsnull, nsnull, nsnull, nsnull);
+     if (NS_FAILED(rv))
+ #ifdef XPC_IDISPATCH_SUPPORT
+     {
+         rv = CheckComponentPermissions(cx, aCID);
+     }
+     if (NS_FAILED(rv))
+ #endif
+     {
+@@ -3002,17 +3002,17 @@ nsScriptSecurityManager::CanGetService(J
+                                        const nsCID &aCID)
+ {
+ #ifdef DEBUG_CAPS_CanGetService
+     char* cidStr = aCID.ToString();
+     printf("### CanGetService(%s) ", cidStr);
+     nsCRT::free(cidStr);
+ #endif
+ 
+-    nsresult rv = CheckXPCPermissions(nsnull, nsnull, nsnull, nsnull, nsnull);
++    nsresult rv = CheckXPCPermissions(nsnull, nsnull, nsnull, nsnull);
+     if (NS_FAILED(rv))
+     {
+         //-- Access denied, report an error
+         nsCAutoString errorMsg("Permission denied to get service. CID=");
+         char cidStr[NSID_LENGTH];
+         aCID.ToProvidedString(cidStr);
+         errorMsg.Append(cidStr);
+         SetPendingException(cx, errorMsg.get());
+@@ -3041,65 +3041,44 @@ nsScriptSecurityManager::CanAccess(PRUin
+                                    void** aPolicy)
+ {
+     return CheckPropertyAccessImpl(aAction, aCallContext, cx,
+                                    aJSObject, aObj, nsnull, aClassInfo,
+                                    nsnull, aPropertyName, aPolicy);
+ }
+ 
+ nsresult
+-nsScriptSecurityManager::CheckXPCPermissions(JSContext* cx,
+-                                             nsISupports* aObj, JSObject* aJSObject,
++nsScriptSecurityManager::CheckXPCPermissions(nsISupports* aObj, JSObject* aJSObject,
+                                              nsIPrincipal* aSubjectPrincipal,
+                                              const char* aObjectSecurityLevel)
+ {
+     //-- Check for the all-powerful UniversalXPConnect privilege
+     PRBool ok = PR_FALSE;
+     if (NS_SUCCEEDED(IsCapabilityEnabled("UniversalXPConnect", &ok)) && ok)
+         return NS_OK;
+ 
+     //-- If the object implements nsISecurityCheckedComponent, it has a non-default policy.
+     if (aObjectSecurityLevel)
+     {
+         if (PL_strcasecmp(aObjectSecurityLevel, "allAccess") == 0)
+             return NS_OK;
+-        if (cx && PL_strcasecmp(aObjectSecurityLevel, "sameOrigin") == 0)
++        if (aSubjectPrincipal && aJSObject &&
++            PL_strcasecmp(aObjectSecurityLevel, "sameOrigin") == 0)
+         {
+-            nsresult rv;
+-            if (!aJSObject)
++            nsIPrincipal* objectPrincipal = doGetObjectPrincipal(aJSObject);
++
++            // Only do anything if we have both a subject and object
++            // principal.
++            if (objectPrincipal)
+             {
+-                nsCOMPtr<nsIXPConnectWrappedJS> xpcwrappedjs =
+-                    do_QueryInterface(aObj);
+-                if (xpcwrappedjs)
+-                {
+-                    rv = xpcwrappedjs->GetJSObject(&aJSObject);
+-                    NS_ENSURE_SUCCESS(rv, rv);
+-                }
+-            }
+-
+-            if (!aSubjectPrincipal)
+-            {
+-                // No subject principal passed in. Compute it.
+-                aSubjectPrincipal = GetSubjectPrincipal(cx, &rv);
++                PRBool subsumes;
++                nsresult rv = aSubjectPrincipal->Subsumes(objectPrincipal, &subsumes);
+                 NS_ENSURE_SUCCESS(rv, rv);
+-            }
+-            if (aSubjectPrincipal && aJSObject)
+-            {
+-                nsIPrincipal* objectPrincipal = doGetObjectPrincipal(aJSObject);
+-
+-                // Only do anything if we have both a subject and object
+-                // principal.
+-                if (objectPrincipal)
+-                {
+-                    PRBool subsumes;
+-                    rv = aSubjectPrincipal->Subsumes(objectPrincipal, &subsumes);
+-                    NS_ENSURE_SUCCESS(rv, rv);
+-                    if (subsumes)
+-                        return NS_OK;
+-                }
++                if (subsumes)
++                    return NS_OK;
+             }
+         }
+         else if (PL_strcasecmp(aObjectSecurityLevel, "noAccess") != 0)
+         {
+             PRBool canAccess = PR_FALSE;
+             if (NS_SUCCEEDED(IsCapabilityEnabled(aObjectSecurityLevel, &canAccess)) &&
+                 canAccess)
+                 return NS_OK;

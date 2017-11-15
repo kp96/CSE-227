@@ -1,0 +1,262 @@
+exporting patch:
+# HG changeset patch
+# User Frederik Braun <fbraun@mozilla.com>
+# Date 1376303680 -7200
+# Node ID 602c3712da1222ea94282d31210e98dd3ae812ce
+# Parent  44b0383e1063e764e090865a1b2b188b47742aee
+bug 607067 CSP violation messages for base restrictions are awful (plus fixing affected testcases)
+
+diff --git a/browser/devtools/webconsole/test/browser_webconsole_bug_770099_violation.js b/browser/devtools/webconsole/test/browser_webconsole_bug_770099_violation.js
+--- a/browser/devtools/webconsole/test/browser_webconsole_bug_770099_violation.js
++++ b/browser/devtools/webconsole/test/browser_webconsole_bug_770099_violation.js
+@@ -3,17 +3,17 @@
+  * Any copyright is dedicated to the Public Domain.
+  * http://creativecommons.org/publicdomain/zero/1.0/
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ // Tests that the Web Console CSP messages are displayed
+ 
+ const TEST_VIOLATION = "https://example.com/browser/browser/devtools/webconsole/test/test_bug_770099_violation.html";
+-const CSP_VIOLATION_MSG = "Content Security Policy: Directive default-src https://example.com:443 violated by http://some.example.com/test.png"
++const CSP_VIOLATION_MSG = 'Content Security Policy: The page\'s settings blocked the loading of a resource at http://some.example.com/test.png ("default-src https://example.com:443").'
+ 
+ let hud = undefined;
+ 
+ function test() {
+   addTab("data:text/html;charset=utf8,Web Console CSP violation test");
+   browser.addEventListener("load", function _onLoad() {
+     browser.removeEventListener("load", _onLoad, true);
+     openConsole(null, loadDocument);
+diff --git a/content/base/src/CSPUtils.jsm b/content/base/src/CSPUtils.jsm
+--- a/content/base/src/CSPUtils.jsm
++++ b/content/base/src/CSPUtils.jsm
+@@ -293,17 +293,17 @@ CSPRep.fromString = function(aStr, self,
+       // grab value tokens and interpret them
+       var options = dirvalue.split(/\s+/);
+       for each (var opt in options) {
+         if (opt === "inline-script")
+           aCSPR._allowInlineScripts = true;
+         else if (opt === "eval-script")
+           aCSPR._allowEval = true;
+         else
+-          cspWarn(aCSPR, CSPLocalizer.getFormatStr("doNotUnderstandOption",
++          cspWarn(aCSPR, CSPLocalizer.getFormatStr("ignoringUnknownOption",
+                                                    [opt]));
+       }
+       continue directive;
+     }
+ 
+     // ALLOW DIRECTIVE //////////////////////////////////////////////////
+     // parse "allow" as equivalent to "default-src", at least until the spec
+     // stabilizes, at which time we can stop parsing "allow"
+@@ -356,27 +356,27 @@ CSPRep.fromString = function(aStr, self,
+ 
+           // Verify that each report URI is in the same etld + 1 and that the
+           // scheme and port match "self" if "self" is defined, and just that
+           // it's valid otherwise.
+           if (self) {
+             if (gETLDService.getBaseDomain(uri) !==
+                 gETLDService.getBaseDomain(selfUri)) {
+               cspWarn(aCSPR,
+-                      CSPLocalizer.getFormatStr("notETLDPlus1",
+-                                            [gETLDService.getBaseDomain(uri)]));
++                      CSPLocalizer.getFormatStr("reportURInotETLDPlus1",
++                                                [gETLDService.getBaseDomain(uri)]));
+               continue;
+             }
+             if (!uri.schemeIs(selfUri.scheme)) {
+-              cspWarn(aCSPR, CSPLocalizer.getFormatStr("notSameScheme",
++              cspWarn(aCSPR, CSPLocalizer.getFormatStr("reportURInotSameSchemeAsSelf",
+                                                        [uri.asciiSpec]));
+               continue;
+             }
+             if (uri.port && uri.port !== selfUri.port) {
+-              cspWarn(aCSPR, CSPLocalizer.getFormatStr("notSamePort",
++              cspWarn(aCSPR, CSPLocalizer.getFormatStr("reportURInotSamePortAsSelf",
+                                                        [uri.asciiSpec]));
+               continue;
+             }
+           }
+         } catch(e) {
+           switch (e.result) {
+             case Components.results.NS_ERROR_INSUFFICIENT_DOMAIN_LEVELS:
+             case Components.results.NS_ERROR_HOST_IS_IP_ADDRESS:
+@@ -615,29 +615,29 @@ CSPRep.fromStringSpecCompliant = functio
+ 
+           // Verify that each report URI is in the same etld + 1 and that the
+           // scheme and port match "self" if "self" is defined, and just that
+           // it's valid otherwise.
+           if (self) {
+             if (gETLDService.getBaseDomain(uri) !==
+                 gETLDService.getBaseDomain(selfUri)) {
+               cspWarn(aCSPR, 
+-                      CSPLocalizer.getFormatStr("notETLDPlus1",
+-                                            [gETLDService.getBaseDomain(uri)]));
++                      CSPLocalizer.getFormatStr("reportURInotETLDPlus1",
++                                                [gETLDService.getBaseDomain(uri)]));
+               continue;
+             }
+             if (!uri.schemeIs(selfUri.scheme)) {
+-              cspWarn(aCSPR, 
+-                      CSPLocalizer.getFormatStr("notSameScheme",
++              cspWarn(aCSPR,
++                      CSPLocalizer.getFormatStr("reportURInotSameSchemeAsSelf",
+                                                 [uri.asciiSpec]));
+               continue;
+             }
+             if (uri.port && uri.port !== selfUri.port) {
+-              cspWarn(aCSPR, 
+-                      CSPLocalizer.getFormatStr("notSamePort",
++              cspWarn(aCSPR,
++                      CSPLocalizer.getFormatStr("reportURInotSamePortAsSelf",
+                                                 [uri.asciiSpec]));
+               continue;
+             }
+           }
+         } catch(e) {
+           switch (e.result) {
+             case Components.results.NS_ERROR_INSUFFICIENT_DOMAIN_LEVELS:
+             case Components.results.NS_ERROR_HOST_IS_IP_ADDRESS:
+diff --git a/content/base/src/contentSecurityPolicy.js b/content/base/src/contentSecurityPolicy.js
+--- a/content/base/src/contentSecurityPolicy.js
++++ b/content/base/src/contentSecurityPolicy.js
+@@ -175,29 +175,29 @@ ContentSecurityPolicy.prototype = {
+   logViolationDetails:
+   function(aViolationType, aSourceFile, aScriptSample, aLineNum) {
+     // allowsInlineScript and allowsEval both return true when report-only mode
+     // is enabled, resulting in a call to this function. Therefore we need to
+     // check that the policy was in fact violated before logging any violations
+     switch (aViolationType) {
+     case Ci.nsIContentSecurityPolicy.VIOLATION_TYPE_INLINE_STYLE:
+       if (!this._policy.allowsInlineStyles)
+-        this._asyncReportViolation('self',null,'inline style base restriction',
++        this._asyncReportViolation('self', null, CSPLocalizer.getStr("inlineStyleBlocked"),
+                                    'violated base restriction: Inline Stylesheets will not apply',
+                                    aSourceFile, aScriptSample, aLineNum);
+       break;
+     case Ci.nsIContentSecurityPolicy.VIOLATION_TYPE_INLINE_SCRIPT:
+       if (!this._policy.allowsInlineScripts)
+-        this._asyncReportViolation('self', null, 'inline script base restriction',
++        this._asyncReportViolation('self', null, CSPLocalizer.getStr("inlineScriptBlocked"),
+                                    'violated base restriction: Inline Scripts will not execute',
+                                    aSourceFile, aScriptSample, aLineNum);
+       break;
+     case Ci.nsIContentSecurityPolicy.VIOLATION_TYPE_EVAL:
+       if (!this._policy.allowsEvalInScripts)
+-        this._asyncReportViolation('self', null, 'eval script base restriction',
++        this._asyncReportViolation('self', null, CSPLocalizer.getStr("scriptFromStringBlocked"),
+                                    'violated base restriction: Code will not be created from strings',
+                                    aSourceFile, aScriptSample, aLineNum);
+       break;
+     }
+   },
+ 
+   set reportOnlyMode(val) {
+     this._reportOnlyMode = val;
+@@ -357,19 +357,19 @@ ContentSecurityPolicy.prototype = {
+       if (aLineNum)
+         report["csp-report"]["line-number"] = aLineNum;
+ 
+       var reportString = JSON.stringify(report);
+       CSPdebug("Constructed violation report:\n" + reportString);
+ 
+       var violationMessage = null;
+       if (blockedUri["asciiSpec"]) {
+-         violationMessage = CSPLocalizer.getFormatStr("directiveViolatedWithURI", [violatedDirective, blockedUri.asciiSpec]);
++         violationMessage = CSPLocalizer.getFormatStr("CSPViolationWithURI", [violatedDirective, blockedUri.asciiSpec]);
+       } else {
+-         violationMessage = CSPLocalizer.getFormatStr("directiveViolated", [violatedDirective]);
++         violationMessage = CSPLocalizer.getFormatStr("CSPViolation", [violatedDirective]);
+       }
+       this._policy.log(WARN_FLAG, violationMessage,
+                         (aSourceFile) ? aSourceFile : null,
+                         (aScriptSample) ? decodeURIComponent(aScriptSample) : null,
+                         (aLineNum) ? aLineNum : null);
+ 
+       // For each URI in the report list, send out a report.
+       // We make the assumption that all of the URIs are absolute URIs; this
+diff --git a/dom/locales/en-US/chrome/security/csp.properties b/dom/locales/en-US/chrome/security/csp.properties
+--- a/dom/locales/en-US/chrome/security/csp.properties
++++ b/dom/locales/en-US/chrome/security/csp.properties
+@@ -1,59 +1,66 @@
+ # This Source Code Form is subject to the terms of the Mozilla Public
+ # License, v. 2.0. If a copy of the MPL was not distributed with this
+ # file, You can obtain one at http://mozilla.org/MPL/2.0/.
+ 
+ # CSP Warnings:
+-# LOCALIZATION NOTE (directiveViolated):
+-# %1$S is the directive that has been violated.
+-directiveViolated = Directive %1$S violated
+-# LOCALIZATION NOTE (directiveViolatedWithURI):
++# LOCALIZATION NOTE (CSPViolation):
++# %1$S is the reason why the resource has not been loaded.
++CSPViolation = The page's settings blocked the loading of a resource: %1$S
++# LOCALIZATION NOTE (CSPViolationWithURI):
+ # %1$S is the directive that has been violated.
+ # %2$S is the URI of the resource which violated the directive.
+-directiveViolatedWithURI = Directive %1$S violated by %2$S
++CSPViolationWithURI = The page's settings blocked the loading of a resource at %2$S ("%1$S").
+ # LOCALIZATION NOTE (triedToSendReport):
+ # %1$S is the URI we attempted to send a report to.
+ triedToSendReport = Tried to send report to invalid URI: "%1$S"
+ # LOCALIZATION NOTE (errorWas):
+ # %1$S is the error resulting from attempting to send the report
+ errorWas = error was: "%1$S"
+ # LOCALIZATION NOTE (couldNotParseReportURI):
+ # %1$S is the report URI that could not be parsed
+ couldNotParseReportURI = couldn't parse report URI: %1$S
+ # LOCALIZATION NOTE (couldNotProcessUnknownDirective):
+ # %1$S is the unknown directive
+ couldNotProcessUnknownDirective = Couldn't process unknown directive '%1$S'
+-# LOCALIZATION NOTE (doNotUnderstandOption):
++# LOCALIZATION NOTE (ignoringUnknownOption):
+ # %1$S is the option that could not be understood
+-doNotUnderstandOption = don't understand option '%1$S'.  Ignoring it.
+-# LOCALIZATION NOTE (notETLDPlus1):
++ignoringUnknownOption = Ignoring unknown option %1$S
++# LOCALIZATION NOTE (reportURInotETLDPlus1):
+ # %1$S is the ETLD of the report URI that could not be used
+-notETLDPlus1 = can't use report URI from non-matching eTLD+1: %1$S
+-# LOCALIZATION NOTE (notSameScheme):
++reportURInotETLDPlus1 = The report URI (%1$S) must be from the same eTLD+1.
++# LOCALIZATION NOTE (reportURInotSameSchemeAsSelf, reportURInotSamePortAsSelf):
+ # %1$S is the report URI that could not be used
+-notSameScheme = can't use report URI with different scheme from originating document: %1$S
+-# LOCALIZATION NOTE (notSamePort):
+-# %1$S is the report URI that could not be used
+-notSamePort = can't use report URI with different port from originating document: %1$S
++reportURInotSameSchemeAsSelf = The report URI (%1$S) must use the same scheme as the originating document.
++reportURInotSamePortAsSelf = The report URI (%1$S) must use the same port as the originating document.
+ # LOCALIZATION NOTE (pageCannotSendReportsTo):
+ # %1$S is the URI of the page with the policy
+ # %2$S is the report URI that could not be used
+ pageCannotSendReportsTo = page on %1$S cannot send reports to %2$S
+ allowOrDefaultSrcRequired = 'allow' or 'default-src' directive required but not present.  Reverting to "default-src 'none'"
+ # LOCALIZATION NOTE (failedToParseUnrecognizedSource):
+ # %1$S is the CSP Source that could not be parsed
+ failedToParseUnrecognizedSource = Failed to parse unrecognized source %1$S
+ # LOCALIZATION NOTE (reportPostRedirect):
+ # %1$S is the specified report URI before redirect
+ reportPostRedirect = Post of violation report to %1$S failed, as a redirect occurred
+ # LOCALIZATION NOTE (allowDirectiveIsDeprecated):
+ # Don't translate "allow" and "default-src" as they are keywords and part of
+ # the CSP protocol syntax.
+ allowDirectiveIsDeprecated = allow directive is deprecated, use the equivalent default-src directive instead
++# LOCALIZATION NOTE (inlineScriptBlocked):
++# inline script refers to JavaScript code that is embedded into the HTML document.
++inlineScriptBlocked = An attempt to execute inline scripts has been blocked
++# LOCALIZATION NOTE (inlineStyleBlocked):
++# inline style refers to CSS code that is embedded into the HTML document.
++inlineStyleBlocked = An attempt to apply inline style sheets has been blocked
++# LOCALIZATION NOTE (scriptFromStringBlocked):
++# eval is a name and should not be localized.
++scriptFromStringBlocked = An attempt to call JavaScript from a string (by calling a function like eval) has been blocked
+ 
+ # CSP Errors:
+ policyURINotAlone = policy-uri directive can only appear alone
+ noParentRequest = The policy-uri cannot be fetched without a parent request and a CSP.
+ # LOCALIZATION NOTE (policyURIParseError):
+ # %1$S is the URI that could not be parsed
+ policyURIParseError = could not parse URI in policy URI: %1$S
+ # LOCALIZATION NOTE (nonMatchingHost):

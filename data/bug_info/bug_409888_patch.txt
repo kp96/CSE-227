@@ -1,0 +1,406 @@
+Index: docshell/base/nsDocShell.h
+===================================================================
+RCS file: /cvsroot/mozilla/docshell/base/nsDocShell.h,v
+retrieving revision 1.217
+diff -u -p -d -8 -r1.217 nsDocShell.h
+--- docshell/base/nsDocShell.h	12 Nov 2007 05:48:24 -0000	1.217
++++ docshell/base/nsDocShell.h	8 Jan 2008 05:47:53 -0000
+@@ -508,16 +508,21 @@ protected:
+     void DoGetPositionAndSize(PRInt32 * x, PRInt32 * y, PRInt32 * cx,
+                               PRInt32 * cy);
+     
+     // Check whether aURI should inherit our security context
+     static nsresult URIInheritsSecurityContext(nsIURI* aURI, PRBool* aResult);
+ 
+     // Check whether aURI is about:blank
+     static PRBool IsAboutBlank(nsIURI* aURI);
++
++    // Call this when a URI load is handed to us (via OnLinkClick or
++    // InternalLoad).  This makes sure that we're not inside unload, or that if
++    // we are it's still OK to load this URI.
++    PRBool IsOKToLoadURI(nsIURI* aURI);
+     
+ protected:
+     // Override the parent setter from nsDocLoader
+     virtual nsresult SetDocLoaderParent(nsDocLoader * aLoader);
+ 
+     // Event type dispatched by RestorePresentation
+     class RestorePresentationEvent : public nsRunnable {
+     public:
+@@ -639,16 +644,23 @@ protected:
+     nsCOMPtr<nsIClipboardDragDropHookList>  mTransferableHookData;
+ 
+     // Secure browser UI object
+     nsCOMPtr<nsISecureBrowserUI> mSecurityUI;
+ 
+     // Suspends/resumes channels based on the URI classifier.
+     nsRefPtr<nsClassifierCallback> mClassifier;
+ 
++    // The URI we're currently loading.  This is only relevant during the
++    // firing of a pagehide/unload.  The caller of FirePageHideNotification()
++    // is responsible for setting it and unsetting it.  It may be null if the
++    // pagehide/unload is happening for some reason other than just loading a
++    // new URI.
++    nsCOMPtr<nsIURI> mLoadingURI;
++
+     // WEAK REFERENCES BELOW HERE.
+     // Note these are intentionally not addrefd.  Doing so will create a cycle.
+     // For that reasons don't use nsCOMPtr.
+ 
+     nsIDocShellTreeOwner *     mTreeOwner; // Weak Reference
+     nsPIDOMEventTarget *       mChromeEventHandler; //Weak Reference
+ 
+ #ifdef DEBUG
+Index: docshell/base/nsDocShell.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/docshell/base/nsDocShell.cpp,v
+retrieving revision 1.878
+diff -u -p -d -8 -r1.878 nsDocShell.cpp
+--- docshell/base/nsDocShell.cpp	5 Jan 2008 13:40:49 -0000	1.878
++++ docshell/base/nsDocShell.cpp	16 Jan 2008 15:33:14 -0000
+@@ -673,17 +673,19 @@ nsDocShell::ConvertLoadTypeToDocShellLoa
+ // nsDocShell::nsIDocShell
+ //*****************************************************************************   
+ NS_IMETHODIMP
+ nsDocShell::LoadURI(nsIURI * aURI,
+                     nsIDocShellLoadInfo * aLoadInfo,
+                     PRUint32 aLoadFlags,
+                     PRBool aFirstParty)
+ {
+-    if (!IsNavigationAllowed()) {
++    // Note: we allow loads to get through here even if mFiredUnloadEvent is
++    // true; that case will get handled in LoadInternal or LoadHistoryEntry.
++    if (IsPrintingOrPP()) {
+       return NS_OK; // JS may not handle returning of an error code
+     }
+     nsresult rv;
+     nsCOMPtr<nsIURI> referrer;
+     nsCOMPtr<nsIInputStream> postStream;
+     nsCOMPtr<nsIInputStream> headersStream;
+     nsCOMPtr<nsISupports> owner;
+     PRBool inheritOwner = PR_FALSE;
+@@ -3598,16 +3600,20 @@ nsDocShell::Destroy()
+     if (mObserveErrorPages) {
+         nsCOMPtr<nsIPrefBranch2> prefs(do_QueryInterface(mPrefs));
+         if (prefs) {
+             prefs->RemoveObserver("browser.xul.error_pages.enabled", this);
+             mObserveErrorPages = PR_FALSE;
+         }
+     }
+ 
++    // Make sure to blow away our mLoadingURI just in case.  No loads
++    // from inside this pagehide.
++    mLoadingURI = nsnull;
++    
+     // Fire unload event before we blow anything away.
+     (void) FirePageHideNotification(PR_TRUE);
+ 
+     // Note: mContentListener can be null if Init() failed and we're being
+     // called from the destructor.
+     if (mContentListener) {
+         mContentListener->DropDocShellreference();
+         mContentListener->SetParentContentListener(nsnull);
+@@ -5160,16 +5166,20 @@ nsDocShell::CreateAboutBlankContentViewe
+ 
+     if (NS_SUCCEEDED(rv) && !okToUnload) {
+       // The user chose not to unload the page, interrupt the load.
+       return NS_ERROR_FAILURE;
+     }
+ 
+     mSavingOldViewer = CanSavePresentation(LOAD_NORMAL, nsnull, nsnull);
+ 
++    // Make sure to blow away our mLoadingURI just in case.  No loads
++    // from inside this pagehide.
++    mLoadingURI = nsnull;
++    
+     // Notify the current document that it is about to be unloaded!!
+     //
+     // It is important to fire the unload() notification *before* any state
+     // is changed within the DocShell - otherwise, javascript will get the
+     // wrong information :-(
+     //
+     (void) FirePageHideNotification(!mSavingOldViewer);
+   }
+@@ -5576,16 +5586,20 @@ nsDocShell::RestoreFromHistory()
+         oldMUDV->GetTextZoom(&textZoom);
+         oldMUDV->GetFullZoom(&pageZoom);
+     }
+ 
+     // Protect against mLSHE going away via a load triggered from
+     // pagehide or unload.
+     nsCOMPtr<nsISHEntry> origLSHE = mLSHE;
+ 
++    // Make sure to blow away our mLoadingURI just in case.  No loads
++    // from inside this pagehide.
++    mLoadingURI = nsnull;
++    
+     // Notify the old content viewer that it's being hidden.
+     FirePageHideNotification(!mSavingOldViewer);
+ 
+     // If mLSHE was changed as a result of the pagehide event, then
+     // something else was loaded.  Don't finish restoring.
+     if (mLSHE != origLSHE)
+       return NS_OK;
+ 
+@@ -5938,29 +5952,34 @@ nsDocShell::CreateContentViewer(const ch
+         // it's still safe to do so, since there may have been DOM mutations
+         // or new requests initiated.
+         nsCOMPtr<nsIDOMDocument> domDoc;
+         viewer->GetDOMDocument(getter_AddRefs(domDoc));
+         nsCOMPtr<nsIDocument> doc = do_QueryInterface(domDoc);
+         mSavingOldViewer = CanSavePresentation(mLoadType, request, doc);
+     }
+ 
++    NS_ASSERTION(!mLoadingURI, "Re-entering unload?");
++    
++    nsCOMPtr<nsIChannel> aOpenedChannel = do_QueryInterface(request);
++    if (aOpenedChannel) {
++        aOpenedChannel->GetURI(getter_AddRefs(mLoadingURI));
++    }
+     FirePageHideNotification(!mSavingOldViewer);
++    mLoadingURI = nsnull;
+ 
+     // Set mFiredUnloadEvent = PR_FALSE so that the unload handler for the
+     // *new* document will fire.
+     mFiredUnloadEvent = PR_FALSE;
+ 
+     // we've created a new document so go ahead and call
+     // OnLoadingSite(), but don't fire OnLocationChange()
+     // notifications before we've called Embed(). See bug 284993.
+     mURIResultedInDocument = PR_TRUE;
+ 
+-    nsCOMPtr<nsIChannel> aOpenedChannel = do_QueryInterface(request);
+-
+     PRBool onLocationChangeNeeded = OnLoadingSite(aOpenedChannel, PR_FALSE);
+ 
+     // let's try resetting the load group if we need to...
+     nsCOMPtr<nsILoadGroup> currentLoadGroup;
+     NS_ENSURE_SUCCESS(aOpenedChannel->
+                       GetLoadGroup(getter_AddRefs(currentLoadGroup)),
+                       NS_ERROR_FAILURE);
+ 
+@@ -6469,35 +6488,85 @@ nsDocShell::CheckLoadingPermissions()
+     }
+ 
+     return sameOrigin;
+ }
+ 
+ //*****************************************************************************
+ // nsDocShell: Site Loading
+ //*****************************************************************************   
++class InternalLoadEvent : public nsRunnable
++{
++public:
++    InternalLoadEvent(nsDocShell* aDocShell, nsIURI * aURI, nsIURI * aReferrer,
++                      nsISupports * aOwner, PRUint32 aFlags,
++                      const PRUnichar *aWindowTarget, const char* aTypeHint,
++                      nsIInputStream * aPostData,
++                      nsIInputStream * aHeadersData, PRUint32 aLoadType,
++                      nsISHEntry * aSHEntry, PRBool aFirstParty) :
++        mDocShell(aDocShell),
++        mURI(aURI),
++        mReferrer(aReferrer),
++        mOwner(aOwner),
++        mFlags(aFlags),
++        mPostData(aPostData),
++        mHeadersData(aHeadersData),
++        mLoadType(aLoadType),
++        mSHEntry(aSHEntry),
++        mFirstParty(aFirstParty)
++    {
++        // Make sure to keep null things null as needed
++        if (aWindowTarget) {
++            mWindowTarget = aWindowTarget;
++        }
++        if (aTypeHint) {
++            mTypeHint = aTypeHint;
++        }
++    }
++    
++    NS_IMETHOD Run() {
++        return mDocShell->InternalLoad(mURI, mReferrer, mOwner, mFlags,
++                                       mWindowTarget.get(), mTypeHint.get(),
++                                       mPostData, mHeadersData, mLoadType,
++                                       mSHEntry, mFirstParty, nsnull, nsnull);
++    }
++
++private:
++    nsRefPtr<nsDocShell> mDocShell;
++    nsCOMPtr<nsIURI> mURI;
++    nsCOMPtr<nsIURI> mReferrer;
++    nsCOMPtr<nsISupports> mOwner;
++    PRUint32 mFlags;
++
++    // Use IDL strings so .get() returns null by default
++    nsXPIDLString mWindowTarget;
++    nsXPIDLCString mTypeHint;
++    
++    nsCOMPtr<nsIInputStream> mPostData;
++    nsCOMPtr<nsIInputStream> mHeadersData;
++    PRUint32 mLoadType;
++    nsCOMPtr<nsISHEntry> mSHEntry;
++    PRBool mFirstParty;
++};
++
+ NS_IMETHODIMP
+ nsDocShell::InternalLoad(nsIURI * aURI,
+                          nsIURI * aReferrer,
+                          nsISupports * aOwner,
+                          PRUint32 aFlags,
+                          const PRUnichar *aWindowTarget,
+                          const char* aTypeHint,
+                          nsIInputStream * aPostData,
+                          nsIInputStream * aHeadersData,
+                          PRUint32 aLoadType,
+                          nsISHEntry * aSHEntry,
+                          PRBool aFirstParty,
+                          nsIDocShell** aDocShell,
+                          nsIRequest** aRequest)
+ {
+-    if (mFiredUnloadEvent) {
+-      return NS_OK; // JS may not handle returning of an error code
+-    }
+-
+     nsresult rv = NS_OK;
+ 
+ #ifdef PR_LOGGING
+     if (gDocShellLeakLog && PR_LOG_TEST(gDocShellLeakLog, PR_LOG_DEBUG)) {
+         nsCAutoString spec;
+         if (aURI)
+             aURI->GetSpec(spec);
+         PR_LogPrint("DOCSHELL %p InternalLoad %s\n", this, spec.get());
+@@ -6515,16 +6584,31 @@ nsDocShell::InternalLoad(nsIURI * aURI,
+     if (!aURI) {
+         return NS_ERROR_NULL_POINTER;
+     }
+ 
+     NS_ENSURE_TRUE(IsValidLoadType(aLoadType), NS_ERROR_INVALID_ARG);
+ 
+     NS_ENSURE_TRUE(!mIsBeingDestroyed, NS_ERROR_NOT_AVAILABLE);
+ 
++    if (mFiredUnloadEvent) {
++        if (IsOKToLoadURI(aURI)) {
++            // Do this asynchronously
++            nsCOMPtr<nsIRunnable> ev =
++                new InternalLoadEvent(this, aURI, aReferrer, aOwner, aFlags,
++                                      aWindowTarget, aTypeHint,
++                                      aPostData, aHeadersData, aLoadType,
++                                      aSHEntry, aFirstParty);
++            return NS_DispatchToCurrentThread(ev);
++        }
++
++        // Just ignore this load attempt
++        return NS_OK;
++    }
++
+     // wyciwyg urls can only be loaded through history. Any normal load of
+     // wyciwyg through docshell is  illegal. Disallow such loads.
+     if (aLoadType & LOAD_CMD_NORMAL) {
+         PRBool isWyciwyg = PR_FALSE;
+         rv = aURI->SchemeIs("wyciwyg", &isWyciwyg);   
+         if ((isWyciwyg && NS_SUCCEEDED(rv)) || NS_FAILED(rv)) 
+             return NS_ERROR_FAILURE;
+     }
+@@ -8083,16 +8167,20 @@ nsDocShell::AddToSessionHistory(nsIURI *
+ 
+     return rv;
+ }
+ 
+ 
+ NS_IMETHODIMP
+ nsDocShell::LoadHistoryEntry(nsISHEntry * aEntry, PRUint32 aLoadType)
+ {
++    if (!IsNavigationAllowed()) {
++        return NS_OK;
++    }
++    
+     nsCOMPtr<nsIURI> uri;
+     nsCOMPtr<nsIInputStream> postData;
+     nsCOMPtr<nsIURI> referrerURI;
+     nsCAutoString contentType;
+     nsCOMPtr<nsISupports> owner;
+ 
+     NS_ENSURE_TRUE(aEntry, NS_ERROR_FAILURE);
+ 
+@@ -9230,16 +9318,36 @@ nsDocShell::IsAboutBlank(nsIURI* aURI)
+         return PR_FALSE;
+     }
+     
+     nsCAutoString str;
+     aURI->GetSpec(str);
+     return str.EqualsLiteral("about:blank");
+ }
+ 
++PRBool
++nsDocShell::IsOKToLoadURI(nsIURI* aURI)
++{
++    NS_PRECONDITION(aURI, "Must have a URI!");
++    
++    if (!mFiredUnloadEvent) {
++        return PR_TRUE;
++    }
++
++    if (!mLoadingURI) {
++        return PR_FALSE;
++    }
++
++    nsCOMPtr<nsIScriptSecurityManager> secMan =
++        do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID);
++    return
++        secMan &&
++        NS_SUCCEEDED(secMan->CheckSameOriginURI(aURI, mLoadingURI, PR_FALSE));
++}
++
+ //*****************************************************************************
+ // nsClassifierCallback
+ //*****************************************************************************
+ 
+ NS_IMPL_THREADSAFE_ISUPPORTS2(nsClassifierCallback,
+                               nsIURIClassifierCallback,
+                               nsIRunnable)
+ 
+Index: docshell/base/nsWebShell.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/docshell/base/nsWebShell.cpp,v
+retrieving revision 1.698
+diff -u -p -d -8 -r1.698 nsWebShell.cpp
+--- docshell/base/nsWebShell.cpp	27 Nov 2007 05:32:24 -0000	1.698
++++ docshell/base/nsWebShell.cpp	8 Jan 2008 05:52:30 -0000
+@@ -762,17 +762,17 @@ NS_IMETHODIMP
+ nsWebShell::OnLinkClick(nsIContent* aContent,
+                         nsIURI* aURI,
+                         const PRUnichar* aTargetSpec,
+                         nsIInputStream* aPostDataStream,
+                         nsIInputStream* aHeadersDataStream)
+ {
+   NS_ASSERTION(NS_IsMainThread(), "wrong thread");
+ 
+-  if (mFiredUnloadEvent) {
++  if (!IsOKToLoadURI(aURI)) {
+     return NS_OK;
+   }
+ 
+   if (aContent->IsEditable()) {
+     return NS_OK;
+   }
+ 
+   nsCOMPtr<nsIRunnable> ev =
+@@ -793,17 +793,17 @@ nsWebShell::OnLinkClickSync(nsIContent *
+   // Initialize the DocShell / Request
+   if (aDocShell) {
+     *aDocShell = nsnull;
+   }
+   if (aRequest) {
+     *aRequest = nsnull;
+   }
+ 
+-  if (mFiredUnloadEvent) {
++  if (!IsOKToLoadURI(aURI)) {
+     return NS_OK;
+   }
+ 
+   if (aContent->IsEditable()) {
+     return NS_OK;
+   }
+ 
+   {

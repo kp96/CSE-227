@@ -1,0 +1,22 @@
+diff --git a/resources/localized/English.lproj/Localizable.strings.in b/resources/localized/English.lproj/Localizable.strings.in
+--- a/resources/localized/English.lproj/Localizable.strings.in
++++ b/resources/localized/English.lproj/Localizable.strings.in
+@@ -542,17 +542,17 @@
+ /* To create paragraphs within the long description text, please wrap each 
+    paragraph in <p></p> tags.  Because these strings appear in an XHTML page, 
+    each LongDescText string must begin with a <p> and end with a </p> or the 
+    safe browsing page will not display. */
+ "PhishingLongDescText" = "<p>Phishing sites are designed to trick you into revealing personal or financial information by creating copies of trusted websites.</p><p>Entering any information on this web page may result in identity theft or other fraud.</p>";
+ "MalwareLongDescText" = "<p>Malware sites try to install programs that steal private information, use your computer to attack others, or damage your system.</p><p>Some malware sites intentionally distribute harmful software, but many are compromised without the knowledge or permission of their owners.</p><p>Your computer can be infected just by proceeding to this site, without any further action on your part.</p>";
+ "MoreInformationFormat" = "For more information about why this site was blocked, see Camino’s <a href='%@'>Safe Browsing Documentation</a>.";
+ "GetMeOutButtonLabel" = "Close Page";
+-"IgnoreWarningButtonLabel" = "Ignore this warning";
++"IgnoreWarningButtonLabel" = "Ignore This Warning";
+ "PhishReportingDisabledToolTip" = "“Warn me when visiting potentially malicious sites” must be enabled to report phishing pages.";
+ 
+ /* Gecko Print Dialog; only needed for Gecko 1.9.2 */
+ "Options:" = "Options:";
+ "Print Selection Only" = "Print Selection Only";
+ "Ignore Scaling and Shrink To Fit Page Width" = "Ignore Scaling and Shrink To Fit Page Width";
+ 
+ "Appearance:" = "Appearance:";

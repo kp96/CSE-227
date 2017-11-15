@@ -1,0 +1,248 @@
+# HG changeset patch
+# Parent 1e3af440ce238c3dcd850237c340a4cfb741332c
+# User Patrick McManus <mcmanus@ducksong.com>
+bug 658580 revert isalive() from 654201
+
+diff --git a/netwerk/base/public/nsISocketTransport.idl b/netwerk/base/public/nsISocketTransport.idl
+--- a/netwerk/base/public/nsISocketTransport.idl
++++ b/netwerk/base/public/nsISocketTransport.idl
+@@ -46,17 +46,17 @@ native PRNetAddr(union PRNetAddr);
+  *
+  * NOTE: Connection setup is triggered by opening an input or output stream,
+  * it does not start on its own. Completion of the connection setup is
+  * indicated by a STATUS_CONNECTED_TO notification to the event sink (if set).
+  *
+  * NOTE: This is a free-threaded interface, meaning that the methods on
+  * this interface may be called from any thread.
+  */
+-[scriptable, uuid(bbee8fef-6ac2-4819-9089-61169bdf5074)]
++[scriptable, uuid(19c37caa-fb41-4c32-bbf1-c6b31b75d789)]
+ interface nsISocketTransport : nsITransport 
+ {
+     /**
+      * Get the host for the underlying socket connection.
+      */
+     readonly attribute AUTF8String host;
+ 
+     /**
+@@ -90,22 +90,18 @@ interface nsISocketTransport : nsITransp
+      * via nsISSLSocketControl at socket creation time.
+      *
+      * NOTE: this attribute cannot be changed once a stream has been opened.
+      */
+     attribute nsIInterfaceRequestor securityCallbacks;
+    
+     /**
+      * Test if this socket transport is (still) connected.
+-     *
+-     * @param aPassive indicates that the IsAlive() method should not
+-     *                 read, even non-destructively, from the network.
+-     *                 SSL based transports may deadlock if called without this.
+      */
+-    boolean isAlive(in boolean aPassive);
++    boolean isAlive();
+ 
+     /**
+      * Socket timeouts in seconds.  To specify no timeout, pass PR_UINT32_MAX
+      * as aValue to setTimeout.  The implementation may truncate timeout values
+      * to a smaller range of values (e.g., 0 to 0xFFFF).
+      */
+     unsigned long getTimeout(in unsigned long aType);
+     void          setTimeout(in unsigned long aType, in unsigned long aValue);
+diff --git a/netwerk/base/src/nsSocketTransport2.cpp b/netwerk/base/src/nsSocketTransport2.cpp
+--- a/netwerk/base/src/nsSocketTransport2.cpp
++++ b/netwerk/base/src/nsSocketTransport2.cpp
+@@ -1828,58 +1828,38 @@ nsSocketTransport::SetEventSink(nsITrans
+     }
+ 
+     MutexAutoLock lock(mLock);
+     mEventSink = sink;
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+-nsSocketTransport::IsAlive(PRBool aPassive, PRBool *result)
++nsSocketTransport::IsAlive(PRBool *result)
+ {
+     *result = PR_FALSE;
+ 
+     PRFileDesc *fd;
+     {
+         MutexAutoLock lock(mLock);
+         if (NS_FAILED(mCondition))
+             return NS_OK;
+         fd = GetFD_Locked();
+         if (!fd)
+             return NS_OK;
+     }
+ 
+     // XXX do some idle-time based checks??
+ 
+-    if (aPassive) {
+-        *result = PR_TRUE;                        /* presume true */
++    char c;
++    PRInt32 rval = PR_Recv(fd, &c, 1, PR_MSG_PEEK, 0);
+ 
+-        PRPollDesc desc;
+-        desc.fd = mFD;
++    if ((rval > 0) || (rval < 0 && PR_GetError() == PR_WOULD_BLOCK_ERROR))
++        *result = PR_TRUE;
+ 
+-        // include POLL_READ in the in_flags in order to take
+-        // conditions PK11LoggedOut / AlreadyShutDown into account on SSL
+-        // sockets as a workaround for bug 658138
+-        desc.in_flags = PR_POLL_READ | PR_POLL_EXCEPT;
+-        desc.out_flags = 0;
+-
+-        if ((PR_Poll(&desc, 1, 0) == 1) &&
+-            (desc.out_flags &
+-             (PR_POLL_EXCEPT | PR_POLL_ERR | PR_POLL_NVAL | PR_POLL_HUP))) {
+-            *result = PR_FALSE;
+-        }
+-    }
+-    else {
+-        char c;
+-        PRInt32 rval = PR_Recv(fd, &c, 1, PR_MSG_PEEK, 0);
+-        
+-        if ((rval > 0) || (rval < 0 && PR_GetError() == PR_WOULD_BLOCK_ERROR))
+-            *result = PR_TRUE;
+-    }
+-    
+     {
+         MutexAutoLock lock(mLock);
+         ReleaseFD_Locked(fd);
+     }
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+diff --git a/netwerk/protocol/ftp/nsFtpConnectionThread.cpp b/netwerk/protocol/ftp/nsFtpConnectionThread.cpp
+--- a/netwerk/protocol/ftp/nsFtpConnectionThread.cpp
++++ b/netwerk/protocol/ftp/nsFtpConnectionThread.cpp
+@@ -1423,18 +1423,17 @@ nsFtpState::R_pasv() {
+         // is the same
+         nsCOMPtr<nsISocketTransport> strans = do_QueryInterface(mDataTransport);
+         if (strans) {
+             PRInt32 oldPort;
+             nsresult rv = strans->GetPort(&oldPort);
+             if (NS_SUCCEEDED(rv)) {
+                 if (oldPort == port) {
+                     PRBool isAlive;
+-                    if (NS_SUCCEEDED(strans->IsAlive(PR_FALSE, &isAlive)) &&
+-                        isAlive)
++                    if (NS_SUCCEEDED(strans->IsAlive(&isAlive)) && isAlive)
+                         newDataConn = PR_FALSE;
+                 }
+             }
+         }
+ 
+         if (newDataConn) {
+             mDataTransport->Close(NS_ERROR_ABORT);
+             mDataTransport = nsnull;
+diff --git a/netwerk/protocol/ftp/nsFtpControlConnection.cpp b/netwerk/protocol/ftp/nsFtpControlConnection.cpp
+--- a/netwerk/protocol/ftp/nsFtpControlConnection.cpp
++++ b/netwerk/protocol/ftp/nsFtpControlConnection.cpp
+@@ -111,17 +111,17 @@ nsFtpControlConnection::~nsFtpControlCon
+ 
+ PRBool
+ nsFtpControlConnection::IsAlive()
+ {
+     if (!mSocket) 
+         return PR_FALSE;
+ 
+     PRBool isAlive = PR_FALSE;
+-    mSocket->IsAlive(PR_FALSE, &isAlive);
++    mSocket->IsAlive(&isAlive);
+     return isAlive;
+ }
+ nsresult 
+ nsFtpControlConnection::Connect(nsIProxyInfo* proxyInfo,
+                                 nsITransportEventSink* eventSink)
+ {
+     if (mSocket)
+         return NS_OK;
+diff --git a/netwerk/protocol/http/nsHttpConnection.cpp b/netwerk/protocol/http/nsHttpConnection.cpp
+--- a/netwerk/protocol/http/nsHttpConnection.cpp
++++ b/netwerk/protocol/http/nsHttpConnection.cpp
+@@ -74,17 +74,16 @@ nsHttpConnection::nsHttpConnection()
+     , mConsiderReusedAfterInterval(0)
+     , mConsiderReusedAfterEpoch(0)
+     , mCurrentBytesRead(0)
+     , mMaxBytesRead(0)
+     , mKeepAlive(PR_TRUE) // assume to keep-alive by default
+     , mKeepAliveMask(PR_TRUE)
+     , mSupportsPipelining(PR_FALSE) // assume low-grade server
+     , mIsReused(PR_FALSE)
+-    , mIsActivated(PR_FALSE)
+     , mCompletedProxyConnect(PR_FALSE)
+     , mLastTransactionExpectedNoContent(PR_FALSE)
+     , mIdleMonitoring(PR_FALSE)
+ {
+     LOG(("Creating nsHttpConnection @%x\n", this));
+ 
+     // grab a reference to the handler to ensure that it doesn't go away.
+     nsHttpHandler *handler = gHttpHandler;
+@@ -164,17 +163,16 @@ nsHttpConnection::Activate(nsAHttpTransa
+         mCallbacks.swap(callbacks);
+         if (callbacks)
+             NS_ProxyRelease(mCallbackTarget, callbacks);
+         mCallbackTarget = callbackTarget;
+     }
+ 
+     // take ownership of the transaction
+     mTransaction = trans;
+-    mIsActivated = PR_TRUE;
+ 
+     NS_ABORT_IF_FALSE(!mIdleMonitoring,
+                       "Activating a connection with an Idle Monitor");
+     mIdleMonitoring = PR_FALSE;
+ 
+     // set mKeepAlive according to what will be requested
+     mKeepAliveMask = mKeepAlive = (caps & NS_HTTP_ALLOW_KEEPALIVE);
+ 
+@@ -273,25 +271,18 @@ PRUint32 nsHttpConnection::TimeToLive()
+ }
+ 
+ PRBool
+ nsHttpConnection::IsAlive()
+ {
+     if (!mSocketTransport)
+         return PR_FALSE;
+ 
+-    // Calling IsAlive() non passively on an SSL socket transport that has
+-    // not yet completed the SSL handshake can result
+-    // in the event loop being run. All code that calls
+-    // nsHttpConnection::IsAlive() is not re-entrant so we need to avoid
+-    // having IsAlive() trigger a real SSL read in that circumstance.
+-
+     PRBool alive;
+-    PRBool passiveRead = mConnInfo->UsingSSL() && !mIsActivated;
+-    nsresult rv = mSocketTransport->IsAlive(passiveRead, &alive);
++    nsresult rv = mSocketTransport->IsAlive(&alive);
+     if (NS_FAILED(rv))
+         alive = PR_FALSE;
+ 
+ //#define TEST_RESTART_LOGIC
+ #ifdef TEST_RESTART_LOGIC
+     if (!alive) {
+         LOG(("pretending socket is still alive to test restart logic\n"));
+         alive = PR_TRUE;
+diff --git a/netwerk/protocol/http/nsHttpConnection.h b/netwerk/protocol/http/nsHttpConnection.h
+--- a/netwerk/protocol/http/nsHttpConnection.h
++++ b/netwerk/protocol/http/nsHttpConnection.h
+@@ -195,15 +195,14 @@ private:
+     PRInt64                         mMaxBytesRead;       // max read in 1 activation
+ 
+     nsRefPtr<nsIAsyncInputStream>   mInputOverflow;
+ 
+     PRPackedBool                    mKeepAlive;
+     PRPackedBool                    mKeepAliveMask;
+     PRPackedBool                    mSupportsPipelining;
+     PRPackedBool                    mIsReused;
+-    PRPackedBool                    mIsActivated;
+     PRPackedBool                    mCompletedProxyConnect;
+     PRPackedBool                    mLastTransactionExpectedNoContent;
+     PRPackedBool                    mIdleMonitoring;
+ };
+ 
+ #endif // nsHttpConnection_h__

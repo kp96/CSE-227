@@ -1,0 +1,18 @@
+Index: dictionarysearchOverlay.js
+===================================================================
+RCS file: /cvs/dictionarysearch/src/content/dictionarysearch/dictionarysearchOverlay.js,v
+retrieving revision 1.5
+diff -u -r1.5 dictionarysearchOverlay.js
+--- dictionarysearchOverlay.js	17 Apr 2005 19:12:56 -0000	1.5
++++ dictionarysearchOverlay.js	31 Jul 2005 12:50:39 -0000
+@@ -172,8 +172,8 @@
+     
+     var node = document.popupNode;
+     var selection = "";
+-    var nodeLocalName = node.localName.toUpperCase();
+-    if ((nodeLocalName == "TEXTAREA") || (nodeLocalName == "INPUT" && node.type == "text")) {
++
++    if ((node instanceof HTMLTextAreaElement) || (node instanceof HTMLInputElement && node.type == "text")) {
+         selection = node.value.substring(node.selectionStart, node.selectionEnd);
+     } 
+     else {

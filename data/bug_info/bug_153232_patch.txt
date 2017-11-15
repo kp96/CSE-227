@@ -1,0 +1,21 @@
+Index: mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp,v
+retrieving revision 1.106
+diff -p -u -6 -r1.106 nsNSSIOLayer.cpp
+--- mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp	20 Apr 2006 16:21:57 -0000	1.106
++++ mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp	21 Apr 2006 15:43:17 -0000
+@@ -721,12 +721,13 @@ nsHandleSSLError(nsNSSSocketInfo *socket
+ 	  break;
+ 
+   case SEC_ERROR_BAD_SIGNATURE:
+     params[0] = hostNameU.get();
+     nssComponent->PIPBundleFormatStringFromName("PeersCertBadSignature", 
+                                                 params, 1, formattedString);
++    break;
+ 
+   //A generic error handler for peer cert
+   case SEC_ERROR_UNKNOWN_CERT:
+   case SEC_ERROR_BAD_KEY:
+   case SEC_ERROR_CERT_USAGES_INVALID:
+   case SEC_ERROR_INADEQUATE_KEY_USAGE:

@@ -1,0 +1,56 @@
+# HG changeset patch
+# Parent 0bfb0a5f36b3e329fd85786104c8df31efa36f13
+# User Blake Kaplan <mrbkap@gmail.com>
+Fix bug 643450.
+
+diff --git a/dom/base/nsJSEnvironment.cpp b/dom/base/nsJSEnvironment.cpp
+--- a/dom/base/nsJSEnvironment.cpp
++++ b/dom/base/nsJSEnvironment.cpp
+@@ -1912,38 +1912,32 @@ nsJSContext::CallEventHandler(nsISupport
+ 
+       ReportPendingException();
+ 
+       // Don't pass back results from failed calls.
+       rval = JSVAL_VOID;
+ 
+       // Tell the caller that the handler threw an error.
+       rv = NS_ERROR_FAILURE;
++    } else if (rval == JSVAL_NULL) {
++      *arv = nsnull;
++    } else if (!JS_WrapValue(mContext, &rval)) {
++      ReportPendingException();
++      rv = NS_ERROR_FAILURE;
++    } else {
++      rv = nsContentUtils::XPConnect()->JSToVariant(mContext, rval, arv);
++      if (NS_FAILED(rv))
++        ReportPendingException();
+     }
+ 
+     sSecurityManager->PopContextPrincipal(mContext);
+   }
+ 
+   pusher.Pop();
+ 
+-  // Convert to variant before calling ScriptEvaluated, as it may GC, meaning
+-  // we would need to root rval.
+-  if (NS_SUCCEEDED(rv)) {
+-    if (rval == JSVAL_NULL) {
+-      *arv = nsnull;
+-    } else {
+-      if (!JS_WrapValue(mContext, &rval)) {
+-        ReportPendingException();
+-        rv = NS_ERROR_FAILURE;
+-      } else {
+-        rv = nsContentUtils::XPConnect()->JSToVariant(mContext, rval, arv);
+-      }
+-    }
+-  }
+-
+   // ScriptEvaluated needs to come after we pop the stack
+   ScriptEvaluated(PR_TRUE);
+ 
+   return rv;
+ }
+ 
+ nsresult
+ nsJSContext::BindCompiledEventHandler(nsISupports* aTarget, void *aScope,

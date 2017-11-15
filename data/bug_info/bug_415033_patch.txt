@@ -1,0 +1,43 @@
+Index: mozilla/netwerk/base/public/security-prefs.js
+===================================================================
+RCS file: /cvsroot/mozilla/netwerk/base/public/security-prefs.js,v
+retrieving revision 1.19
+diff -u -p -r1.19 security-prefs.js
+--- mozilla/netwerk/base/public/security-prefs.js	20 Aug 2007 14:22:42 -0000	1.19
++++ mozilla/netwerk/base/public/security-prefs.js	23 Feb 2008 02:43:51 -0000
+@@ -3,6 +3,7 @@ pref("general.useragent.security",      
+ pref("security.enable_ssl2",             false);
+ pref("security.enable_ssl3",             true);
+ pref("security.enable_tls",		 true);
++pref("security.enable_tls_session_tickets", true);
+ 
+ pref("security.ssl2.rc4_128", false);
+ pref("security.ssl2.rc2_128", false);
+Index: mozilla/security/manager/ssl/src/nsNSSComponent.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSComponent.cpp,v
+retrieving revision 1.157
+diff -u -p -r1.157 nsNSSComponent.cpp
+--- mozilla/security/manager/ssl/src/nsNSSComponent.cpp	4 Dec 2007 18:53:56 -0000	1.157
++++ mozilla/security/manager/ssl/src/nsNSSComponent.cpp	23 Feb 2008 02:43:55 -0000
+@@ -1596,6 +1596,10 @@ nsNSSComponent::InitializeNSS(PRBool sho
+       mPrefBranch->GetBoolPref("security.enable_tls", &enabled);
+       SSL_OptionSetDefault(SSL_ENABLE_TLS, enabled);
+ 
++      // Configure TLS session ticket
++      mPrefBranch->GetBoolPref("security.enable_tls_session_tickets", &enabled);
++      SSL_OptionSetDefault(SSL_ENABLE_SESSION_TICKETS, enabled);
++
+       // Disable any ciphers that NSS might have enabled by default
+       for (PRUint16 i = 0; i < SSL_NumImplementedCiphers; ++i)
+       {
+@@ -2047,6 +2051,9 @@ nsNSSComponent::Observe(nsISupports *aSu
+       mPrefBranch->GetBoolPref("security.enable_tls", &enabled);
+       SSL_OptionSetDefault(SSL_ENABLE_TLS, enabled);
+       clearSessionCache = PR_TRUE;
++    } else if (prefName.Equals("security.enable_tls_session_tickets")) {
++      mPrefBranch->GetBoolPref("security.enable_tls_session_tickets", &enabled);
++      SSL_OptionSetDefault(SSL_ENABLE_SESSION_TICKETS, enabled);
+     } else if (prefName.Equals("security.OCSP.enabled")
+                || prefName.Equals("security.OCSP.require")) {
+       setOCSPOptions(mPrefBranch);

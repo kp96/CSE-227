@@ -1,0 +1,44 @@
+Index: mozilla/security/manager/ssl/src/nsCertOverrideService.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsCertOverrideService.cpp,v
+retrieving revision 1.6
+diff -u -u -1 -0 -w -r1.6 nsCertOverrideService.cpp
+--- mozilla/security/manager/ssl/src/nsCertOverrideService.cpp	22 Apr 2008 20:03:21 -0000	1.6
++++ mozilla/security/manager/ssl/src/nsCertOverrideService.cpp	23 Apr 2008 23:07:02 -0000
+@@ -482,33 +482,33 @@
+     return NS_ERROR_FAILURE;
+ 
+   CERTCertificate* nsscert = cert2->GetCert();
+   if (!nsscert)
+     return NS_ERROR_FAILURE;
+ 
+   CERTCertificateCleaner nsscertCleaner(nsscert);
+ 
+   nsCAutoString nickname;
+   nickname = nsNSSCertificate::defaultServerNickname(nsscert);
+-  if (nickname.IsEmpty())
+-    return NS_ERROR_FAILURE;
+-
++  if (!nickname.IsEmpty())
++  {
+   PK11SlotInfo *slot = PK11_GetInternalKeySlot();
+   if (!slot)
+     return NS_ERROR_FAILURE;
+ 
+   SECStatus srv = PK11_ImportCert(slot, nsscert, CK_INVALID_HANDLE, 
+                                   const_cast<char*>(nickname.get()), PR_FALSE);
+   PK11_FreeSlot(slot);
+ 
+   if (srv != SECSuccess)
+     return NS_ERROR_FAILURE;
++  }
+ 
+   nsCAutoString fpStr;
+   nsresult rv = GetCertFingerprintByOidTag(nsscert, 
+                   mOidTagForStoringNewHashes, fpStr);
+   if (NS_FAILED(rv))
+     return rv;
+ 
+   char *dbkey = NULL;
+   rv = aCert->GetDbKey(&dbkey);
+   if (NS_FAILED(rv) || !dbkey)

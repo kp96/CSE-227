@@ -1,0 +1,18 @@
+Index: all.js
+===================================================================
+RCS file: /m/pub/mozilla/modules/libpref/src/init/all.js,v
+retrieving revision 3.253
+diff -u -r3.253 all.js
+--- all.js	2001/07/10 23:24:12	3.253
++++ all.js	2001/07/19 02:39:51
+@@ -182,8 +182,8 @@
+ 
+ pref("capability.policy.default.HTMLDocument.close", "allAccess");
+ pref("capability.policy.default.HTMLDocument.open", "allAccess");
+-pref("capability.policy.default.HTMLDocument.write", "allAccess");
+-pref("capability.policy.default.HTMLDocument.writeln", "allAccess");
++pref("capability.policy.default.HTMLDocument.write", "noAccess");
++pref("capability.policy.default.HTMLDocument.writeln", "noAccess");
+ 
+ pref("capability.policy.default.Location.hash.set", "allAccess");
+ pref("capability.policy.default.Location.href.set", "allAccess");

@@ -1,0 +1,4 @@
+Update NSS used in Mozilla 1.9.0 branch
+from current NSS_3_12_1_RTM to
+NSS_3_12_1_WITH_CBKI_1_72_RTM.
+

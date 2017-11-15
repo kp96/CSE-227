@@ -1,0 +1,29 @@
+# HG changeset patch
+# User Irving Reid <irving@mozilla.com>
+# Date 1321395213 18000
+# Node ID 7d2d2a02974116da17a904034d242336e287b3cf
+# Parent  fba69840e3d710c323e8204cb340a0f04c1260f4
+Bug 535103, Bug 469117: Don't return non-notificationbox XUL element from getNotificationBox, to fix several Password Manager issues
+
+diff --git a/mail/base/content/mailWindow.js b/mail/base/content/mailWindow.js
+--- a/mail/base/content/mailWindow.js
++++ b/mail/base/content/mailWindow.js
+@@ -512,17 +512,17 @@ function getNotificationBox(aWindow) {
+   var tabmail = document.getElementById("tabmail");
+   var tabInfo = tabmail.tabInfo;
+ 
+   for (var i = 0; i < tabInfo.length; ++i) {
+     var browserFunc = tabInfo[i].mode.getBrowser ||
+                       tabInfo[i].mode.tabType.getBrowser;
+     if (browserFunc) {
+       var possBrowser = browserFunc.call(tabInfo[i].mode.tabType, tabInfo[i]);
+-      if (possBrowser && possBrowser.contentWindow == aWindow)
++      if (possBrowser && possBrowser.contentWindow == aWindow && possBrowser.parentNode.tagName == "notificationbox")
+         return possBrowser.parentNode;
+     }
+   }
+   return null;
+ }
+ 
+ // Given the server, open the twisty and the set the selection
+ // on inbox of that server.

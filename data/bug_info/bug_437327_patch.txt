@@ -1,0 +1,414 @@
+Index: Camino.xcodeproj/project.pbxproj
+===================================================================
+RCS file: /cvsroot/mozilla/camino/Camino.xcodeproj/project.pbxproj,v
+retrieving revision 1.111
+diff -u -8 -r1.111 project.pbxproj
+--- Camino.xcodeproj/project.pbxproj	14 May 2009 18:46:40 -0000	1.111
++++ Camino.xcodeproj/project.pbxproj	16 May 2009 16:14:29 -0000
+@@ -260,16 +260,18 @@
+ 		33FBAAFF0C84D0CA00DD459E /* NSString+Utils.m in Sources */ = {isa = PBXBuildFile; fileRef = 33FBAAFB0C84D0CA00DD459E /* NSString+Utils.m */; };
+ 		34884A36074F7C5D000EA76B /* AddressBook.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 34884A35074F7C5D000EA76B /* AddressBook.framework */; };
+ 		34884A37074F7C5D000EA76B /* AddressBook.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 34884A35074F7C5D000EA76B /* AddressBook.framework */; };
+ 		3489ADCC0753B717005ADF6C /* ABAddressBook+Utils.mm in Sources */ = {isa = PBXBuildFile; fileRef = 3489ADCA0753B717005ADF6C /* ABAddressBook+Utils.mm */; };
+ 		3489ADCE0753B717005ADF6C /* ABAddressBook+Utils.mm in Sources */ = {isa = PBXBuildFile; fileRef = 3489ADCA0753B717005ADF6C /* ABAddressBook+Utils.mm */; };
+ 		34D112DE08E9B17400989FD5 /* dl_trash.tiff in Resources */ = {isa = PBXBuildFile; fileRef = 34D112DD08E9B17400989FD5 /* dl_trash.tiff */; };
+ 		3D9419800F559B2F00227277 /* blockedSite.xhtml in Resources */ = {isa = PBXBuildFile; fileRef = 3D94197F0F559B2F00227277 /* blockedSite.xhtml */; };
+ 		3D9419810F559B2F00227277 /* blockedSite.xhtml in Resources */ = {isa = PBXBuildFile; fileRef = 3D94197F0F559B2F00227277 /* blockedSite.xhtml */; };
++		3DACDAAA0FBF1D1600709AC3 /* SafeBrowsingTestDataUpdater.mm in Sources */ = {isa = PBXBuildFile; fileRef = 3DACDAA90FBF1D1600709AC3 /* SafeBrowsingTestDataUpdater.mm */; };
++		3DACDAAB0FBF1D1600709AC3 /* SafeBrowsingTestDataUpdater.mm in Sources */ = {isa = PBXBuildFile; fileRef = 3DACDAA90FBF1D1600709AC3 /* SafeBrowsingTestDataUpdater.mm */; };
+ 		3DE5B63A0F6C11B300D2EF11 /* TransientBar.mm in Sources */ = {isa = PBXBuildFile; fileRef = 3DE5B6390F6C11B300D2EF11 /* TransientBar.mm */; };
+ 		3DE5B63B0F6C11B400D2EF11 /* TransientBar.mm in Sources */ = {isa = PBXBuildFile; fileRef = 3DE5B6390F6C11B300D2EF11 /* TransientBar.mm */; };
+ 		3F12FC57072E8ECB00995ED9 /* libxpcom_core.dylib in Copy Libraries */ = {isa = PBXBuildFile; fileRef = 3F12FC56072E8ECB00995ED9 /* libxpcom_core.dylib */; };
+ 		3F12FD3107312CCD00995ED9 /* libxpcom_core.dylib in Copy Libraries */ = {isa = PBXBuildFile; fileRef = 3F12FC56072E8ECB00995ED9 /* libxpcom_core.dylib */; };
+ 		3F27D94D05DB2600007B543D /* NSSplitView+Utils.mm in Sources */ = {isa = PBXBuildFile; fileRef = 3F27D94B05DB2600007B543D /* NSSplitView+Utils.mm */; };
+ 		3F27D94F05DB2600007B543D /* NSSplitView+Utils.mm in Sources */ = {isa = PBXBuildFile; fileRef = 3F27D94B05DB2600007B543D /* NSSplitView+Utils.mm */; };
+ 		3F383A47087C6D3C00A2594D /* AddressBookManager.m in Sources */ = {isa = PBXBuildFile; fileRef = 3FB2BAE00545EB30002B9691 /* AddressBookManager.m */; };
+ 		3F383A49087C6D4600A2594D /* AddressBookManager.m in Sources */ = {isa = PBXBuildFile; fileRef = 3FB2BAE00545EB30002B9691 /* AddressBookManager.m */; };
+@@ -2699,16 +2701,18 @@
+ 		33FBAAF30C84D0A500DD459E /* NSString+Gecko.h */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.h; name = "NSString+Gecko.h"; path = "src/extensions/NSString+Gecko.h"; sourceTree = "<group>"; };
+ 		33FBAAFA0C84D0CA00DD459E /* NSString+Gecko.mm */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.objcpp; name = "NSString+Gecko.mm"; path = "src/extensions/NSString+Gecko.mm"; sourceTree = "<group>"; };
+ 		33FBAAFB0C84D0CA00DD459E /* NSString+Utils.m */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.objc; name = "NSString+Utils.m"; path = "src/extensions/NSString+Utils.m"; sourceTree = "<group>"; };
+ 		34884A35074F7C5D000EA76B /* AddressBook.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AddressBook.framework; path = /System/Library/Frameworks/AddressBook.framework; sourceTree = "<absolute>"; };
+ 		3489ADC90753B717005ADF6C /* ABAddressBook+Utils.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "ABAddressBook+Utils.h"; path = "src/extensions/ABAddressBook+Utils.h"; sourceTree = "<group>"; };
+ 		3489ADCA0753B717005ADF6C /* ABAddressBook+Utils.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = "ABAddressBook+Utils.mm"; path = "src/extensions/ABAddressBook+Utils.mm"; sourceTree = "<group>"; };
+ 		34D112DD08E9B17400989FD5 /* dl_trash.tiff */ = {isa = PBXFileReference; lastKnownFileType = image.tiff; name = dl_trash.tiff; path = resources/images/toolbar/dl_trash.tiff; sourceTree = SOURCE_ROOT; };
+ 		3D94197F0F559B2F00227277 /* blockedSite.xhtml */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xml; name = blockedSite.xhtml; path = resources/application/blockedSite.xhtml; sourceTree = "<group>"; };
++		3DACDAA80FBF1D1600709AC3 /* SafeBrowsingTestDataUpdater.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = SafeBrowsingTestDataUpdater.h; path = src/safebrowsing/SafeBrowsingTestDataUpdater.h; sourceTree = "<group>"; };
++		3DACDAA90FBF1D1600709AC3 /* SafeBrowsingTestDataUpdater.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = SafeBrowsingTestDataUpdater.mm; path = src/safebrowsing/SafeBrowsingTestDataUpdater.mm; sourceTree = "<group>"; };
+ 		3DE5B6380F6C11B300D2EF11 /* TransientBar.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = TransientBar.h; path = src/browser/TransientBar.h; sourceTree = "<group>"; };
+ 		3DE5B6390F6C11B300D2EF11 /* TransientBar.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = TransientBar.mm; path = src/browser/TransientBar.mm; sourceTree = "<group>"; };
+ 		3F12FC56072E8ECB00995ED9 /* libxpcom_core.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libxpcom_core.dylib; path = ../dist/Embed/libxpcom_core.dylib; sourceTree = SOURCE_ROOT; };
+ 		3F22CC1303DF42A200026DCE /* Charset.dict */ = {isa = PBXFileReference; lastKnownFileType = text.xml; name = Charset.dict; path = resources/application/Charset.dict; sourceTree = "<group>"; };
+ 		3F27D94A05DB2600007B543D /* NSSplitView+Utils.h */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.h; name = "NSSplitView+Utils.h"; path = "src/extensions/NSSplitView+Utils.h"; sourceTree = "<group>"; };
+ 		3F27D94B05DB2600007B543D /* NSSplitView+Utils.mm */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.objcpp; name = "NSSplitView+Utils.mm"; path = "src/extensions/NSSplitView+Utils.mm"; sourceTree = "<group>"; };
+ 		3F2CF8CB042A88B7005FD42F /* ImageAndTextCell.h */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.h; name = ImageAndTextCell.h; path = src/extensions/ImageAndTextCell.h; sourceTree = "<group>"; };
+ 		3F2CF8CC042A88B7005FD42F /* ImageAndTextCell.m */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.objc; name = ImageAndTextCell.m; path = src/extensions/ImageAndTextCell.m; sourceTree = "<group>"; };
+@@ -4298,16 +4302,18 @@
+ 		};
+ 		C7DE8DD00F30CF8A00CD3872 /* Safe Browsing */ = {
+ 			isa = PBXGroup;
+ 			children = (
+ 				C7DE8DD40F30CFAC00CD3872 /* SafeBrowsingListManager.h */,
+ 				C7DE8DD30F30CFAC00CD3872 /* SafeBrowsingListManager.mm */,
+ 				C7DE8DD60F30CFAC00CD3872 /* SafeBrowsingAboutModule.h */,
+ 				C7DE8DD50F30CFAC00CD3872 /* SafeBrowsingAboutModule.mm */,
++				3DACDAA80FBF1D1600709AC3 /* SafeBrowsingTestDataUpdater.h */,
++				3DACDAA90FBF1D1600709AC3 /* SafeBrowsingTestDataUpdater.mm */,
+ 			);
+ 			name = "Safe Browsing";
+ 			sourceTree = "<group>";
+ 		};
+ 		C7FF53690D3527F400194776 /* Web Search */ = {
+ 			isa = PBXGroup;
+ 			children = (
+ 				C795737B0D35310B0028A773 /* Backend */,
+@@ -6447,16 +6453,17 @@
+ 				336234490E6BC2FB00DD5373 /* HTMLBookmarkConverter.m in Sources */,
+ 				C713F0900E9AF7DB002313B3 /* CHSlidingViewAnimation.m in Sources */,
+ 				C7AB1EA00EEC5FEB0053A08A /* NSTextView+Utils.m in Sources */,
+ 				DE18FBFD0F2435F700325C11 /* GrowlController.mm in Sources */,
+ 				C7DE8DD70F30CFAC00CD3872 /* SafeBrowsingListManager.mm in Sources */,
+ 				C7DE8DD80F30CFAC00CD3872 /* SafeBrowsingAboutModule.mm in Sources */,
+ 				3DE5B63A0F6C11B300D2EF11 /* TransientBar.mm in Sources */,
+ 				009A854D0F892F1D00C9892B /* CHCertificateOverrideManager.mm in Sources */,
++				3DACDAAA0FBF1D1600709AC3 /* SafeBrowsingTestDataUpdater.mm in Sources */,
+ 			);
+ 			runOnlyForDeploymentPostprocessing = 0;
+ 		};
+ 		3F44AD9405BDFB9F00CB4B08 /* Sources */ = {
+ 			isa = PBXSourcesBuildPhase;
+ 			buildActionMask = 2147483647;
+ 			files = (
+ 				3F44AD9605BDFB9F00CB4B08 /* Appearance.mm in Sources */,
+@@ -6636,16 +6643,17 @@
+ 				336234480E6BC2FB00DD5373 /* HTMLBookmarkConverter.m in Sources */,
+ 				C713F0910E9AF7DB002313B3 /* CHSlidingViewAnimation.m in Sources */,
+ 				C7AB1EA10EEC5FEB0053A08A /* NSTextView+Utils.m in Sources */,
+ 				DE18FBFC0F2435F700325C11 /* GrowlController.mm in Sources */,
+ 				C7DE8DD90F30CFAC00CD3872 /* SafeBrowsingListManager.mm in Sources */,
+ 				C7DE8DDA0F30CFAC00CD3872 /* SafeBrowsingAboutModule.mm in Sources */,
+ 				3DE5B63B0F6C11B400D2EF11 /* TransientBar.mm in Sources */,
+ 				009A854C0F892F1D00C9892B /* CHCertificateOverrideManager.mm in Sources */,
++				3DACDAAB0FBF1D1600709AC3 /* SafeBrowsingTestDataUpdater.mm in Sources */,
+ 			);
+ 			runOnlyForDeploymentPostprocessing = 0;
+ 		};
+ /* End PBXSourcesBuildPhase section */
+ 
+ /* Begin PBXTargetDependency section */
+ 		33820DBC0F8AA26500D2164A /* PBXTargetDependency */ = {
+ 			isa = PBXTargetDependency;
+Index: src/safebrowsing/SafeBrowsingListManager.mm
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/safebrowsing/SafeBrowsingListManager.mm,v
+retrieving revision 1.1
+diff -u -8 -r1.1 SafeBrowsingListManager.mm
+--- src/safebrowsing/SafeBrowsingListManager.mm	29 Jan 2009 04:05:46 -0000	1.1
++++ src/safebrowsing/SafeBrowsingListManager.mm	16 May 2009 16:14:32 -0000
+@@ -43,16 +43,17 @@
+ #import "NSString+Utils.h"
+ #import "CHBrowserService.h"
+ 
+ #include "nsIUrlClassifierDBService.h"
+ #include "nsIUrlListManager.h"
+ #include "nsCOMPtr.h"
+ #include "nsIServiceManager.h"
+ #include "nsString.h"
++#include "SafeBrowsingTestDataUpdater.h"
+ 
+ @implementation SafeBrowsingList
+ 
+ + (id)listWithName:(NSString *)aName type:(ESafeBrowsingListType)aType
+ {
+   return [[[self alloc] initWithName:aName type:aType] autorelease];
+ }
+ 
+@@ -102,16 +103,17 @@
+ 
+ - (void)setInitialDataProviderValuesFromPreferences;
+ - (void)getDataProviderURLPref:(nsACString&)outPrefValue forKey:(NSString *)aKeyTemplate usingProviderID:(int)aProviderID;
+ - (void)registerObservationOfSafeBrowsingPreferences;
+ - (void)establishSecureKeyWithDataProvider;
+ - (void)reRegisterAllLists;
+ - (void)setUpdatesAreEnabled:(BOOL)aShouldEnableUpdates forListTypes:(SafeBrowsingListTypesMask)aListTypesToChange;
+ - (int)preferredDataProviderIdentifier;
++- (void)insertTestURLsIntoDatabase;
+ 
+ @end
+ 
+ #pragma mark -
+ 
+ @implementation SafeBrowsingListManager
+ 
+ + (SafeBrowsingListManager *)sharedInstance
+@@ -142,16 +144,17 @@
+     // Register for xpcom shutdown so we know if the list manager goes away.
+     [[NSNotificationCenter defaultCenter] addObserver:self
+                                              selector:@selector(xpcomShutdown:)
+                                                  name:XPCOMShutDownNotificationName
+                                                object:nil];
+ 
+     [self registerObservationOfSafeBrowsingPreferences];
+     [self setInitialDataProviderValuesFromPreferences];
++    [self insertTestURLsIntoDatabase];
+   }
+   return self;
+ }
+ 
+ - (void)dealloc
+ {
+   NS_IF_RELEASE(mListManager);
+ 
+@@ -203,16 +206,27 @@
+ 
+   nsCAutoString getHashURL;
+   [self getDataProviderURLPref:getHashURL 
+                         forKey:kGeckoPrefSafeBrowsingDataProviderGetHashURL 
+                usingProviderID:providerID];
+   mListManager->SetGethashUrl(getHashURL);
+ }
+ 
++// Manually insert our own test URLs into the safe browsing database. This provides
++// a way for users to verify that the feature is enabled and working and also
++// to experience what the UI looks like when visiting a dangerous site.
++- (void)insertTestURLsIntoDatabase
++{
++  // Create a CHSafeBrowsingTestDataUpdater instance to simulate the update stream.
++  // The object will be freed automatically by XPCOM's memory management.
++  CHSafeBrowsingTestDataUpdater *testDataController = new CHSafeBrowsingTestDataUpdater();
++  testDataController->InsertTestURLsIntoSafeBrowsingDb();
++}
++
+ // Initializes a secure MAC with the data provider, which is used to decrypt list data. 
+ // This value is not applied in |setInitialDataProviderValuesFromPreferences| because communication 
+ // with the provider's server is required to set it, making it preferable to do so only when
+ // safe browsing is enabled by the user. This method will not clear any registered lists.
+ - (void)establishSecureKeyWithDataProvider
+ {
+   nsCAutoString keyURL;
+   [self getDataProviderURLPref:keyURL
+Index: src/safebrowsing/SafeBrowsingTestDataUpdater.h
+===================================================================
+RCS file: src/safebrowsing/SafeBrowsingTestDataUpdater.h
+diff -N src/safebrowsing/SafeBrowsingTestDataUpdater.h
+--- /dev/null	1 Jan 1970 00:00:00 -0000
++++ src/safebrowsing/SafeBrowsingTestDataUpdater.h	16 May 2009 16:14:32 -0000
+@@ -0,0 +1,68 @@
++/* ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is Camino code.
++ *
++ * The Initial Developer of the Original Code is
++ * Sean Murphy.
++ * Portions created by the Initial Developer are Copyright (C) 2009
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *   Sean Murphy <murph@seanmurph.com>
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either the GNU General Public License Version 2 or later (the "GPL"), or
++ * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++#ifndef CHSafeBrowsingTestDataUpdater_h_
++#define CHSafeBrowsingTestDataUpdater_h_
++
++#import <Cocoa/Cocoa.h>
++
++#include <nsISupportsUtils.h>
++#include "nsCOMPtr.h"
++#include "nsIUrlClassifierDBService.h"
++
++//
++// CHSafeBrowsingTestDataUpdater
++//
++// Manually inserts our own test URLs into the safe browsing blacklist database 
++// by simulating a url-classifier update stream.
++//
++class CHSafeBrowsingTestDataUpdater : public nsIUrlClassifierUpdateObserver
++{
++ public:
++  NS_DECL_ISUPPORTS
++  NS_DECL_NSIURLCLASSIFIERUPDATEOBSERVER
++
++  CHSafeBrowsingTestDataUpdater();
++  virtual ~CHSafeBrowsingTestDataUpdater();
++
++  NS_IMETHOD InsertTestURLsIntoSafeBrowsingDb();
++
++ private:
++  nsresult AppendUpdateStream(const nsACString & inDatabaseTableName, NSArray *inTestURLs, nsACString & outUpdateStream);
++};
++
++#endif // CHSafeBrowsingTestDataUpdater_h_
+Index: src/safebrowsing/SafeBrowsingTestDataUpdater.mm
+===================================================================
+RCS file: src/safebrowsing/SafeBrowsingTestDataUpdater.mm
+diff -N src/safebrowsing/SafeBrowsingTestDataUpdater.mm
+--- /dev/null	1 Jan 1970 00:00:00 -0000
++++ src/safebrowsing/SafeBrowsingTestDataUpdater.mm	16 May 2009 16:14:32 -0000
+@@ -0,0 +1,143 @@
++/* ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is Camino code.
++ *
++ * The Initial Developer of the Original Code is
++ * Sean Murphy.
++ * Portions created by the Initial Developer are Copyright (C) 2009
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *   Sean Murphy <murph@seanmurph.com>
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either the GNU General Public License Version 2 or later (the "GPL"), or
++ * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++#include "SafeBrowsingTestDataUpdater.h"
++#include "nsIUrlClassifierDBService.h"
++#include "nsCOMPtr.h"
++#include "nsIServiceManager.h"
++#include "nsPrintfCString.h"
++#include "nsString.h"
++
++// URLs are separated by a comma and should only include the second-level domain name
++// (e.g. leave out the "http://www.")
++static NSString *const kTestPhishingURLs = @"mozilla.com/firefox/its-a-trap.html,caminobrowser.org/documentation/security/test-phishing/";
++static NSString *const kTestMalwareURLs = @"mozilla.com/firefox/its-an-attack.html,caminobrowser.org/documentation/security/test-malware/";
++
++NS_IMPL_ISUPPORTS1(CHSafeBrowsingTestDataUpdater, nsIUrlClassifierUpdateObserver)
++
++CHSafeBrowsingTestDataUpdater::CHSafeBrowsingTestDataUpdater()
++{
++}
++
++CHSafeBrowsingTestDataUpdater::~CHSafeBrowsingTestDataUpdater()
++{
++}
++
++NS_IMETHODIMP
++CHSafeBrowsingTestDataUpdater::InsertTestURLsIntoSafeBrowsingDb()
++{
++  nsresult rv;
++
++  nsCOMPtr<nsIUrlClassifierDBService> dbService = do_GetService("@mozilla.org/url-classifier/dbservice;1", &rv);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  nsCAutoString updateStream;
++  AppendUpdateStream(NS_LITERAL_CSTRING("test-phish-simple"),
++                     [kTestPhishingURLs componentsSeparatedByString:@","],
++                     updateStream);
++
++  AppendUpdateStream(NS_LITERAL_CSTRING("test-malware-simple"),
++                     [kTestMalwareURLs componentsSeparatedByString:@","],
++                     updateStream);
++
++  rv = dbService->BeginUpdate(this, NS_LITERAL_CSTRING("test-phish-simple,test-malware-simple"), NS_LITERAL_CSTRING(""));
++  NS_ENSURE_SUCCESS(rv, rv);
++  rv = dbService->BeginStream(NS_LITERAL_CSTRING(""), NS_LITERAL_CSTRING(""));
++  NS_ENSURE_SUCCESS(rv, rv);
++  rv = dbService->UpdateStream(updateStream);
++  NS_ENSURE_SUCCESS(rv, rv);
++  rv = dbService->FinishStream();
++  NS_ENSURE_SUCCESS(rv, rv);
++  rv = dbService->FinishUpdate();
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  return NS_OK;
++}
++
++nsresult CHSafeBrowsingTestDataUpdater::AppendUpdateStream(const nsACString & inDatabaseTableName,
++                                                           NSArray *inTestURLs,
++                                                           nsACString & outUpdateStream)
++{
++  // Form an update stream using the format described at:
++  // http://code.google.com/p/google-safe-browsing/wiki/Protocolv2Spec
++
++  nsCAutoString updateStream;
++  updateStream.AppendLiteral("\nn:1000\ni:");
++  updateStream.Append(inDatabaseTableName);
++  updateStream.AppendLiteral("\nad:1-");
++  updateStream.AppendInt([inTestURLs count]);
++  for (unsigned i = 0; i < [inTestURLs count]; i++) {
++    const char *currentURL = [[inTestURLs objectAtIndex:i] cStringUsingEncoding:NSASCIIStringEncoding];
++    updateStream.Append(nsPrintfCString("\na:%i:32:%i\n", i + 1, strlen(currentURL)));
++    updateStream.Append(currentURL);
++  }
++
++  outUpdateStream.Append(updateStream);
++
++  return NS_OK;
++}
++
++/* void updateUrlRequested (in ACString url, in ACString table, in ACString serverMAC); */
++NS_IMETHODIMP CHSafeBrowsingTestDataUpdater::UpdateUrlRequested(const nsACString & url, const nsACString & table, const nsACString & serverMAC)
++{
++  return NS_OK;
++}
++
++/* void rekeyRequested (); */
++NS_IMETHODIMP CHSafeBrowsingTestDataUpdater::RekeyRequested()
++{
++  return NS_OK;
++}
++
++/* void streamFinished (in nsresult status, in unsigned long delay); */
++NS_IMETHODIMP CHSafeBrowsingTestDataUpdater::StreamFinished(nsresult status, PRUint32 delay)
++{
++  return NS_OK;
++}
++
++/* void updateError (in nsresult error); */
++NS_IMETHODIMP CHSafeBrowsingTestDataUpdater::UpdateError(nsresult error)
++{
++  NSLog(@"Error inserting test URLs into safe browsing database");
++  return NS_OK;
++}
++
++/* void updateSuccess (in unsigned long requestedTimeout); */
++NS_IMETHODIMP CHSafeBrowsingTestDataUpdater::UpdateSuccess(PRUint32 requestedTimeout)
++{
++  return NS_OK;
++}

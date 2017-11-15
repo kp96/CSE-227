@@ -1,0 +1,1556 @@
+Index: caps/src/nsScriptSecurityManager.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/caps/src/nsScriptSecurityManager.cpp,v
+retrieving revision 1.300
+diff -u -p -d -8 -r1.300 nsScriptSecurityManager.cpp
+--- caps/src/nsScriptSecurityManager.cpp	12 May 2006 00:05:40 -0000	1.300
++++ caps/src/nsScriptSecurityManager.cpp	13 Jun 2006 20:51:44 -0000
+@@ -1190,35 +1190,16 @@ nsScriptSecurityManager::GetBaseURISchem
+ 
+     // Get the innermost URI
+     nsCOMPtr<nsIURI> uri = NS_GetInnermostURI(aURI);
+ 
+     //-- get the source scheme
+     rv = uri->GetScheme(aScheme);
+     if (NS_FAILED(rv)) return rv;
+ 
+-    //-- if aURI is an about uri, distinguish 'safe' and 'unsafe' about URIs
+-    if(aScheme.EqualsLiteral("about"))
+-    {
+-        nsCAutoString path;
+-        rv = NS_GetAboutModuleName(uri, path);
+-        NS_ENSURE_SUCCESS(rv, rv);
+-        if (path.EqualsLiteral("blank")   ||
+-            path.EqualsLiteral("mozilla") ||
+-            path.EqualsLiteral("logo")    ||
+-            path.EqualsLiteral("license") ||
+-            path.EqualsLiteral("licence") ||
+-            path.EqualsLiteral("credits") ||
+-            path.EqualsLiteral("neterror"))
+-        {
+-            aScheme = NS_LITERAL_CSTRING("about safe");
+-            return NS_OK;
+-        }
+-    }
+-
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsScriptSecurityManager::CheckLoadURI(nsIURI *aSourceURI, nsIURI *aTargetURI,
+                                       PRUint32 aFlags)
+ {
+     // FIXME: bug 327244 -- this function should really die...  Really truly.
+@@ -1323,18 +1304,18 @@ nsScriptSecurityManager::CheckLoadURIWit
+         { "moz-anno",        ChromeProtocol },
+         { "mailbox",         DenyProtocol   },
+         { "pop",             AllowProtocol  },
+         { "imap",            DenyProtocol   },
+         { "pop3",            DenyProtocol   },
+         { "news",            AllowProtocol  },
+         { "javascript",      AllowProtocol  },
+         { "ftp",             AllowProtocol  },
+-        { "about safe",      AllowProtocol  },
+-        { "about",           ChromeProtocol },
++        { "moz-safe-about",  AllowProtocol  },
++        { "about",           DenyProtocol   },
+         { "mailto",          AllowProtocol  },
+         { "aim",             AllowProtocol  },
+         { "data",            AllowProtocol  },
+         { "keyword",         DenyProtocol   },
+         { "resource",        ChromeProtocol },
+         { "gopher",          AllowProtocol  },
+         { "datetime",        DenyProtocol   },
+         { "finger",          AllowProtocol  },
+@@ -1354,16 +1335,18 @@ nsScriptSecurityManager::CheckLoadURIWit
+             switch (protocolList[i].action)
+             {
+             case AllowProtocol:
+                 // everyone can access these schemes.
+                 return NS_OK;
+             case PrefControlled:
+                 {
+                     // resource: and chrome: are equivalent, securitywise
++                    // That's bogus!!  Fix this.  But watch out for
++                    // the view-source stylesheet?
+                     if (sourceScheme.EqualsLiteral("chrome") ||
+                         sourceScheme.EqualsLiteral("resource"))
+                         return NS_OK;
+ 
+                     // Now check capability policies
+                     static const char loadURIPrefGroup[] = "checkloaduri";
+                     ClassInfoData nameData(nsnull, loadURIPrefGroup);
+ 
+@@ -1379,16 +1362,18 @@ nsScriptSecurityManager::CheckLoadURIWit
+ 
+                     ReportError(nsnull, errorTag, sourceURI, aTargetURI);
+                     return NS_ERROR_DOM_BAD_URI;
+                 }
+             case ChromeProtocol:
+                 if (aFlags & nsIScriptSecurityManager::ALLOW_CHROME)
+                     return NS_OK;
+                 // resource: and chrome: are equivalent, securitywise
++                // That's bogus!!  Fix this.  But watch out for
++                // the view-source stylesheet?
+                 if (sourceScheme.EqualsLiteral("chrome") ||
+                     sourceScheme.EqualsLiteral("resource"))
+                     return NS_OK;
+                 ReportError(nsnull, errorTag, sourceURI, aTargetURI);
+                 return NS_ERROR_DOM_BAD_URI;
+             case DenyProtocol:
+                 // Deny access
+                 ReportError(nsnull, errorTag, sourceURI, aTargetURI);
+Index: netwerk/base/src/nsSimpleNestedURI.h
+===================================================================
+RCS file: netwerk/base/src/nsSimpleNestedURI.h
+diff -N netwerk/base/src/nsSimpleNestedURI.h
+--- /dev/null	1 Jan 1970 00:00:00 -0000
++++ netwerk/base/src/nsSimpleNestedURI.h	13 Jun 2006 23:19:09 -0000
+@@ -0,0 +1,92 @@
++/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
++/* ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is mozilla.org code.
++ *
++ * The Initial Developer of the Original Code is
++ * the Mozilla Corporation.
++ * Portions created by the Initial Developer are Copyright (C) 2006
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *   Boris Zbarsky <bzbarsky@mit.edu> (Original author)
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either of the GNU General Public License Version 2 or later (the "GPL"),
++ * or the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++/**
++ * URI class to be used for cases when a simple URI actually resolves to some
++ * other sort of URI, with the latter being what's loaded when the load
++ * happens.  All objects of this class should always be immutable, so that the
++ * inner URI and this URI don't get out of sync.  The Clone() implementation
++ * will guarantee this for the clone, but it's up to the protocol handlers
++ * creating these URIs to ensure that in the first place.  The innerURI passed
++ * to this URI will be set immutable if possible.
++ */
++
++#ifndef nsSimpleNestedURI_h__
++#define nsSimpleNestedURI_h__
++
++#include "nsCOMPtr.h"
++#include "nsSimpleURI.h"
++#include "nsINestedURI.h"
++
++class nsSimpleNestedURI : public nsSimpleURI,
++                          public nsINestedURI
++{
++public:
++    // To be used by deserialization only.  Leaves this object in an
++    // uninitialized state that will throw on most accesses.
++    nsSimpleNestedURI()
++        : nsSimpleURI(nsnull)
++    {
++    }
++
++    // Constructor that should generally be used when constructing an object of
++    // this class with |operator new|.
++    nsSimpleNestedURI(nsIURI* innerURI);
++
++    NS_DECL_ISUPPORTS_INHERITED
++    NS_DECL_NSINESTEDURI
++
++    // Overrides for various methods nsSimpleURI implements follow.
++  
++    // nsIURI overrides
++    NS_IMETHOD Equals(nsIURI* other, PRBool *result);
++    virtual nsSimpleURI* StartClone();
++
++    // nsISerializable overrides
++    NS_IMETHOD Read(nsIObjectInputStream* aStream);
++    NS_IMETHOD Write(nsIObjectOutputStream* aStream);
++
++    // Override the nsIClassInfo method GetClassIDNoAlloc to make sure our
++    // nsISerializable impl works right.
++    NS_IMETHOD GetClassIDNoAlloc(nsCID *aClassIDNoAlloc);  
++
++protected:
++    nsCOMPtr<nsIURI> mInnerURI;
++};
++
++#endif /* nsSimpleNestedURI_h__ */
+Index: netwerk/base/src/nsSimpleNestedURI.cpp
+===================================================================
+RCS file: netwerk/base/src/nsSimpleNestedURI.cpp
+diff -N netwerk/base/src/nsSimpleNestedURI.cpp
+--- /dev/null	1 Jan 1970 00:00:00 -0000
++++ netwerk/base/src/nsSimpleNestedURI.cpp	13 Jun 2006 22:57:27 -0000
+@@ -0,0 +1,161 @@
++/* -*- Mode: C++; tab-width: 4; indent-tabs-mode: nil; c-basic-offset: 4 -*- */
++/* ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is mozilla.org code.
++ *
++ * The Initial Developer of the Original Code is
++ * the Mozilla Corporation.
++ * Portions created by the Initial Developer are Copyright (C) 2006
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *   Boris Zbarsky <bzbarsky@mit.edu> (Original author)
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either of the GNU General Public License Version 2 or later (the "GPL"),
++ * or the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++#include "nsSimpleNestedURI.h"
++#include "nsIObjectInputStream.h"
++#include "nsIObjectOutputStream.h"
++#include "nsNetUtil.h"
++
++NS_IMPL_ISUPPORTS_INHERITED1(nsSimpleNestedURI, nsSimpleURI, nsINestedURI)
++
++nsSimpleNestedURI::nsSimpleNestedURI(nsIURI* innerURI)
++    : nsSimpleURI(nsnull),
++      mInnerURI(innerURI)
++{
++    NS_ASSERTION(innerURI, "Must have inner URI");
++    NS_TryToSetImmutable(innerURI);
++}
++    
++// nsISerializable
++
++NS_IMETHODIMP
++nsSimpleNestedURI::Read(nsIObjectInputStream* aStream)
++{
++    nsresult rv = nsSimpleURI::Read(aStream);
++    if (NS_FAILED(rv)) return rv;
++
++    NS_ASSERTION(!mMutable, "How did that happen?");
++
++    rv = aStream->ReadObject(PR_TRUE, getter_AddRefs(mInnerURI));
++    if (NS_FAILED(rv)) return rv;
++
++    NS_TryToSetImmutable(mInnerURI);
++
++    return rv;
++}
++
++NS_IMETHODIMP
++nsSimpleNestedURI::Write(nsIObjectOutputStream* aStream)
++{
++    nsCOMPtr<nsISerializable> serializable = do_QueryInterface(mInnerURI);
++    if (!serializable) {
++        // We can't serialize ourselves
++        return NS_ERROR_NOT_AVAILABLE;
++    }
++
++    nsresult rv = nsSimpleURI::Write(aStream);
++    if (NS_FAILED(rv)) return rv;
++
++    rv = aStream->WriteCompoundObject(mInnerURI, NS_GET_IID(nsIURI),
++                                      PR_TRUE);
++    return rv;
++}
++
++// nsINestedURI
++
++NS_IMETHODIMP
++nsSimpleNestedURI::GetInnerURI(nsIURI** uri)
++{
++    NS_ENSURE_TRUE(mInnerURI, NS_ERROR_NOT_INITIALIZED);
++    
++    return NS_EnsureSafeToReturn(mInnerURI, uri);
++}
++
++NS_IMETHODIMP
++nsSimpleNestedURI::GetInnermostURI(nsIURI** uri)
++{
++    return NS_ImplGetInnermostURI(this, uri);
++}
++
++// nsIURI overrides
++
++NS_IMETHODIMP
++nsSimpleNestedURI::Equals(nsIURI* other, PRBool *result)
++{
++    *result = PR_FALSE;
++    NS_ENSURE_TRUE(mInnerURI, NS_ERROR_NOT_INITIALIZED);
++    
++    if (other) {
++        PRBool correctScheme;
++        nsresult rv = other->SchemeIs(mScheme.get(), &correctScheme);
++        NS_ENSURE_SUCCESS(rv, rv);
++
++        if (correctScheme) {
++            nsCOMPtr<nsINestedURI> nest = do_QueryInterface(other);
++            if (nest) {
++                nsCOMPtr<nsIURI> otherInner;
++                rv = nest->GetInnerURI(getter_AddRefs(otherInner));
++                NS_ENSURE_SUCCESS(rv, rv);
++
++                return otherInner->Equals(mInnerURI, result);
++            }
++        }
++    }
++
++    return NS_OK;
++}
++
++/* virtual */ nsSimpleURI*
++nsSimpleNestedURI::StartClone()
++{
++    NS_ENSURE_TRUE(mInnerURI, nsnull);
++    
++    nsCOMPtr<nsIURI> innerClone;
++    nsresult rv = mInnerURI->Clone(getter_AddRefs(innerClone));
++    if (NS_FAILED(rv)) {
++        return nsnull;
++    }
++
++    nsSimpleNestedURI* url = new nsSimpleNestedURI(innerClone);
++    if (url) {
++        url->SetMutable(PR_FALSE);
++    }
++
++    return url;
++}
++
++// nsIClassInfo overrides
++
++NS_IMETHODIMP 
++nsSimpleNestedURI::GetClassIDNoAlloc(nsCID *aClassIDNoAlloc)
++{
++    static NS_DEFINE_CID(kSimpleNestedURICID, NS_SIMPLENESTEDURI_CID);
++
++    *aClassIDNoAlloc = kSimpleNestedURICID;
++    return NS_OK;
++}
+Index: netwerk/base/src/Makefile.in
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/netwerk/base/src/Makefile.in,v
+retrieving revision 1.94
+diff -u -p -d -8 -r1.94 Makefile.in
+--- netwerk/base/src/Makefile.in	10 May 2006 17:29:47 -0000	1.94
++++ netwerk/base/src/Makefile.in	12 May 2006 04:54:05 -0000
+@@ -72,16 +72,17 @@ CPPSRCS		= \
+ 		nsLoadGroup.cpp \
+ 		nsMIMEInputStream.cpp \
+ 		nsProtocolProxyService.cpp \
+ 		nsProxyInfo.cpp \
+ 		nsPACMan.cpp \
+ 		nsRequestObserverProxy.cpp \
+ 		nsSimpleStreamListener.cpp \
+ 		nsSimpleURI.cpp \
++		nsSimpleNestedURI.cpp \
+ 		nsStandardURL.cpp \
+ 		nsSocketTransport2.cpp \
+ 		nsSocketTransportService2.cpp \
+ 		nsServerSocket.cpp \
+ 		nsStreamListenerTee.cpp \
+ 		nsStreamLoader.cpp \
+ 		nsSyncStreamListener.cpp \
+ 		nsUnicharStreamLoader.cpp \
+Index: netwerk/protocol/about/public/nsIAboutModule.idl
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/netwerk/protocol/about/public/nsIAboutModule.idl,v
+retrieving revision 1.14
+diff -u -p -d -8 -r1.14 nsIAboutModule.idl
+--- netwerk/protocol/about/public/nsIAboutModule.idl	10 May 2006 17:29:50 -0000	1.14
++++ netwerk/protocol/about/public/nsIAboutModule.idl	13 Jun 2006 22:56:22 -0000
+@@ -35,25 +35,40 @@
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "nsISupports.idl"
+ 
+ interface nsIURI;
+ interface nsIChannel;
+ 
+-[scriptable, uuid(692303c0-2f83-11d3-8cd0-0060b0fc14a3)]
++[scriptable, uuid(9575693c-60d9-4332-b6b8-6c29289339cb)]
+ interface nsIAboutModule : nsISupports 
+ {
+     /**
+      * Constructs a new channel for the about protocol module. 
+      *
+      * @param aURI the uri of the new channel
+      */
+     nsIChannel newChannel(in nsIURI aURI);
++
++    /**
++     * A flag that indicates whether a URI is safe for untrusted
++     * content.  If it is, web pages and so forth will be allowed to
++     * link to this about: URI.  Otherwise, only chrome will be able
++     * to link to it.
++     */
++    const unsigned long URI_SAFE_FOR_UNTRUSTED_CONTENT = (1 << 0);
++
++    /**
++     * A method to get the flags that apply to a given about: URI.  The URI
++     * passed in is guaranteed to be one of the URIs that this module
++     * registered to deal with.
++     */
++    unsigned long getURIFlags(in nsIURI aURI);
+ };
+ 
+ %{C++
+ 
+ #define NS_ABOUT_MODULE_CONTRACTID        "@mozilla.org/network/protocol/about;1" 
+ #define NS_ABOUT_MODULE_CONTRACTID_PREFIX NS_ABOUT_MODULE_CONTRACTID "?what=" 
+ #define NS_ABOUT_MODULE_CONTRACTID_LENGTH 49      // nsCRT::strlen(NS_ABOUT_MODULE_CONTRACTID_PREFIX)
+ 
+Index: netwerk/protocol/about/src/nsAboutProtocolHandler.h
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/netwerk/protocol/about/src/nsAboutProtocolHandler.h,v
+retrieving revision 1.8
+diff -u -p -d -8 -r1.8 nsAboutProtocolHandler.h
+--- netwerk/protocol/about/src/nsAboutProtocolHandler.h	14 Sep 2005 04:16:27 -0000	1.8
++++ netwerk/protocol/about/src/nsAboutProtocolHandler.h	13 Jun 2006 22:45:17 -0000
+@@ -36,36 +36,43 @@
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #ifndef nsAboutProtocolHandler_h___
+ #define nsAboutProtocolHandler_h___
+ 
+ #include "nsIProtocolHandler.h"
+ 
+ class nsCString;
+-
+-#define NS_ABOUTPROTOCOLHANDLER_CID                  \
+-{ /* 9e3b6c90-2f75-11d3-8cd0-0060b0fc14a3 */         \
+-    0x9e3b6c90,                                      \
+-    0x2f75,                                          \
+-    0x11d3,                                          \
+-    {0x8c, 0xd0, 0x00, 0x60, 0xb0, 0xfc, 0x14, 0xa3} \
+-}
++class nsIAboutModule;
+ 
+ class nsAboutProtocolHandler : public nsIProtocolHandler
+ {
+ public:
+     NS_DECL_ISUPPORTS
+ 
+     // nsIProtocolHandler methods:
+     NS_DECL_NSIPROTOCOLHANDLER
+ 
+     // nsAboutProtocolHandler methods:
+-    nsAboutProtocolHandler();
+-    virtual ~nsAboutProtocolHandler();
++    nsAboutProtocolHandler() {}
++    virtual ~nsAboutProtocolHandler() {}
+ 
+-    static NS_METHOD
+-    Create(nsISupports *aOuter, REFNSIID aIID, void **aResult);
++protected:
++    static nsresult GetModuleForURI(nsIURI* uri, nsIAboutModule** module);
++};
+ 
+-    nsresult Init();
++class nsSafeAboutProtocolHandler : public nsIProtocolHandler
++{
++public:
++    NS_DECL_ISUPPORTS
++
++    // nsIProtocolHandler methods:
++    NS_DECL_NSIPROTOCOLHANDLER
++
++    // nsSafeAboutProtocolHandler methods:
++    nsSafeAboutProtocolHandler() {}
++
++private:
++    ~nsSafeAboutProtocolHandler() {}
+ };
+ 
++
+ #endif /* nsAboutProtocolHandler_h___ */
+Index: netwerk/protocol/about/src/nsAboutBlank.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/netwerk/protocol/about/src/nsAboutBlank.cpp,v
+retrieving revision 1.34
+diff -u -p -d -8 -r1.34 nsAboutBlank.cpp
+--- netwerk/protocol/about/src/nsAboutBlank.cpp	2 Jan 2006 03:20:03 -0000	1.34
++++ netwerk/protocol/about/src/nsAboutBlank.cpp	13 Jun 2006 22:09:44 -0000
+@@ -61,16 +61,23 @@ nsAboutBlank::NewChannel(nsIURI *aURI, n
+                                   NS_LITERAL_CSTRING("text/html"),
+                                   NS_LITERAL_CSTRING("utf-8"));
+     if (NS_FAILED(rv)) return rv;
+ 
+     *result = channel;
+     return rv;
+ }
+ 
++NS_IMETHODIMP
++nsAboutBlank::GetURIFlags(nsIURI *aURI, PRUint32 *result)
++{
++    *result = nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT;
++    return NS_OK;
++}
++
+ NS_METHOD
+ nsAboutBlank::Create(nsISupports *aOuter, REFNSIID aIID, void **aResult)
+ {
+     nsAboutBlank* about = new nsAboutBlank();
+     if (about == nsnull)
+         return NS_ERROR_OUT_OF_MEMORY;
+     NS_ADDREF(about);
+     nsresult rv = about->QueryInterface(aIID, aResult);
+Index: netwerk/protocol/about/src/nsAboutBloat.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/netwerk/protocol/about/src/nsAboutBloat.cpp,v
+retrieving revision 1.41
+diff -u -p -d -8 -r1.41 nsAboutBloat.cpp
+--- netwerk/protocol/about/src/nsAboutBloat.cpp	2 Jan 2006 03:20:03 -0000	1.41
++++ netwerk/protocol/about/src/nsAboutBloat.cpp	13 Jun 2006 22:10:18 -0000
+@@ -152,16 +152,23 @@ nsAboutBloat::NewChannel(nsIURI *aURI, n
+                                   NS_LITERAL_CSTRING("text/plain"),
+                                   NS_LITERAL_CSTRING("utf-8"));
+     if (NS_FAILED(rv)) return rv;
+ 
+     *result = channel;
+     return rv;
+ }
+ 
++NS_IMETHODIMP
++nsAboutBloat::GetURIFlags(nsIURI *aURI, PRUint32 *result)
++{
++    *result = 0;
++    return NS_OK;
++}
++
+ NS_METHOD
+ nsAboutBloat::Create(nsISupports *aOuter, REFNSIID aIID, void **aResult)
+ {
+     nsAboutBloat* about = new nsAboutBloat();
+     if (about == nsnull)
+         return NS_ERROR_OUT_OF_MEMORY;
+     NS_ADDREF(about);
+     nsresult rv = about->QueryInterface(aIID, aResult);
+Index: netwerk/protocol/about/src/nsAboutCache.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/netwerk/protocol/about/src/nsAboutCache.cpp,v
+retrieving revision 1.44
+diff -u -p -d -8 -r1.44 nsAboutCache.cpp
+--- netwerk/protocol/about/src/nsAboutCache.cpp	20 May 2006 22:36:48 -0000	1.44
++++ netwerk/protocol/about/src/nsAboutCache.cpp	13 Jun 2006 22:10:55 -0000
+@@ -134,16 +134,22 @@ nsAboutCache::NewChannel(nsIURI *aURI, n
+                                   NS_LITERAL_CSTRING("text/html"),
+                                   NS_LITERAL_CSTRING("utf-8"));
+     if (NS_FAILED(rv)) return rv;
+ 
+     *result = channel;
+     return rv;
+ }
+ 
++NS_IMETHODIMP
++nsAboutCache::GetURIFlags(nsIURI *aURI, PRUint32 *result)
++{
++    *result = 0;
++    return NS_OK;
++}
+ 
+ NS_IMETHODIMP
+ nsAboutCache::VisitDevice(const char *deviceID,
+                           nsICacheDeviceInfo *deviceInfo,
+                           PRBool *visitEntries)
+ {
+     PRUint32 bytesWritten, value;
+     nsXPIDLCString str;
+Index: netwerk/protocol/about/src/nsAboutCacheEntry.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/netwerk/protocol/about/src/nsAboutCacheEntry.cpp,v
+retrieving revision 1.32
+diff -u -p -d -8 -r1.32 nsAboutCacheEntry.cpp
+--- netwerk/protocol/about/src/nsAboutCacheEntry.cpp	19 Dec 2005 23:04:27 -0000	1.32
++++ netwerk/protocol/about/src/nsAboutCacheEntry.cpp	13 Jun 2006 22:12:25 -0000
+@@ -124,16 +124,23 @@ nsAboutCacheEntry::NewChannel(nsIURI *ur
+     rv = GetContentStream(uri, getter_AddRefs(stream));
+     if (NS_FAILED(rv)) return rv;
+ 
+     return NS_NewInputStreamChannel(result, uri, stream,
+                                     NS_LITERAL_CSTRING("application/xhtml+xml"),
+                                     NS_LITERAL_CSTRING("utf-8"));
+ }
+ 
++NS_IMETHODIMP
++nsAboutCacheEntry::GetURIFlags(nsIURI *aURI, PRUint32 *result)
++{
++    *result = 0;
++    return NS_OK;
++}
++
+ //-----------------------------------------------------------------------------
+ // nsAboutCacheEntry
+ 
+ nsresult
+ nsAboutCacheEntry::GetContentStream(nsIURI *uri, nsIInputStream **result)
+ {
+     nsCOMPtr<nsIStorageStream> storageStream;
+     nsCOMPtr<nsIOutputStream> outputStream;
+Index: netwerk/protocol/about/src/nsAboutProtocolHandler.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/netwerk/protocol/about/src/nsAboutProtocolHandler.cpp,v
+retrieving revision 1.42
+diff -u -p -d -8 -r1.42 nsAboutProtocolHandler.cpp
+--- netwerk/protocol/about/src/nsAboutProtocolHandler.cpp	18 Dec 2005 01:50:48 -0000	1.42
++++ netwerk/protocol/about/src/nsAboutProtocolHandler.cpp	13 Jun 2006 23:24:05 -0000
+@@ -43,55 +43,25 @@
+ #include "nsIComponentManager.h"
+ #include "nsIServiceManager.h"
+ #include "nsIAboutModule.h"
+ #include "nsString.h"
+ #include "nsReadableUtils.h"
+ #include "nsNetCID.h"
+ #include "nsAboutProtocolUtils.h"
+ #include "nsNetError.h"
++#include "nsNetUtil.h"
++#include "nsSimpleNestedURI.h"
+ 
+ static NS_DEFINE_CID(kSimpleURICID,     NS_SIMPLEURI_CID);
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+ 
+-nsAboutProtocolHandler::nsAboutProtocolHandler()
+-{
+-}
+-
+-nsresult
+-nsAboutProtocolHandler::Init()
+-{
+-    return NS_OK;
+-}
+-
+-nsAboutProtocolHandler::~nsAboutProtocolHandler()
+-{
+-}
+-
+ NS_IMPL_ISUPPORTS1(nsAboutProtocolHandler, nsIProtocolHandler)
+ 
+-NS_METHOD
+-nsAboutProtocolHandler::Create(nsISupports *aOuter, REFNSIID aIID, void **aResult)
+-{
+-    if (aOuter)
+-        return NS_ERROR_NO_AGGREGATION;
+-
+-    nsAboutProtocolHandler* ph = new nsAboutProtocolHandler();
+-    if (ph == nsnull)
+-        return NS_ERROR_OUT_OF_MEMORY;
+-    NS_ADDREF(ph);
+-    nsresult rv = ph->Init();
+-    if (NS_SUCCEEDED(rv)) {
+-        rv = ph->QueryInterface(aIID, aResult);
+-    }
+-    NS_RELEASE(ph);
+-    return rv;
+-}
+-
+ ////////////////////////////////////////////////////////////////////////////////
+ // nsIProtocolHandler methods:
+ 
+ NS_IMETHODIMP
+ nsAboutProtocolHandler::GetScheme(nsACString &result)
+ {
+     result.AssignLiteral("about");
+     return NS_OK;
+@@ -112,46 +82,77 @@ nsAboutProtocolHandler::GetProtocolFlags
+ }
+ 
+ NS_IMETHODIMP
+ nsAboutProtocolHandler::NewURI(const nsACString &aSpec,
+                                const char *aCharset, // ignore charset info
+                                nsIURI *aBaseURI,
+                                nsIURI **result)
+ {
++    *result = nsnull;
+     nsresult rv;
+ 
+-    nsIURI* url;
+-    rv = CallCreateInstance(kSimpleURICID, &url);
++    // Use a simple URI to parse out some stuff first
++    nsCOMPtr<nsIURI> url = do_CreateInstance(kSimpleURICID, &rv);
+     if (NS_FAILED(rv)) return rv;
+ 
+     rv = url->SetSpec(aSpec);
+     if (NS_FAILED(rv)) {
+-        NS_RELEASE(url);
+         return rv;
+     }
+ 
+-    *result = url;
+-    return rv;
++    // Unfortunately, people create random about: URIs that don't correspond to
++    // about: modules...  Since those URIs will never open a channel, might as
++    // well consider them unsafe for better perf, and just in case.
++    PRBool isSafe = PR_FALSE;
++    
++    nsCOMPtr<nsIAboutModule> aboutMod;
++    rv = GetModuleForURI(url, getter_AddRefs(aboutMod));
++    if (NS_SUCCEEDED(rv)) {
++        // The standard return case
++        PRUint32 flags;
++        rv = aboutMod->GetURIFlags(url, &flags);
++        NS_ENSURE_SUCCESS(rv, rv);
++
++        isSafe =
++            ((flags & nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT) != 0);
++    }
++
++    if (isSafe) {
++        // We need to indicate that this baby is safe.  Use an inner
++        // URI that no one but the security manager will see.
++        nsCOMPtr<nsIURI> inner;
++        rv = NS_NewURI(getter_AddRefs(inner), "moz-safe-about:x");
++        NS_ENSURE_SUCCESS(rv, rv);
++
++        nsSimpleNestedURI* outer = new nsSimpleNestedURI(inner);
++        NS_ENSURE_TRUE(outer, NS_ERROR_OUT_OF_MEMORY);
++
++        // Take a ref to it in the COMPtr we plan to return
++        url = outer;
++
++        rv = outer->SetSpec(aSpec);
++        NS_ENSURE_SUCCESS(rv, rv);
++    }
++
++    // We don't want to allow mutation, since it would allow safe and
++    // unsafe URIs to change into each other...
++    NS_TryToSetImmutable(url);
++    url.swap(*result);
++    return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsAboutProtocolHandler::NewChannel(nsIURI* uri, nsIChannel* *result)
+ {
+     NS_ENSURE_ARG_POINTER(uri);
+-    // about:what you ask?
+-    nsresult rv;
+-    nsCAutoString contractID;
+-    rv = NS_GetAboutModuleName(uri, contractID);
+-    if (NS_FAILED(rv)) return rv;
+-
+-    // look up a handler to deal with "what"
+-    contractID.Insert(NS_LITERAL_CSTRING(NS_ABOUT_MODULE_CONTRACTID_PREFIX), 0);
+ 
+-    nsCOMPtr<nsIAboutModule> aboutMod(do_GetService(contractID.get(), &rv));
++    // about:what you ask?
++    nsCOMPtr<nsIAboutModule> aboutMod;
++    nsresult rv = GetModuleForURI(uri, getter_AddRefs(aboutMod));
+     if (NS_SUCCEEDED(rv)) {
+         // The standard return case:
+         return aboutMod->NewChannel(uri, result);
+     }
+ 
+     // mumble...
+ 
+     if (rv == NS_ERROR_FACTORY_NOT_REGISTERED) {
+@@ -165,9 +166,92 @@ nsAboutProtocolHandler::NewChannel(nsIUR
+ 
+ NS_IMETHODIMP 
+ nsAboutProtocolHandler::AllowPort(PRInt32 port, const char *scheme, PRBool *_retval)
+ {
+     // don't override anything.  
+     *_retval = PR_FALSE;
+     return NS_OK;
+ }
++
++////////////////////////////////////////////////////////////////////////////////
++/* static */
++nsresult
++nsAboutProtocolHandler::GetModuleForURI(nsIURI* uri, nsIAboutModule** module)
++{
++    NS_PRECONDITION(uri, "Must have URI");
++
++    nsresult rv;
++    nsCAutoString contractID;
++    rv = NS_GetAboutModuleName(uri, contractID);
++    if (NS_FAILED(rv)) return rv;
++
++    // look up a handler to deal with "what"
++    contractID.Insert(NS_LITERAL_CSTRING(NS_ABOUT_MODULE_CONTRACTID_PREFIX), 0);
++
++    return CallGetService(contractID.get(), module);
++}
++
+ ////////////////////////////////////////////////////////////////////////////////
++// Safe about protocol handler impl
++
++NS_IMPL_ISUPPORTS1(nsSafeAboutProtocolHandler, nsIProtocolHandler)
++
++// nsIProtocolHandler methods:
++
++NS_IMETHODIMP
++nsSafeAboutProtocolHandler::GetScheme(nsACString &result)
++{
++    result.AssignLiteral("moz-safe-about");
++    return NS_OK;
++}
++
++NS_IMETHODIMP
++nsSafeAboutProtocolHandler::GetDefaultPort(PRInt32 *result)
++{
++    *result = -1;        // no port for moz-safe-about: URLs
++    return NS_OK;
++}
++
++NS_IMETHODIMP
++nsSafeAboutProtocolHandler::GetProtocolFlags(PRUint32 *result)
++{
++    *result = URI_NORELATIVE | URI_NOAUTH;
++    return NS_OK;
++}
++
++NS_IMETHODIMP
++nsSafeAboutProtocolHandler::NewURI(const nsACString &aSpec,
++                                   const char *aCharset, // ignore charset info
++                                   nsIURI *aBaseURI,
++                                   nsIURI **result)
++{
++    nsresult rv;
++
++    nsCOMPtr<nsIURI> url = do_CreateInstance(kSimpleURICID, &rv);
++    if (NS_FAILED(rv)) return rv;
++
++    rv = url->SetSpec(aSpec);
++    if (NS_FAILED(rv)) {
++        return rv;
++    }
++
++    NS_TryToSetImmutable(url);
++    
++    *result = nsnull;
++    url.swap(*result);
++    return rv;
++}
++
++NS_IMETHODIMP
++nsSafeAboutProtocolHandler::NewChannel(nsIURI* uri, nsIChannel* *result)
++{
++    *result = nsnull;
++    return NS_ERROR_NOT_AVAILABLE;
++}
++
++NS_IMETHODIMP 
++nsSafeAboutProtocolHandler::AllowPort(PRInt32 port, const char *scheme, PRBool *_retval)
++{
++    // don't override anything.  
++    *_retval = PR_FALSE;
++    return NS_OK;
++}
+Index: netwerk/protocol/about/src/nsAboutRedirector.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/netwerk/protocol/about/src/nsAboutRedirector.cpp,v
+retrieving revision 1.25
+diff -u -p -d -8 -r1.25 nsAboutRedirector.cpp
+--- netwerk/protocol/about/src/nsAboutRedirector.cpp	27 Jan 2006 12:07:54 -0000	1.25
++++ netwerk/protocol/about/src/nsAboutRedirector.cpp	13 Jun 2006 22:14:54 -0000
+@@ -38,16 +38,17 @@
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "nsAboutProtocolHandler.h"
+ #include "nsAboutRedirector.h"
+ #include "nsNetUtil.h"
+ #include "plstr.h"
+ #include "nsIScriptSecurityManager.h"
+ #include "nsAboutProtocolUtils.h"
++#include "nsSimpleNestedURI.h"
+ 
+ NS_IMPL_ISUPPORTS1(nsAboutRedirector, nsIAboutModule)
+ 
+ struct RedirEntry {
+     const char* id;
+     const char* url;
+     PRBool dropChromePrivs; // if PR_TRUE, the page will not have chrome privileges
+ };
+@@ -124,16 +125,39 @@ nsAboutRedirector::NewChannel(nsIURI *aU
+             return rv;
+         }
+     }
+ 
+     NS_ERROR("nsAboutRedirector called for unknown case");
+     return NS_ERROR_ILLEGAL_VALUE;
+ }
+ 
++NS_IMETHODIMP
++nsAboutRedirector::GetURIFlags(nsIURI *aURI, PRUint32 *result)
++{
++    NS_ENSURE_ARG_POINTER(aURI);
++
++    nsCAutoString name;
++    nsresult rv = NS_GetAboutModuleName(aURI, name);
++    NS_ENSURE_SUCCESS(rv, rv);
++
++    for (int i=0; i < kRedirTotal; i++) 
++    {
++        if (name.EqualsASCII(kRedirMap[i].id))
++        {
++            *result = kRedirMap[i].dropChromePrivs ?
++                nsIAboutModule::URI_SAFE_FOR_UNTRUSTED_CONTENT : 0;
++            return NS_OK;
++        }
++    }
++
++    NS_ERROR("nsAboutRedirector called for unknown case");
++    return NS_ERROR_ILLEGAL_VALUE;
++}
++
+ NS_METHOD
+ nsAboutRedirector::Create(nsISupports *aOuter, REFNSIID aIID, void **aResult)
+ {
+     nsAboutRedirector* about = new nsAboutRedirector();
+     if (about == nsnull)
+         return NS_ERROR_OUT_OF_MEMORY;
+     NS_ADDREF(about);
+     nsresult rv = about->QueryInterface(aIID, aResult);
+Index: netwerk/protocol/about/src/Makefile.in
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/netwerk/protocol/about/src/Makefile.in,v
+retrieving revision 1.32
+diff -u -p -d -8 -r1.32 Makefile.in
+--- netwerk/protocol/about/src/Makefile.in	5 Apr 2005 17:40:24 -0000	1.32
++++ netwerk/protocol/about/src/Makefile.in	12 May 2006 06:00:48 -0000
+@@ -58,15 +58,17 @@ CPPSRCS		= \
+ 		nsAboutProtocolHandler.cpp \
+ 		nsAboutBlank.cpp \
+ 		nsAboutBloat.cpp \
+ 		nsAboutCache.cpp \
+ 		nsAboutCacheEntry.cpp \
+ 		nsAboutRedirector.cpp \
+ 		$(NULL)
+ 
++LOCAL_INCLUDES=-I$(srcdir)/../../../base/src
++
+ # we don't want the shared lib, but we want to force the creation of a
+ # static lib.
+ FORCE_STATIC_LIB = 1
+ 
+ include $(topsrcdir)/config/rules.mk
+ 
+ DEFINES += -DIMPL_NS_NET
+Index: xpfe/appshell/src/nsAbout.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/xpfe/appshell/src/nsAbout.cpp,v
+retrieving revision 1.19
+diff -u -p -d -8 -r1.19 nsAbout.cpp
+--- xpfe/appshell/src/nsAbout.cpp	10 May 2006 17:30:13 -0000	1.19
++++ xpfe/appshell/src/nsAbout.cpp	13 Jun 2006 22:15:45 -0000
+@@ -74,16 +74,23 @@ nsAbout::NewChannel(nsIURI *aURI, nsICha
+ 
+     nsCOMPtr<nsISupports> owner = do_QueryInterface(principal);
+     rv = tempChannel->SetOwner(owner);
+     *result = tempChannel.get();
+     NS_ADDREF(*result);
+     return rv;
+ }
+ 
++NS_IMETHODIMP
++nsAbout::GetURIFlags(nsIURI *aURI, PRUint32 *result)
++{
++    *result = 0;
++    return NS_OK;
++}
++
+ NS_METHOD
+ nsAbout::Create(nsISupports *aOuter, REFNSIID aIID, void **aResult)
+ {
+     nsAbout* about = new nsAbout();
+     if (about == nsnull)
+         return NS_ERROR_OUT_OF_MEMORY;
+     NS_ADDREF(about);
+     nsresult rv = about->QueryInterface(aIID, aResult);
+Index: extensions/python/xpcom/components/pyabout.py
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/extensions/python/xpcom/components/pyabout.py,v
+retrieving revision 1.1
+diff -u -p -d -8 -r1.1 pyabout.py
+--- extensions/python/xpcom/components/pyabout.py	17 Feb 2006 11:56:18 -0000	1.1
++++ extensions/python/xpcom/components/pyabout.py	13 Jun 2006 22:16:08 -0000
+@@ -58,8 +58,11 @@ class AboutPython:
+ 
+         channel = components.classes["@mozilla.org/network/input-stream-channel;1"] \
+             .createInstance(components.interfaces.nsIInputStreamChannel)
+ 
+         channel.setURI(aURI)
+         #channel.contentType = "text/html"
+         channel.contentStream = istream
+         return channel
++
++    def getURIFlags(self, aURI):
++        return 0;
+Index: extensions/metrics/src/nsMetricsService.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/extensions/metrics/src/nsMetricsService.cpp,v
+retrieving revision 1.32
+diff -u -p -d -8 -r1.32 nsMetricsService.cpp
+--- extensions/metrics/src/nsMetricsService.cpp	2 Jun 2006 06:06:26 -0000	1.32
++++ extensions/metrics/src/nsMetricsService.cpp	13 Jun 2006 22:16:41 -0000
+@@ -617,16 +617,23 @@ nsMetricsService::NewChannel(nsIURI *uri
+ 
+   NS_ENSURE_SUCCESS(rv, NS_ERROR_FAILURE);
+ 
+   NS_ADDREF(*result = channel);
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
++nsMetricsService::GetURIFlags(nsIURI *aURI, PRUint32 *result)
++{
++    *result = 0;
++    return NS_OK;
++}
++
++NS_IMETHODIMP
+ nsMetricsService::OnStartRequest(nsIRequest *request, nsISupports *context)
+ {
+   NS_ENSURE_STATE(!mConfigOutputStream);
+ 
+   nsCOMPtr<nsIFile> file;
+   GetConfigTempFile(getter_AddRefs(file));
+ 
+   nsCOMPtr<nsIFileOutputStream> out =
+Index: extensions/cck/browser/resources/content/cckwizard/srcfiles/disableAboutConfig.js.in
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/extensions/cck/browser/resources/content/cckwizard/srcfiles/disableAboutConfig.js.in,v
+retrieving revision 1.2
+diff -u -p -d -8 -r1.2 disableAboutConfig.js.in
+--- extensions/cck/browser/resources/content/cckwizard/srcfiles/disableAboutConfig.js.in	25 May 2006 20:02:40 -0000	1.2
++++ extensions/cck/browser/resources/content/cckwizard/srcfiles/disableAboutConfig.js.in	13 Jun 2006 22:16:58 -0000
+@@ -56,16 +56,20 @@ AboutHandler.prototype =
+   newChannel : function newChannel(aURI) {
+     var ioService = Components.classes["@mozilla.org/network/io-service;1"].getService();
+     ioService = ioService.QueryInterface(Components.interfaces.nsIIOService);
+     var uri_str = "data:text/html,<h3>about:config has been disabled</h3>";
+     var ext_uri = ioService.newURI(uri_str, null, null);
+     var ext_channel = ioService.newChannelFromURI(ext_uri);
+     return ext_channel;
+   }
++
++  getURIFlags : function safeForUntrustedContent(aURI) {
++    return 0;
++  }
+ };
+ 
+ 
+ var AboutFactory =
+ {
+   createInstance : function(outer, iid)
+   {
+     if (outer != null) {
+Index: netwerk/protocol/viewsource/src/nsViewSourceHandler.h
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/netwerk/protocol/viewsource/src/nsViewSourceHandler.h,v
+retrieving revision 1.5
+diff -u -p -d -8 -r1.5 nsViewSourceHandler.h
+--- netwerk/protocol/viewsource/src/nsViewSourceHandler.h	2 May 2006 18:54:07 -0000	1.5
++++ netwerk/protocol/viewsource/src/nsViewSourceHandler.h	12 May 2006 04:41:18 -0000
+@@ -35,66 +35,17 @@
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #ifndef nsViewSourceHandler_h___
+ #define nsViewSourceHandler_h___
+ 
+ #include "nsIProtocolHandler.h"
+-#include "nsCOMPtr.h"
+-#include "nsSimpleURI.h"
+-#include "nsINestedURI.h"
+ 
+ class nsViewSourceHandler : public nsIProtocolHandler
+ {
+ public:
+     NS_DECL_ISUPPORTS
+     NS_DECL_NSIPROTOCOLHANDLER
+ };
+ 
+-#define NS_VIEWSOURCEURI_CID                             \
+-{ /* 2545766f-3a27-4fd1-8e88-b0886d346242 */             \
+-     0x2545766f,                                         \
+-     0x3a27,                                             \
+-     0x4fd1,                                             \
+-     { 0x8e, 0x88, 0xb0, 0x88, 0x6d, 0x34, 0x62, 0x42 }  \
+-}
+-
+-class nsViewSourceURI : public nsSimpleURI,
+-                        public nsINestedURI
+-{
+-public:
+-  nsViewSourceURI(nsIURI* innerURI)
+-    : nsSimpleURI(nsnull),
+-      mInnerURI(innerURI)
+-  {
+-    NS_ASSERTION(innerURI, "Must have inner URI");
+-  }
+-
+-  // To be used by deserialization only
+-  nsViewSourceURI()
+-    : nsSimpleURI(nsnull)
+-  {
+-  }
+-
+-  NS_DECL_ISUPPORTS_INHERITED
+-  NS_DECL_NSINESTEDURI
+-
+-  // Overrides for various methods nsSimpleURI implements follow.
+-  
+-  // nsIURI overrides
+-  NS_IMETHOD Equals(nsIURI* other, PRBool *result);
+-  virtual nsSimpleURI* StartClone();
+-
+-  // nsISerializable overrides -- we can use the same Write(), but we
+-  // need a different Read().
+-  NS_IMETHOD Read(nsIObjectInputStream* aStream);
+-
+-  // Override the nsIClassInfo method GetClassIDNoAlloc to make sure our
+-  // nsISerializable impl works right.
+-  NS_IMETHOD GetClassIDNoAlloc(nsCID *aClassIDNoAlloc);  
+-
+-protected:
+-  nsCOMPtr<nsIURI> mInnerURI;  
+-};                        
+-
+ #endif /* !defined( nsViewSourceHandler_h___ ) */
+Index: netwerk/protocol/viewsource/src/nsViewSourceHandler.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/netwerk/protocol/viewsource/src/nsViewSourceHandler.cpp,v
+retrieving revision 1.14
+diff -u -p -d -8 -r1.14 nsViewSourceHandler.cpp
+--- netwerk/protocol/viewsource/src/nsViewSourceHandler.cpp	2 May 2006 18:54:07 -0000	1.14
++++ netwerk/protocol/viewsource/src/nsViewSourceHandler.cpp	12 May 2006 05:57:56 -0000
+@@ -36,19 +36,17 @@
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "nsViewSourceHandler.h"
+ #include "nsViewSourceChannel.h"
+ #include "nsNetUtil.h"
+-#include "nsIObjectInputStream.h"
+-#include "nsIObjectOutputStream.h"
+-#include "nsIProgrammingLanguage.h"
++#include "nsSimpleNestedURI.h"
+ 
+ #define VIEW_SOURCE "view-source"
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+ 
+ NS_IMPL_ISUPPORTS1(nsViewSourceHandler, nsIProtocolHandler)
+ 
+ ////////////////////////////////////////////////////////////////////////////////
+@@ -91,39 +89,38 @@ nsViewSourceHandler::NewURI(const nsACSt
+         return NS_ERROR_MALFORMED_URI;
+ 
+     nsCOMPtr<nsIURI> innerURI;
+     nsresult rv = NS_NewURI(getter_AddRefs(innerURI),
+                             Substring(aSpec, colon + 1), aCharset);
+     if (NS_FAILED(rv))
+         return rv;
+ 
+-    NS_TryToSetImmutable(innerURI);
+-
+     nsCAutoString asciiSpec;
+     rv = innerURI->GetAsciiSpec(asciiSpec);
+     if (NS_FAILED(rv))
+         return rv;
+ 
+     // put back our scheme and construct a simple-uri wrapper
+ 
+     asciiSpec.Insert(VIEW_SOURCE ":", 0);
+ 
+-    // We can't swap() from an nsRefPtr<nsViewSourceURI> to an nsIURI**, sadly.
+-    nsViewSourceURI* ourURI = new nsViewSourceURI(innerURI);
++    // We can't swap() from an nsRefPtr<nsSimpleNestedURI> to an nsIURI**,
++    // sadly.
++    nsSimpleNestedURI* ourURI = new nsSimpleNestedURI(innerURI);
+     nsCOMPtr<nsIURI> uri = ourURI;
+     if (!uri)
+         return NS_ERROR_OUT_OF_MEMORY;
+ 
+     rv = ourURI->SetSpec(asciiSpec);
+     if (NS_FAILED(rv))
+         return rv;
+ 
+     // Make the URI immutable so it's impossible to get it out of sync
+-    // with mInnerURI.
++    // with its inner URI.
+     ourURI->SetMutable(PR_FALSE);
+ 
+     uri.swap(*aResult);
+     return rv;
+ }
+ 
+ NS_IMETHODIMP
+ nsViewSourceHandler::NewChannel(nsIURI* uri, nsIChannel* *result)
+@@ -146,103 +143,8 @@ nsViewSourceHandler::NewChannel(nsIURI* 
+ 
+ NS_IMETHODIMP 
+ nsViewSourceHandler::AllowPort(PRInt32 port, const char *scheme, PRBool *_retval)
+ {
+     // don't override anything.  
+     *_retval = PR_FALSE;
+     return NS_OK;
+ }
+-
+-///////////////////////////////////////////////////////////////
+-// nsViewSourceURI implementation
+-
+-static NS_DEFINE_CID(kViewSourceURICID, NS_VIEWSOURCEURI_CID);
+-
+-NS_IMPL_ISUPPORTS_INHERITED1(nsViewSourceURI, nsSimpleURI, nsINestedURI)
+-
+-// nsISerializable
+-
+-NS_IMETHODIMP
+-nsViewSourceURI::Read(nsIObjectInputStream* aStream)
+-{
+-    nsresult rv = nsSimpleURI::Read(aStream);
+-    if (NS_FAILED(rv)) return rv;
+-
+-    NS_ASSERTION(!mMutable, "How did that happen?");
+-
+-    // Our mPath is going to be ASCII; see nsViewSourceHandler::NewURI.  So
+-    // just using NS_NewURI with no charset is ok.
+-    rv = NS_NewURI(getter_AddRefs(mInnerURI), mPath);
+-    if (NS_FAILED(rv)) return rv;
+-
+-    NS_TryToSetImmutable(mInnerURI);
+-
+-    return rv;
+-}
+-
+-// nsINestedURI
+-
+-NS_IMETHODIMP
+-nsViewSourceURI::GetInnerURI(nsIURI** uri)
+-{
+-    return NS_EnsureSafeToReturn(mInnerURI, uri);
+-}
+-
+-NS_IMETHODIMP
+-nsViewSourceURI::GetInnermostURI(nsIURI** uri)
+-{
+-    return NS_ImplGetInnermostURI(this, uri);
+-}
+-
+-// nsIURI overrides
+-
+-NS_IMETHODIMP
+-nsViewSourceURI::Equals(nsIURI* other, PRBool *result)
+-{
+-    if (other) {
+-        PRBool correctScheme;
+-        nsresult rv = other->SchemeIs(VIEW_SOURCE, &correctScheme);
+-        NS_ENSURE_SUCCESS(rv, rv);
+-
+-        if (correctScheme) {
+-            nsCOMPtr<nsINestedURI> nest = do_QueryInterface(other);
+-            if (nest) {
+-                nsCOMPtr<nsIURI> otherInner;
+-                rv = nest->GetInnerURI(getter_AddRefs(otherInner));
+-                NS_ENSURE_SUCCESS(rv, rv);
+-
+-                return otherInner->Equals(mInnerURI, result);
+-            }
+-        }
+-    }
+-
+-    *result = PR_FALSE;
+-    return NS_OK;
+-}
+-
+-/* virtual */ nsSimpleURI*
+-nsViewSourceURI::StartClone()
+-{
+-    nsCOMPtr<nsIURI> innerClone;
+-    nsresult rv = mInnerURI->Clone(getter_AddRefs(innerClone));
+-    if (NS_FAILED(rv)) {
+-        return nsnull;
+-    }
+-
+-    NS_TryToSetImmutable(innerClone);
+-    
+-    nsViewSourceURI* url = new nsViewSourceURI(innerClone);
+-    if (url) {
+-        url->SetMutable(PR_FALSE);
+-    }
+-
+-    return url;
+-}
+-
+-// nsIClassInfo overrides
+-
+-NS_IMETHODIMP 
+-nsViewSourceURI::GetClassIDNoAlloc(nsCID *aClassIDNoAlloc)
+-{
+-    *aClassIDNoAlloc = kViewSourceURICID;
+-    return NS_OK;
+-}
+Index: netwerk/build/nsNetCID.h
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/netwerk/build/nsNetCID.h,v
+retrieving revision 1.60
+diff -u -p -d -8 -r1.60 nsNetCID.h
+--- netwerk/build/nsNetCID.h	9 Jun 2006 18:23:09 -0000	1.60
++++ netwerk/build/nsNetCID.h	13 Jun 2006 23:19:05 -0000
+@@ -108,16 +108,26 @@
+ #define NS_SIMPLEURI_CID                              \
+ { /* e0da1d70-2f7b-11d3-8cd0-0060b0fc14a3 */          \
+      0xe0da1d70,                                      \
+      0x2f7b,                                          \
+      0x11d3,                                          \
+      {0x8c, 0xd0, 0x00, 0x60, 0xb0, 0xfc, 0x14, 0xa3} \
+ }
+ 
++// component inheriting from the simple URI component and also
++// implementing nsINestedURI.
++#define NS_SIMPLENESTEDURI_CID                           \
++{ /* 56388dad-287b-4240-a785-85c394012503 */             \
++     0x56388dad,                                         \
++     0x287b,                                             \
++     0x4240,                                             \
++     { 0xa7, 0x85, 0x85, 0xc3, 0x94, 0x01, 0x25, 0x03 }  \
++}
++
+ // component implementing nsIStandardURL, nsIURI, nsIURL, nsISerializable,
+ // and nsIClassInfo.
+ #define NS_STANDARDURL_CLASSNAME \
+     "nsStandardURL"
+ #define NS_STANDARDURL_CONTRACTID \
+     "@mozilla.org/network/standard-url;1"
+ #define NS_STANDARDURL_CID                           \
+ { /* de9472d0-8034-11d3-9399-00104ba0fd40 */         \
+@@ -597,16 +607,40 @@
+ { /* {0x9c7ec5d1-23f9-11d5-aea8-8fcc0793e97f} */     \
+     0x9c7ec5d1,                                      \
+     0x23f9,                                          \
+     0x11d5,                                          \
+     {0xae, 0xa8, 0x8f, 0xcc, 0x07, 0x93, 0xe9, 0x7f} \
+ }
+ 
+ /******************************************************************************
++ * netwerk/protocol/about/ classes
++ */
++
++#define NS_ABOUTPROTOCOLHANDLER_CLASSNAME \
++    "About Protocol Handler"
++#define NS_ABOUTPROTOCOLHANDLER_CID                  \
++{ /* 9e3b6c90-2f75-11d3-8cd0-0060b0fc14a3 */         \
++    0x9e3b6c90,                                      \
++    0x2f75,                                          \
++    0x11d3,                                          \
++    {0x8c, 0xd0, 0x00, 0x60, 0xb0, 0xfc, 0x14, 0xa3} \
++}
++
++#define NS_SAFEABOUTPROTOCOLHANDLER_CLASSNAME \
++    "Safe About Protocol Handler"
++#define NS_SAFEABOUTPROTOCOLHANDLER_CID              \
++{ /* 1423e739-782c-4081-b5d8-fe6fba68c0ef */         \
++    0x1423e739,                                      \
++    0x782c,                                          \
++    0x4081,                                          \
++    {0xb5, 0xd8, 0xfe, 0x6f, 0xba, 0x68, 0xc0, 0xef} \
++}
++
++/******************************************************************************
+  * netwerk/dns/ classes
+  */
+ 
+ #define NS_DNSSERVICE_CLASSNAME \
+     "nsDNSService"
+ #define NS_DNSSERVICE_CONTRACTID \
+     "@mozilla.org/network/dns-service;1"
+ #define NS_DNSSERVICE_CID \
+Index: netwerk/build/nsNetModule.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/netwerk/build/nsNetModule.cpp,v
+retrieving revision 1.136
+diff -u -p -d -8 -r1.136 nsNetModule.cpp
+--- netwerk/build/nsNetModule.cpp	9 Jun 2006 18:23:10 -0000	1.136
++++ netwerk/build/nsNetModule.cpp	13 Jun 2006 22:50:11 -0000
+@@ -42,16 +42,17 @@
+ #include "nsIClassInfoImpl.h"
+ #include "nsIGenericFactory.h"
+ #include "nsIComponentManager.h"
+ #include "nsIServiceManager.h"
+ #include "nsICategoryManager.h"
+ #include "nsSocketProviderService.h"
+ #include "nscore.h"
+ #include "nsSimpleURI.h"
++#include "nsSimpleNestedURI.h"
+ #include "nsLoadGroup.h"
+ #include "nsStreamLoader.h"
+ #include "nsUnicharStreamLoader.h"
+ #include "nsFileStreams.h"
+ #include "nsBufferedStreams.h"
+ #include "nsMIMEInputStream.h"
+ #include "nsSOCKSSocketProvider.h"
+ #include "nsCacheService.h"
+@@ -168,16 +169,18 @@ NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR
+ 
+ ///////////////////////////////////////////////////////////////////////////////
+ // protocols
+ ///////////////////////////////////////////////////////////////////////////////
+ 
+ // about:blank is mandatory
+ #include "nsAboutProtocolHandler.h"
+ #include "nsAboutBlank.h"
++NS_GENERIC_FACTORY_CONSTRUCTOR(nsAboutProtocolHandler)
++NS_GENERIC_FACTORY_CONSTRUCTOR(nsSafeAboutProtocolHandler)
+ 
+ #ifdef NECKO_PROTOCOL_about
+ // about
+ #include "nsAboutBloat.h"
+ #include "nsAboutCache.h"
+ #include "nsAboutRedirector.h"
+ #include "nsAboutCacheEntry.h"
+ NS_GENERIC_FACTORY_CONSTRUCTOR(nsAboutCacheEntry)
+@@ -222,17 +225,16 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(nsResURL)
+ #ifdef NECKO_PROTOCOL_gopher
+ #include "nsGopherHandler.h"
+ NS_GENERIC_FACTORY_CONSTRUCTOR(nsGopherHandler)
+ #endif
+ 
+ #ifdef NECKO_PROTOCOL_viewsource
+ #include "nsViewSourceHandler.h"
+ NS_GENERIC_FACTORY_CONSTRUCTOR(nsViewSourceHandler)
+-NS_GENERIC_FACTORY_CONSTRUCTOR(nsViewSourceURI)
+ #endif
+ 
+ #ifdef NECKO_PROTOCOL_data
+ #include "nsDataHandler.h"
+ #endif
+ 
+ ///////////////////////////////////////////////////////////////////////////////
+ 
+@@ -246,16 +248,18 @@ NS_GENERIC_FACTORY_CONSTRUCTOR(nsNoAuthU
+ NS_GENERIC_FACTORY_CONSTRUCTOR(nsAuthURLParser)
+ NS_GENERIC_FACTORY_CONSTRUCTOR(nsStdURLParser)
+ 
+ #include "nsStandardURL.h"
+ NS_GENERIC_FACTORY_CONSTRUCTOR(nsStandardURL)
+ 
+ NS_GENERIC_AGGREGATED_CONSTRUCTOR(nsSimpleURI)
+ 
++NS_GENERIC_FACTORY_CONSTRUCTOR(nsSimpleNestedURI)
++
+ ///////////////////////////////////////////////////////////////////////////////
+ 
+ #include "nsIDNService.h"
+ NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsIDNService, Init)
+ 
+ ///////////////////////////////////////////////////////////////////////////////
+ #if defined(XP_WIN) && !defined(WINCE)
+ #include "nsNotifyAddrListener.h"
+@@ -645,16 +649,20 @@ static const nsModuleComponentInfo gNetM
+     { NS_EFFECTIVETLDSERVICE_CLASSNAME,
+       NS_EFFECTIVETLDSERVICE_CID,
+       NS_EFFECTIVETLDSERVICE_CONTRACTID,
+       nsEffectiveTLDServiceConstructor },
+     { NS_SIMPLEURI_CLASSNAME,
+       NS_SIMPLEURI_CID,
+       NS_SIMPLEURI_CONTRACTID,
+       nsSimpleURIConstructor },
++    { "Simple Nested URI", 
++      NS_SIMPLENESTEDURI_CID,
++      nsnull,
++      nsSimpleNestedURIConstructor },
+     { NS_ASYNCSTREAMCOPIER_CLASSNAME,
+       NS_ASYNCSTREAMCOPIER_CID,
+       NS_ASYNCSTREAMCOPIER_CONTRACTID,
+       nsAsyncStreamCopierConstructor },
+     { NS_INPUTSTREAMPUMP_CLASSNAME,
+       NS_INPUTSTREAMPUMP_CID,
+       NS_INPUTSTREAMPUMP_CONTRACTID,
+       nsInputStreamPumpConstructor },
+@@ -969,20 +977,25 @@ static const nsModuleComponentInfo gNetM
+     { NS_RESURL_CLASSNAME, // needed only for fastload
+       NS_RESURL_CID,
+       nsnull,
+       nsResURLConstructor
+     },
+ #endif
+ 
+     // from netwerk/protocol/about (about:blank is mandatory):
+-    { "About Protocol Handler", 
++    { NS_ABOUTPROTOCOLHANDLER_CLASSNAME, 
+       NS_ABOUTPROTOCOLHANDLER_CID,
+       NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX "about", 
+-      nsAboutProtocolHandler::Create
++      nsAboutProtocolHandlerConstructor
++    },
++    { NS_SAFEABOUTPROTOCOLHANDLER_CLASSNAME,
++      NS_SAFEABOUTPROTOCOLHANDLER_CID,
++      NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX "safe-about", 
++      nsSafeAboutProtocolHandlerConstructor
+     },
+     { "about:blank", 
+       NS_ABOUT_BLANK_MODULE_CID,
+       NS_ABOUT_MODULE_CONTRACTID_PREFIX "blank", 
+       nsAboutBlank::Create
+     },
+ #ifdef NECKO_PROTOCOL_about
+     { "about:bloat", 
+@@ -1104,21 +1117,16 @@ static const nsModuleComponentInfo gNetM
+ 
+ #ifdef NECKO_PROTOCOL_viewsource
+     // from netwerk/protocol/viewsource:
+     { "The ViewSource Protocol Handler", 
+       NS_VIEWSOURCEHANDLER_CID,
+       NS_NETWORK_PROTOCOL_CONTRACTID_PREFIX "view-source",
+       nsViewSourceHandlerConstructor
+     },
+-    { "The ViewSource URI", 
+-      NS_VIEWSOURCEURI_CID,
+-      nsnull,
+-      nsViewSourceURIConstructor
+-    },
+ #endif
+ 
+ #if defined(XP_WIN) && !defined(WINCE)
+     { NS_NETWORK_LINK_SERVICE_CLASSNAME,
+       NS_NETWORK_LINK_SERVICE_CID,
+       NS_NETWORK_LINK_SERVICE_CONTRACTID,
+       nsNotifyAddrListenerConstructor
+     },

@@ -1,0 +1,211 @@
+# HG changeset patch
+# User Cykesiopka <cykesiopka.bmo@gmail.com>
+# Parent  503da58c2e6c3fe1d1b2dc62ce1e73f74a118efc
+Bug 443811 - Use long date format for cert date output. r=keeler
+
+diff --git a/security/manager/ssl/TransportSecurityInfo.cpp b/security/manager/ssl/TransportSecurityInfo.cpp
+--- a/security/manager/ssl/TransportSecurityInfo.cpp
++++ b/security/manager/ssl/TransportSecurityInfo.cpp
+@@ -833,22 +833,20 @@ GetDateBoundary(nsIX509Cert* ix509,
+     timeToUse = notBefore;
+     trueExpired_falseNotYetValid = false;
+   }
+ 
+   nsCOMPtr<nsIDateTimeFormat> dateTimeFormat(do_CreateInstance(NS_DATETIMEFORMAT_CONTRACTID, &rv));
+   if (NS_FAILED(rv))
+     return;
+ 
+-  dateTimeFormat->FormatPRTime(nullptr, kDateFormatShort, 
+-                               kTimeFormatNoSeconds, timeToUse, 
+-                               formattedDate);
+-  dateTimeFormat->FormatPRTime(nullptr, kDateFormatShort,
+-                               kTimeFormatNoSeconds, now,
+-                               nowDate);
++  dateTimeFormat->FormatPRTime(nullptr, kDateFormatLong, kTimeFormatNoSeconds,
++                               timeToUse, formattedDate);
++  dateTimeFormat->FormatPRTime(nullptr, kDateFormatLong, kTimeFormatNoSeconds,
++                               now, nowDate);
+ }
+ 
+ static void
+ AppendErrorTextTime(nsIX509Cert* ix509,
+                     nsINSSComponent *component,
+                     nsString &returnedMessage)
+ {
+   nsAutoString formattedDate, nowDate;
+diff --git a/security/manager/ssl/nsNSSCertHelper.cpp b/security/manager/ssl/nsNSSCertHelper.cpp
+--- a/security/manager/ssl/nsNSSCertHelper.cpp
++++ b/security/manager/ssl/nsNSSCertHelper.cpp
+@@ -1653,42 +1653,45 @@ ProcessSECAlgorithmID(SECAlgorithmID *al
+     }
+     printableItem->SetDisplayValue(text);
+   }
+   sequence.forget(retSequence);
+   return NS_OK;
+ }
+ 
+ static nsresult
+-ProcessTime(PRTime dispTime, const char16_t *displayName, 
+-            nsIASN1Sequence *parentSequence)
++ProcessTime(PRTime dispTime, const char16_t* displayName,
++            nsIASN1Sequence* parentSequence)
+ {
+   nsresult rv;
+   nsCOMPtr<nsIDateTimeFormat> dateFormatter =
+      do_CreateInstance(NS_DATETIMEFORMAT_CONTRACTID, &rv);
+-  if (NS_FAILED(rv)) 
++  if (NS_FAILED(rv)) {
+     return rv;
++  }
+ 
+   nsString text;
+   nsString tempString;
+ 
+   PRExplodedTime explodedTime;
+   PR_ExplodeTime(dispTime, PR_LocalTimeParameters, &explodedTime);
+ 
+-  dateFormatter->FormatPRExplodedTime(nullptr, kDateFormatShort, kTimeFormatSecondsForce24Hour,
+-                              &explodedTime, tempString);
++  dateFormatter->FormatPRExplodedTime(nullptr, kDateFormatLong,
++                                      kTimeFormatSeconds, &explodedTime,
++                                      tempString);
+ 
+   text.Append(tempString);
+   text.AppendLiteral("\n(");
+ 
+   PRExplodedTime explodedTimeGMT;
+   PR_ExplodeTime(dispTime, PR_GMTParameters, &explodedTimeGMT);
+ 
+-  dateFormatter->FormatPRExplodedTime(nullptr, kDateFormatShort, kTimeFormatSecondsForce24Hour,
+-                              &explodedTimeGMT, tempString);
++  dateFormatter->FormatPRExplodedTime(nullptr, kDateFormatLong,
++                                      kTimeFormatSeconds, &explodedTimeGMT,
++                                      tempString);
+ 
+   text.Append(tempString);
+   text.AppendLiteral(" GMT)");
+ 
+   nsCOMPtr<nsIASN1PrintableItem> printableItem = new nsNSSASN1PrintableItem();
+ 
+   printableItem->SetDisplayValue(text);
+   printableItem->SetDisplayName(nsDependentString(displayName));
+diff --git a/security/manager/ssl/nsNSSCertValidity.cpp b/security/manager/ssl/nsNSSCertValidity.cpp
+--- a/security/manager/ssl/nsNSSCertValidity.cpp
++++ b/security/manager/ssl/nsNSSCertValidity.cpp
+@@ -55,18 +55,18 @@ NS_IMETHODIMP nsX509CertValidity::GetNot
+   nsresult rv;
+   nsCOMPtr<nsIDateTimeFormat> dateFormatter =
+      do_CreateInstance(NS_DATETIMEFORMAT_CONTRACTID, &rv);
+   if (NS_FAILED(rv)) return rv;
+ 
+   nsAutoString date;
+   PRExplodedTime explodedTime;
+   PR_ExplodeTime(mNotBefore, PR_LocalTimeParameters, &explodedTime);
+-  dateFormatter->FormatPRExplodedTime(nullptr, kDateFormatShort, kTimeFormatSecondsForce24Hour,
+-                                      &explodedTime, date);
++  dateFormatter->FormatPRExplodedTime(nullptr, kDateFormatLong,
++                                      kTimeFormatSeconds, &explodedTime, date);
+   aNotBeforeLocalTime = date;
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP nsX509CertValidity::GetNotBeforeLocalDay(nsAString &aNotBeforeLocalDay)
+ {
+   if (!mTimesInitialized)
+     return NS_ERROR_FAILURE;
+@@ -74,17 +74,17 @@ NS_IMETHODIMP nsX509CertValidity::GetNot
+   nsresult rv;
+   nsCOMPtr<nsIDateTimeFormat> dateFormatter =
+      do_CreateInstance(NS_DATETIMEFORMAT_CONTRACTID, &rv);
+   if (NS_FAILED(rv)) return rv;
+ 
+   nsAutoString date;
+   PRExplodedTime explodedTime;
+   PR_ExplodeTime(mNotBefore, PR_LocalTimeParameters, &explodedTime);
+-  dateFormatter->FormatPRExplodedTime(nullptr, kDateFormatShort, kTimeFormatNone,
++  dateFormatter->FormatPRExplodedTime(nullptr, kDateFormatLong, kTimeFormatNone,
+                                       &explodedTime, date);
+   aNotBeforeLocalDay = date;
+   return NS_OK;
+ }
+ 
+ 
+ NS_IMETHODIMP nsX509CertValidity::GetNotBeforeGMT(nsAString &aNotBeforeGMT)
+ {
+@@ -94,18 +94,18 @@ NS_IMETHODIMP nsX509CertValidity::GetNot
+   nsresult rv;
+   nsCOMPtr<nsIDateTimeFormat> dateFormatter =
+      do_CreateInstance(NS_DATETIMEFORMAT_CONTRACTID, &rv);
+   if (NS_FAILED(rv)) return rv;
+ 
+   nsAutoString date;
+   PRExplodedTime explodedTime;
+   PR_ExplodeTime(mNotBefore, PR_GMTParameters, &explodedTime);
+-  dateFormatter->FormatPRExplodedTime(nullptr, kDateFormatShort, kTimeFormatSecondsForce24Hour,
+-                                      &explodedTime, date);
++  dateFormatter->FormatPRExplodedTime(nullptr, kDateFormatLong,
++                                      kTimeFormatSeconds, &explodedTime, date);
+   aNotBeforeGMT = date;
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP nsX509CertValidity::GetNotAfter(PRTime *aNotAfter)
+ {
+   NS_ENSURE_ARG(aNotAfter);
+ 
+@@ -125,18 +125,18 @@ NS_IMETHODIMP nsX509CertValidity::GetNot
+   nsresult rv;
+   nsCOMPtr<nsIDateTimeFormat> dateFormatter =
+      do_CreateInstance(NS_DATETIMEFORMAT_CONTRACTID, &rv);
+   if (NS_FAILED(rv)) return rv;
+ 
+   nsAutoString date;
+   PRExplodedTime explodedTime;
+   PR_ExplodeTime(mNotAfter, PR_LocalTimeParameters, &explodedTime);
+-  dateFormatter->FormatPRExplodedTime(nullptr, kDateFormatShort, kTimeFormatSecondsForce24Hour,
+-                                      &explodedTime, date);
++  dateFormatter->FormatPRExplodedTime(nullptr, kDateFormatLong,
++                                      kTimeFormatSeconds, &explodedTime, date);
+   aNotAfterLocaltime = date;
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP nsX509CertValidity::GetNotAfterLocalDay(nsAString &aNotAfterLocalDay)
+ {
+   if (!mTimesInitialized)
+     return NS_ERROR_FAILURE;
+@@ -144,17 +144,17 @@ NS_IMETHODIMP nsX509CertValidity::GetNot
+   nsresult rv;
+   nsCOMPtr<nsIDateTimeFormat> dateFormatter =
+      do_CreateInstance(NS_DATETIMEFORMAT_CONTRACTID, &rv);
+   if (NS_FAILED(rv)) return rv;
+ 
+   nsAutoString date;
+   PRExplodedTime explodedTime;
+   PR_ExplodeTime(mNotAfter, PR_LocalTimeParameters, &explodedTime);
+-  dateFormatter->FormatPRExplodedTime(nullptr, kDateFormatShort, kTimeFormatNone,
++  dateFormatter->FormatPRExplodedTime(nullptr, kDateFormatLong, kTimeFormatNone,
+                                       &explodedTime, date);
+   aNotAfterLocalDay = date;
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP nsX509CertValidity::GetNotAfterGMT(nsAString &aNotAfterGMT)
+ {
+   if (!mTimesInitialized)
+@@ -163,13 +163,13 @@ NS_IMETHODIMP nsX509CertValidity::GetNot
+   nsresult rv;
+   nsCOMPtr<nsIDateTimeFormat> dateFormatter =
+      do_CreateInstance(NS_DATETIMEFORMAT_CONTRACTID, &rv);
+   if (NS_FAILED(rv)) return rv;
+ 
+   nsAutoString date;
+   PRExplodedTime explodedTime;
+   PR_ExplodeTime(mNotAfter, PR_GMTParameters, &explodedTime);
+-  dateFormatter->FormatPRExplodedTime(nullptr, kDateFormatShort, kTimeFormatSecondsForce24Hour,
+-                                      &explodedTime, date);
++  dateFormatter->FormatPRExplodedTime(nullptr, kDateFormatLong,
++                                      kTimeFormatSeconds, &explodedTime, date);
+   aNotAfterGMT = date;
+   return NS_OK;
+ }

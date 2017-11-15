@@ -1,0 +1,24 @@
+Index: dom/src/base/nsGlobalWindow.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/dom/src/base/nsGlobalWindow.cpp,v
+retrieving revision 1.608
+diff -p -u -d -r1.608 nsGlobalWindow.cpp
+--- dom/src/base/nsGlobalWindow.cpp	24 Jul 2003 05:14:53 -0000	1.608
++++ dom/src/base/nsGlobalWindow.cpp	26 Jul 2003 07:19:02 -0000
+@@ -427,11 +427,11 @@ GlobalWindowImpl::SetNewDocument(nsIDOMD
+       NS_ENSURE_TRUE(doc, NS_ERROR_FAILURE);
+ 
+       nsCOMPtr<nsIPrincipal> newPrincipal;
+-      doc->GetPrincipal(getter_AddRefs(newPrincipal));
+-
+-      nsresult rv =
+-        sSecMan->CheckSameOriginPrincipal(mDocumentPrincipal,
+-                                          newPrincipal);
++      nsresult rv = doc->GetPrincipal(getter_AddRefs(newPrincipal));
++      if (NS_SUCCEEDED(rv)) {
++        rv = sSecMan->CheckSameOriginPrincipal(mDocumentPrincipal,
++                                               newPrincipal);
++      }
+ 
+       if (NS_SUCCEEDED(rv)) {
+         // Same origins.  Notify the navigator object that we are

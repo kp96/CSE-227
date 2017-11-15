@@ -1,0 +1,149 @@
+diff --git a/security/manager/ssl/src/nsNSSComponent.cpp b/security/manager/ssl/src/nsNSSComponent.cpp
+--- a/security/manager/ssl/src/nsNSSComponent.cpp
++++ b/security/manager/ssl/src/nsNSSComponent.cpp
+@@ -1621,36 +1621,27 @@ nsNSSComponent::InitializeNSS(bool showW
+       if (init_rv != SECSuccess) {
+         nsPSMInitPanic::SetPanic();
+         return NS_ERROR_NOT_AVAILABLE;
+       }
+     }
+     else
+     {
+ 
+-  // XP_MAC == CFM
+   // XP_MACOSX == MachO
+ 
+-  #if defined(XP_MAC) && defined(XP_MACOSX)
+-  #error "This code assumes XP_MAC and XP_MACOSX will never be defined at the same time"
+-  #endif
+-
+-  #if defined(XP_MAC) || defined(XP_MACOSX)
++  #if defined(XP_MACOSX)
+     // On Mac CFM we place all NSS DBs in the Security
+     // Folder in the profile directory.
+     nsCOMPtr<nsIFile> cfmSecurityPath;
+     cfmSecurityPath = profilePath; // alias for easier code reading
+     cfmSecurityPath->AppendNative(NS_LITERAL_CSTRING("Security"));
+   #endif
+ 
+-  #if defined(XP_MAC)
+-    // on CFM, cfmSecurityPath and profilePath point to the same oject
+-    profilePath->Create(nsIFile::DIRECTORY_TYPE, 0); //This is for Mac, don't worry about
+-                                                     //permissions.
+-  #elif defined(XP_MACOSX)
++  #ifdef defined(XP_MACOSX)
+     // On MachO, we need to access both directories,
+     // and therefore need separate nsIFile instances.
+     // Keep cfmSecurityPath instance, obtain new instance for MachO profilePath.
+     rv = cfmSecurityPath->GetParent(getter_AddRefs(profilePath));
+     if (NS_FAILED(rv)) {
+       nsPSMInitPanic::SetPanic();
+       return rv;
+     }
+diff --git a/security/manager/ssl/src/nsNSSHelper.h b/security/manager/ssl/src/nsNSSHelper.h
+--- a/security/manager/ssl/src/nsNSSHelper.h
++++ b/security/manager/ssl/src/nsNSSHelper.h
+@@ -80,14 +80,10 @@ pip_ucs2_ascii_conversion_fn(PRBool toUn
+ }
+ 
+ //
+ // A function that sets the password on an unitialized slot.
+ //
+ nsresult
+ setPassword(PK11SlotInfo *slot, nsIInterfaceRequestor *ctx);
+ 
+-#ifdef XP_MAC
+-extern OSErr ConvertMacPathToUnixPath(const char *macPath, char **unixPath);
+ #endif
+ 
+-#endif
+-
+diff --git a/security/manager/ssl/src/nsNSSIOLayer.cpp b/security/manager/ssl/src/nsNSSIOLayer.cpp
+--- a/security/manager/ssl/src/nsNSSIOLayer.cpp
++++ b/security/manager/ssl/src/nsNSSIOLayer.cpp
+@@ -119,42 +119,16 @@ static NS_DEFINE_CID(kNSSComponentCID, N
+ 
+ /* SSM_UserCertChoice: enum for cert choice info */
+ typedef enum {ASK, AUTO} SSM_UserCertChoice;
+ 
+ #ifdef PR_LOGGING
+ extern PRLogModuleInfo* gPIPNSSLog;
+ #endif
+ 
+-#if defined(DEBUG_SSL_VERBOSE) && defined (XP_MAC)
+-
+-#ifdef PR_LOG
+-#undef PR_LOG
+-#endif
+-
+-static PRFileDesc *gMyLogFile = nsnull;
+-#define MAC_LOG_FILE "MAC PIPNSS Log File"
+-
+-void MyLogFunction(const char *fmt, ...)
+-{
+-  
+-  va_list ap;
+-  va_start(ap,fmt);
+-  if (gMyLogFile == nsnull)
+-    gMyLogFile = PR_Open(MAC_LOG_FILE, PR_WRONLY | PR_CREATE_FILE | PR_APPEND,
+-                         0600);
+-  if (!gMyLogFile)
+-      return;
+-  PR_vfprintf(gMyLogFile, fmt, ap);
+-  va_end(ap);
+-}
+-
+-#define PR_LOG(module,level,args) MyLogFunction args
+-#endif
+-
+ nsNSSSocketInfo::nsNSSSocketInfo()
+   : mMutex("nsNSSSocketInfo::nsNSSSocketInfo"),
+     mFd(nsnull),
+     mCertVerificationState(before_cert_verification),
+     mSecurityState(nsIWebProgressListener::STATE_IS_INSECURE),
+     mSubRequestsHighSecurity(0),
+     mSubRequestsLowSecurity(0),
+     mSubRequestsBrokenSecurity(0),
+diff --git a/security/manager/ssl/src/nsPKCS12Blob.cpp b/security/manager/ssl/src/nsPKCS12Blob.cpp
+--- a/security/manager/ssl/src/nsPKCS12Blob.cpp
++++ b/security/manager/ssl/src/nsPKCS12Blob.cpp
+@@ -610,39 +610,16 @@ nsPKCS12Blob::inputToDecoder(SEC_PKCS12D
+       return NS_ERROR_ABORT;
+     }
+     if (amount < PIP_PKCS12_BUFFER_SIZE)
+       break;
+   }
+   return NS_OK;
+ }
+ 
+-#ifdef XP_MAC
+-
+-OSErr ConvertMacPathToUnixPath(const char *macPath, char **unixPath)
+-{
+-  PRIntn len;
+-  char *cursor;
+-  
+-  len = PL_strlen(macPath);
+-  cursor = (char*)PR_Malloc(len+2);
+-  if (!cursor)
+-    return memFullErr;
+-    
+-  memcpy(cursor+1, macPath, len+1);
+-  *unixPath = cursor;
+-  *cursor = '/';
+-  while ((cursor = PL_strchr(cursor, ':')) != NULL) {
+-    *cursor = '/';
+-    cursor++;
+-  }
+-  return noErr;
+-}
+-#endif
+-
+ //
+ // C callback methods
+ //
+ 
+ // digest_open
+ // prepare a memory buffer for reading/writing digests
+ SECStatus PR_CALLBACK
+ nsPKCS12Blob::digest_open(void *arg, PRBool reading)

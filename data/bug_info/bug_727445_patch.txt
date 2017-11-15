@@ -1,0 +1,241 @@
+# HG changeset patch
+# Parent 3dcb40ebd4873c77b0708b3089979fef6bd946dd
+# User Christian Holler (:decoder) <choller@mozilla.com>
+Add --enable-address-sanitizer for ASan specific workarounds
+Add --enable-llvm-hacks to pass CFLAGS to NSS and omit -Wl,-z,defs for shared libs
+
+diff --git a/config/autoconf.mk.in b/config/autoconf.mk.in
+--- a/config/autoconf.mk.in
++++ b/config/autoconf.mk.in
+@@ -296,16 +296,20 @@ MOZ_GIO_CFLAGS = @MOZ_GIO_CFLAGS@
+ MOZ_GIO_LIBS = @MOZ_GIO_LIBS@
+ 
+ MOZ_NATIVE_NSPR = @MOZ_NATIVE_NSPR@
+ MOZ_NATIVE_NSS = @MOZ_NATIVE_NSS@
+ 
+ MOZ_B2G_RIL = @MOZ_B2G_RIL@
+ MOZ_B2G_BT = @MOZ_B2G_BT@
+ 
++MOZ_ASAN = @MOZ_ASAN@
++MOZ_CFLAGS_NSS = @MOZ_CFLAGS_NSS@
++MOZ_NO_WLZDEFS = @MOZ_NO_WLZDEFS@
++
+ BUILD_CTYPES = @BUILD_CTYPES@
+ 
+ COMPILE_ENVIRONMENT = @COMPILE_ENVIRONMENT@
+ CROSS_COMPILE   = @CROSS_COMPILE@
+ 
+ WCHAR_CFLAGS	= @WCHAR_CFLAGS@
+ 
+ OS_CPPFLAGS	= @CPPFLAGS@
+diff --git a/configure.in b/configure.in
+--- a/configure.in
++++ b/configure.in
+@@ -1833,27 +1833,59 @@ if test -n "$CLANG_CC"; then
+     _WARNINGS_CFLAGS="-Qunused-arguments ${_WARNINGS_CFLAGS}"
+     CPPFLAGS="-Qunused-arguments ${CPPFLAGS}"
+ fi
+ if test -n "$CLANG_CXX"; then
+     _WARNINGS_CXXFLAGS="-Qunused-arguments ${_WARNINGS_CXXFLAGS}"
+ fi
+ 
+ dnl ========================================================
++dnl = Use Address Sanitizer
++dnl ========================================================
++MOZ_ARG_ENABLE_BOOL(address-sanitizer,
++[  --enable-address-sanitizer       Enable Address Sanitizer (default=no)],
++    MOZ_ASAN=1,
++    MOZ_ASAN= )
++if test -n "$MOZ_ASAN"; then
++    MOZ_LLVM_HACKS=1
++    AC_DEFINE(MOZ_ASAN)
++fi
++AC_SUBST(MOZ_ASAN)
++
++dnl ========================================================
++dnl = Enable hacks required for LLVM instrumentations
++dnl ========================================================
++MOZ_ARG_ENABLE_BOOL(llvm-hacks,
++[  --enable-llvm-hacks       Enable workarounds required for several LLVM instrumentations (default=no)],
++    MOZ_LLVM_HACKS=1,
++    MOZ_LLVM_HACKS= )
++if test -n "$MOZ_LLVM_HACKS"; then
++    MOZ_NO_WLZDEFS=1
++    MOZ_CFLAGS_NSS=1
++fi
++AC_SUBST(MOZ_NO_WLZDEFS)
++AC_SUBST(MOZ_CFLAGS_NSS)
++
++dnl ========================================================
+ dnl GNU specific defaults
+ dnl ========================================================
+ if test "$GNU_CC"; then
+     # FIXME: Let us build with strict aliasing. bug 414641.
+     CFLAGS="$CFLAGS -fno-strict-aliasing"
+     MKSHLIB='$(CXX) $(CXXFLAGS) $(DSO_PIC_CFLAGS) $(DSO_LDOPTS) -Wl,-h,$@ -o $@'
+     MKCSHLIB='$(CC) $(CFLAGS) $(DSO_PIC_CFLAGS) $(DSO_LDOPTS) -Wl,-h,$@ -o $@'
+     DSO_LDOPTS='-shared'
+     if test "$GCC_USE_GNU_LD"; then
+-        # Don't allow undefined symbols in libraries
+-        DSO_LDOPTS="$DSO_LDOPTS -Wl,-z,defs"
++        # Some tools like ASan use a runtime library that is only
++        # linked against executables, so we must allow undefined
++        # symbols for shared objects in some cases.
++        if test -z "$MOZ_NO_WLZDEFS"; then
++            # Don't allow undefined symbols in libraries
++            DSO_LDOPTS="$DSO_LDOPTS -Wl,-z,defs"
++        fi
+     fi
+     WARNINGS_AS_ERRORS='-Werror -Wno-error=uninitialized'
+     DSO_CFLAGS=''
+     DSO_PIC_CFLAGS='-fPIC'
+     ASFLAGS="$ASFLAGS -fPIC"
+     _MOZ_RTTI_FLAGS_ON=-frtti
+     _MOZ_RTTI_FLAGS_OFF=-fno-rtti
+ 
+diff --git a/dom/workers/RuntimeService.cpp b/dom/workers/RuntimeService.cpp
+--- a/dom/workers/RuntimeService.cpp
++++ b/dom/workers/RuntimeService.cpp
+@@ -80,19 +80,24 @@ using namespace mozilla::xpconnect::memo
+ 
+ // The size of the worker runtime heaps in bytes. May be changed via pref.
+ #define WORKER_DEFAULT_RUNTIME_HEAPSIZE 32 * 1024 * 1024
+ 
+ // The C stack size. We use the same stack size on all platforms for
+ // consistency.
+ #define WORKER_STACK_SIZE 256 * sizeof(size_t) * 1024
+ 
+-// The stack limit the JS engine will check. Half the size of the
+-// actual C stack, to be safe.
++// The stack limit the JS engine will check. 
++#ifdef MOZ_ASAN
++// For ASan, we need more stack space, so we use all that is available
++#define WORKER_CONTEXT_NATIVE_STACK_LIMIT WORKER_STACK_SIZE
++#else
++// Half the size of the actual C stack, to be safe.
+ #define WORKER_CONTEXT_NATIVE_STACK_LIMIT 128 * sizeof(size_t) * 1024
++#endif
+ 
+ // The maximum number of threads to use for workers, overridable via pref.
+ #define MAX_WORKERS_PER_DOMAIN 10
+ 
+ PR_STATIC_ASSERT(MAX_WORKERS_PER_DOMAIN >= 1);
+ 
+ // The default number of seconds that close handlers will be allowed to run.
+ #define MAX_SCRIPT_RUN_TIME_SEC 10
+diff --git a/js/src/configure.in b/js/src/configure.in
+--- a/js/src/configure.in
++++ b/js/src/configure.in
+@@ -1763,25 +1763,57 @@ if test -n "$CLANG_CC"; then
+     _WARNINGS_CFLAGS="-Qunused-arguments ${_WARNINGS_CFLAGS}"
+     CPPFLAGS="-Qunused-arguments ${CPPFLAGS}"
+ fi
+ if test -n "$CLANG_CXX"; then
+     _WARNINGS_CXXFLAGS="-Qunused-arguments ${_WARNINGS_CXXFLAGS}"
+ fi
+ 
+ dnl ========================================================
++dnl = Use Address Sanitizer
++dnl ========================================================
++MOZ_ARG_ENABLE_BOOL(address-sanitizer,
++[  --enable-address-sanitizer       Enable Address Sanitizer (default=no)],
++    MOZ_ASAN=1,
++    MOZ_ASAN= )
++if test -n "$MOZ_ASAN"; then
++    MOZ_LLVM_HACKS=1
++    AC_DEFINE(MOZ_ASAN)
++fi
++AC_SUBST(MOZ_ASAN)
++
++dnl ========================================================
++dnl = Enable hacks required for LLVM instrumentations
++dnl ========================================================
++MOZ_ARG_ENABLE_BOOL(llvm-hacks,
++[  --enable-llvm-hacks       Enable workarounds required for several LLVM instrumentations (default=no)],
++    MOZ_LLVM_HACKS=1,
++    MOZ_LLVM_HACKS= )
++if test -n "$MOZ_LLVM_HACKS"; then
++    MOZ_NO_WLZDEFS=1
++    MOZ_CFLAGS_NSS=1
++fi
++AC_SUBST(MOZ_NO_WLZDEFS)
++AC_SUBST(MOZ_CFLAGS_NSS)
++
++dnl ========================================================
+ dnl GNU specific defaults
+ dnl ========================================================
+ if test "$GNU_CC"; then
+     MKSHLIB='$(CXX) $(CXXFLAGS) $(DSO_PIC_CFLAGS) $(DSO_LDOPTS) -Wl,-h,$@ -o $@'
+     MKCSHLIB='$(CC) $(CFLAGS) $(DSO_PIC_CFLAGS) $(DSO_LDOPTS) -Wl,-h,$@ -o $@'
+     DSO_LDOPTS='-shared'
+     if test "$GCC_USE_GNU_LD"; then
+-        # Don't allow undefined symbols in libraries
+-        DSO_LDOPTS="$DSO_LDOPTS -Wl,-z,defs"
++        # Some tools like ASan use a runtime library that is only
++        # linked against executables, so we must allow undefined
++        # symbols for shared objects in some cases.
++        if test -z "$MOZ_NO_WLZDEFS"; then
++            # Don't allow undefined symbols in libraries
++            DSO_LDOPTS="$DSO_LDOPTS -Wl,-z,defs"
++        fi
+     fi
+     WARNINGS_AS_ERRORS='-Werror -Wno-error=uninitialized'
+     DSO_CFLAGS=''
+     DSO_PIC_CFLAGS='-fPIC'
+     ASFLAGS="$ASFLAGS -fPIC"
+     _MOZ_RTTI_FLAGS_ON=-frtti
+     _MOZ_RTTI_FLAGS_OFF=-fno-rtti
+ 
+diff --git a/js/xpconnect/src/XPCJSRuntime.cpp b/js/xpconnect/src/XPCJSRuntime.cpp
+--- a/js/xpconnect/src/XPCJSRuntime.cpp
++++ b/js/xpconnect/src/XPCJSRuntime.cpp
+@@ -2056,17 +2056,22 @@ XPCJSRuntime::XPCJSRuntime(nsXPConnect* 
+     {
+         // Unconstrain the runtime's threshold on nominal heap size, to avoid
+         // triggering GC too often if operating continuously near an arbitrary
+         // finite threshold (0xffffffff is infinity for uint32_t parameters).
+         // This leaves the maximum-JS_malloc-bytes threshold still in effect
+         // to cause period, and we hope hygienic, last-ditch GCs from within
+         // the GC's allocator.
+         JS_SetGCParameter(mJSRuntime, JSGC_MAX_BYTES, 0xffffffff);
++#ifdef MOZ_ASAN
++        // ASan requires more stack space due to redzones
++        JS_SetNativeStackQuota(mJSRuntime, 2 * 128 * sizeof(size_t) * 1024);
++#else  
+         JS_SetNativeStackQuota(mJSRuntime, 128 * sizeof(size_t) * 1024);
++#endif
+         JS_SetContextCallback(mJSRuntime, ContextCallback);
+         JS_SetCompartmentCallback(mJSRuntime, CompartmentCallback);
+         JS_SetGCCallback(mJSRuntime, GCCallback);
+         JS_SetFinalizeCallback(mJSRuntime, FinalizeCallback);
+         JS_SetExtraGCRootsTracer(mJSRuntime, TraceBlackJS, this);
+         JS_SetGrayGCRootsTracer(mJSRuntime, TraceGrayJS, this);
+         JS_SetWrapObjectCallbacks(mJSRuntime,
+                                   xpc::WrapperFactory::Rewrap,
+diff --git a/security/manager/Makefile.in b/security/manager/Makefile.in
+--- a/security/manager/Makefile.in
++++ b/security/manager/Makefile.in
+@@ -273,16 +273,23 @@ DEFAULT_GMAKE_FLAGS += \
+ 	$(NULL)
+ endif
+ 
+ DEFAULT_GMAKE_FLAGS += FREEBL_NO_DEPEND=0
+ ifeq ($(OS_TARGET),Linux)
+ DEFAULT_GMAKE_FLAGS += FREEBL_LOWHASH=1
+ endif
+ 
++ifdef MOZ_NO_WLZDEFS
++DEFAULT_GMAKE_FLAGS += ZDEFS_FLAG=
++endif
++ifdef MOZ_CFLAGS_NSS
++DEFAULT_GMAKE_FLAGS += XCFLAGS="$(CFLAGS)"
++endif
++
+ SUBMAKEFILES = boot/Makefile ssl/Makefile pki/Makefile locales/Makefile
+ 
+ include $(topsrcdir)/config/rules.mk
+ 
+ ifdef MOZ_NSS_PATCH
+ # If we're applying a patch, we'll copy the NSS source to the objdir
+ # and build it from there.
+ NSS_SRCDIR = $(CURDIR)/nss

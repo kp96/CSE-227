@@ -1,0 +1,28 @@
+diff --git a/security/manager/ssl/src/nsNSSIOLayer.cpp b/security/manager/ssl/src/nsNSSIOLayer.cpp
+--- a/security/manager/ssl/src/nsNSSIOLayer.cpp
++++ b/security/manager/ssl/src/nsNSSIOLayer.cpp
+@@ -1675,24 +1675,20 @@ nsSSLIOLayerClose(PRFileDesc *fd)
+ }
+ 
+ PRStatus nsNSSSocketInfo::CloseSocketAndDestroy()
+ {
+   nsNSSShutDownPreventionLock locker;
+ 
+   nsNSSShutDownList::trackSSLSocketClose();
+ 
+   PRFileDesc* popped = PR_PopIOLayer(mFd, PR_TOP_IO_LAYER);
+ 
+-  if (GetHandshakeInProgress()) {
+-    nsSSLIOLayerHelpers::rememberPossibleTLSProblemSite(mFd->lower, this);
+-  }
+-
+   PRStatus status = mFd->methods->close(mFd);
+   if (status != PR_SUCCESS) return status;
+ 
+   popped->identity = PR_INVALID_IO_LAYER;
+   NS_RELEASE_THIS();
+   popped->dtor(popped);
+ 
+   return PR_SUCCESS;
+ }
+ 

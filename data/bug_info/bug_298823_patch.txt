@@ -1,0 +1,110 @@
+Index: caps/src/nsScriptSecurityManager.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/caps/src/nsScriptSecurityManager.cpp,v
+retrieving revision 1.266
+diff -u -8 -p -r1.266 nsScriptSecurityManager.cpp
+--- caps/src/nsScriptSecurityManager.cpp	22 Jul 2005 19:05:40 -0000	1.266
++++ caps/src/nsScriptSecurityManager.cpp	26 Jul 2005 17:54:56 -0000
+@@ -944,31 +944,41 @@ nsScriptSecurityManager::LookupPolicy(ns
+ #ifdef DEBUG_CAPS_LookupPolicy
+         printf("DomainLookup ");
+ #endif
+ 
+         nsXPIDLCString origin;
+         if (NS_FAILED(rv = aPrincipal->GetOrigin(getter_Copies(origin))))
+             return rv;
+  
+-        const char *start = origin;
++        char *start = origin.BeginWriting();
+         const char *nextToLastDot = nsnull;
+         const char *lastDot = nsnull;
+         const char *colon = nsnull;
+-        const char *p = start;
+-        while (*p)
++        char *p = start;
++
++        //-- skip (nested) jar schemes to reach the "real" URI
++        while (*p == 'j' && *(++p) == 'a' && *(++p) == 'r' && *(++p) == ':')
++            start = ++p;
++        
++        //-- search domain (stop at the end of the string or at the 3rd slash)
++        for (PRUint32 slashes=0; *p; p++)
+         {
++            if (*p == '/' && ++slashes == 3) 
++            {
++                *p = '\0'; // truncate at 3rd slash
++                break;
++            }
+             if (*p == '.')
+             {
+                 nextToLastDot = lastDot;
+                 lastDot = p;
+-            }
+-            if (!colon && *p == ':')
++            } 
++            else if (!colon && *p == ':')
+                 colon = p;
+-            p++;
+         }
+ 
+         nsCStringKey key(nextToLastDot ? nextToLastDot+1 : start);
+         DomainEntry *de = (DomainEntry*) mOriginToPolicyMap->Get(&key);
+         if (!de)
+         {
+             nsCAutoString scheme(start, colon-start+1);
+             nsCStringKey schemeKey(scheme);
+@@ -3121,34 +3131,34 @@ nsScriptSecurityManager::InitPolicies()
+         if (!domainPolicy)
+             return NS_ERROR_OUT_OF_MEMORY;
+ 
+         if (!domainPolicy->Init())
+         {
+             delete domainPolicy;
+             return NS_ERROR_UNEXPECTED;
+         }
+-
++        domainPolicy->Hold();
+         //-- Parse list of sites and create an entry in mOriginToPolicyMap for each
+         char* domainStart = domainList.BeginWriting();
+         char* domainCurrent = domainStart;
+         char* lastDot = nsnull;
+         char* nextToLastDot = nsnull;
+         PRBool moreDomains = PR_TRUE;
+         while (moreDomains)
+         {
+             if (*domainCurrent == ' ' || *domainCurrent == '\0')
+             {
+                 moreDomains = (*domainCurrent != '\0');
+                 *domainCurrent = '\0';
+                 nsCStringKey key(nextToLastDot ? nextToLastDot+1 : domainStart);
+                 DomainEntry *newEntry = new DomainEntry(domainStart, domainPolicy);
+                 if (!newEntry)
+                 {
+-                    delete domainPolicy;
++                    domainPolicy->Drop();
+                     return NS_ERROR_OUT_OF_MEMORY;
+                 }
+ #ifdef DEBUG
+                 newEntry->mPolicyName_DEBUG = nameBegin;
+ #endif
+                 DomainEntry *existingEntry = (DomainEntry *)
+                     mOriginToPolicyMap->Get(&key);
+                 if (!existingEntry)
+@@ -3183,16 +3193,17 @@ nsScriptSecurityManager::InitPolicies()
+             {
+                 nextToLastDot = lastDot;
+                 lastDot = domainCurrent;
+             }
+             domainCurrent++;
+         }
+ 
+         rv = InitDomainPolicy(cx, nameBegin, domainPolicy);
++        domainPolicy->Drop();
+         if (NS_FAILED(rv))
+             return rv;
+     }
+ 
+     // Reset the "dirty" flag
+     mPolicyPrefsChanged = PR_FALSE;
+ 
+ #ifdef DEBUG_CAPS_HACKER

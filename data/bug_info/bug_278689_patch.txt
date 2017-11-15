@@ -1,0 +1,556 @@
+# HG changeset patch
+# Parent 82baea639081945a57c62773b9d1b26adc34a14e
+# User Kaspar Brand <mozcontrib@velox.ch>
+Bug 278689 - Multiple Certificates with the same subject are not shown in the digital signature select cert combo (only one is shown) r=neil
+
+diff --git a/mail/locales/en-US/chrome/messenger/am-smime.properties b/mail/locales/en-US/chrome/messenger/am-smime.properties
+diff --git a/mail/locales/en-US/chrome/messenger/am-smime.properties b/mail/locales/en-US/chrome/messenger/am-smime.properties
+--- a/mail/locales/en-US/chrome/messenger/am-smime.properties
++++ b/mail/locales/en-US/chrome/messenger/am-smime.properties
+@@ -8,17 +8,19 @@ NoSenderSigningCert=You specified that t
+ NoSenderEncryptionCert=You specified encryption for this message, but the application either failed to find the encryption certificate specified in your Mail & Newsgroup Account Settings, or the certificate has expired.
+ MissingRecipientEncryptionCert=You specified encryption for this message, but the application failed to find an encryption certificate for %S.
+ ErrorEncryptMail=Unable to encrypt message. Please check that you have a valid email certificate for each recipient. Please check that the certificates specified in Mail & Newsgroups Account Settings for this mail account are valid and trusted for mail.
+ ErrorCanNotSignMail=Unable to sign message. Please check that the certificates specified in Mail & Newsgroups Account Settings for this mail account are valid and trusted for mail.
+ 
+ ## Strings used for in the prefs.
+ prefPanel-smime=Security
+ NoSigningCert=Certificate Manager can't locate a valid certificate that can be used to digitally sign your messages.
++NoSigningCertForThisAddress=Certificate Manager can't locate a valid certificate that can be used to digitally sign your messages with an address of <%S>.
+ NoEncryptionCert=Certificate Manager can't locate a valid certificate that other people can use to send you encrypted email messages.
++NoEncryptionCertForThisAddress=Certificate Manager can't locate a valid certificate that other people can use to send you encrypted email messages to the address <%S>.
+ 
+ encryption_needCertWantSame=You should also specify a certificate for other people to use when they send you encrypted messages. Do you want to use the same certificate to encrypt & decrypt messages sent to you?
+ encryption_wantSame=Do you want to use the same certificate to encrypt & decrypt messages sent to you?
+ encryption_needCertWantToSelect=You should also specify a certificate for other people to use when they send you encrypted messages. Do you want to configure an encryption certificate now?
+ signing_needCertWantSame=You should also specify a certificate to use for digitally signing your messages. Do you want to use the same certificate to digitally sign your messages?
+ signing_wantSame=Do you want to use the same certificate to digitally sign your messages?
+ signing_needCertWantToSelect=You should also specify a certificate to use for digitally signing your messages. Do you want to configure a certificate for digitally signing messages now?
+ 
+diff --git a/mailnews/extensions/smime/content/am-smime.js b/mailnews/extensions/smime/content/am-smime.js
+--- a/mailnews/extensions/smime/content/am-smime.js
++++ b/mailnews/extensions/smime/content/am-smime.js
+@@ -52,39 +52,68 @@ function smimeInitializeFields()
+ 
+   if (!gIdentity) {
+     // The user is going to create a new identity.
+     // Set everything to default values.
+     // Do not take over the values from gAccount.defaultIdentity
+     // as the new identity is going to have a different mail address.
+ 
+     gEncryptionCertName.value = "";
++    gEncryptionCertName.nickname = "";
++    gEncryptionCertName.dbKey = "";
+     gSignCertName.value = "";
++    gSignCertName.nickname = "";
++    gSignCertName.dbKey = "";
+ 
+     gEncryptAlways.setAttribute("disabled", true);
+     gNeverEncrypt.setAttribute("disabled", true);
+     gSignMessages.setAttribute("disabled", true);
+ 
+     gSignMessages.checked = false;
+     gEncryptionChoices.value = 0;
+   }
+   else {
++    var certdb = Components.classes[nsX509CertDBContractID].getService(nsIX509CertDB);
++    var x509cert = null;
++
+     gEncryptionCertName.value = gIdentity.getUnicharAttribute("encryption_cert_name");
++    gEncryptionCertName.dbKey = gIdentity.getCharAttribute("encryption_cert_dbkey");
++    // If we succeed in looking up the certificate by the dbkey pref, then
++    // append the serial number " [...]" to the display value, and remember the
++    // nickname in a separate property.
++    try {
++        if (certdb && gEncryptionCertName.dbKey &&
++            (x509cert = certdb.findCertByDBKey(gEncryptionCertName.dbKey, null))) {
++            gEncryptionCertName.value = x509cert.nickname + " [" + x509cert.serialNumber + "]";
++            gEncryptionCertName.nickname = x509cert.nickname;
++        }
++    } catch(e) {}
+ 
+     gEncryptionChoices.value = gIdentity.getIntAttribute("encryptionpolicy");
+ 
+     if (!gEncryptionCertName.value) {
+       gEncryptAlways.setAttribute("disabled", true);
+       gNeverEncrypt.setAttribute("disabled", true);
+     }
+     else {
+       enableEncryptionControls(true);
+     }
+ 
+     gSignCertName.value = gIdentity.getUnicharAttribute("signing_cert_name");
++    gSignCertName.dbKey = gIdentity.getCharAttribute("signing_cert_dbkey");
++    x509cert = null;
++    // same procedure as with gEncryptionCertName (see above)
++    try {
++        if (certdb && gSignCertName.dbKey &&
++            (x509cert = certdb.findCertByDBKey(gSignCertName.dbKey, null))) {
++            gSignCertName.value = x509cert.nickname + " [" + x509cert.serialNumber + "]";
++            gSignCertName.nickname = x509cert.nickname;
++        }
++    } catch(e) {}
++
+     gSignMessages.checked = gIdentity.getBoolAttribute("sign_mail");
+     if (!gSignCertName.value)
+     {
+       gSignMessages.setAttribute("disabled", true);
+     }
+     else {
+       enableSigningControls(true);
+     }
+@@ -111,20 +140,24 @@ function onSave()
+ }
+ 
+ function smimeSave()
+ {
+   // find out which radio for the encryption radio group is selected and set that on our hidden encryptionChoice pref....
+   var newValue = gEncryptionChoices.value;
+   gHiddenEncryptionPolicy.setAttribute('value', newValue);
+   gIdentity.setIntAttribute("encryptionpolicy", newValue);
+-  gIdentity.setUnicharAttribute("encryption_cert_name", gEncryptionCertName.value);
++  gIdentity.setUnicharAttribute("encryption_cert_name",
++                                gEncryptionCertName.nickname || gEncryptionCertName.value);
++  gIdentity.setCharAttribute("encryption_cert_dbkey", gEncryptionCertName.dbKey);
+ 
+   gIdentity.setBoolAttribute("sign_mail", gSignMessages.checked);
+-  gIdentity.setUnicharAttribute("signing_cert_name", gSignCertName.value);
++  gIdentity.setUnicharAttribute("signing_cert_name",
++                                gSignCertName.nickname || gSignCertName.value);
++  gIdentity.setCharAttribute("signing_cert_dbkey", gSignCertName.dbKey);
+ }
+ 
+ function smimeOnAcceptEditor()
+ {
+   try {
+     if (!onOk())
+       return false;
+   }
+@@ -210,59 +243,61 @@ function askUser(message)
+     null,
+     null,
+     null,
+     {});
+   // confirmEx returns button index:
+   return (button == 0);
+ }
+ 
+-function checkOtherCert(nickname, pref, usage, msgNeedCertWantSame, msgWantSame, msgNeedCertWantToSelect, enabler)
++function checkOtherCert(cert, pref, usage, msgNeedCertWantSame, msgWantSame, msgNeedCertWantToSelect, enabler)
+ {
+   var otherCertInfo = document.getElementById(pref);
+   if (!otherCertInfo)
+     return;
+ 
+-  if (otherCertInfo.value == nickname)
++  if (otherCertInfo.dbKey == cert.dbKey)
+     // all is fine, same cert is now selected for both purposes
+     return;
+ 
+   var certdb = Components.classes[nsX509CertDBContractID].getService(nsIX509CertDB);
+   if (!certdb)
+     return;
+   
+   if (email_recipient_cert_usage == usage) {
+-    matchingOtherCert = certdb.findEmailEncryptionCert(nickname);
++    matchingOtherCert = certdb.findEmailEncryptionCert(cert.nickname);
+   }
+   else if (email_signing_cert_usage == usage) {
+-    matchingOtherCert = certdb.findEmailSigningCert(nickname);
++    matchingOtherCert = certdb.findEmailSigningCert(cert.nickname);
+   }
+   else
+     return;
+ 
+   var userWantsSameCert = false;
+ 
+   if (!otherCertInfo.value.length) {
+-    if (matchingOtherCert) {
++    if (matchingOtherCert && (matchingOtherCert.dbKey == cert.dbKey)) {
+       userWantsSameCert = askUser(gBundle.getString(msgNeedCertWantSame));
+     }
+     else {
+       if (askUser(gBundle.getString(msgNeedCertWantToSelect))) {
+         smimeSelectCert(pref);
+       }
+     }
+   }
+   else {
+-    if (matchingOtherCert) {
++    if (matchingOtherCert && (matchingOtherCert.dbKey == cert.dbKey)) {
+       userWantsSameCert = askUser(gBundle.getString(msgWantSame));
+     }
+   }
+ 
+   if (userWantsSameCert) {
+-    otherCertInfo.value = nickname;
++    otherCertInfo.value = cert.nickname + " [" + cert.serialNumber + "]";
++    otherCertInfo.nickname = cert.nickname;
++    otherCertInfo.dbKey = cert.dbKey;
+     enabler(true);
+   }
+ }
+ 
+ function smimeSelectCert(smime_cert)
+ {
+   var certInfo = document.getElementById(smime_cert);
+   if (!certInfo)
+@@ -282,50 +317,55 @@ function smimeSelectCert(smime_cert)
+     selectEncryptionCert = false;
+     certUsage = email_signing_cert_usage;
+   }
+ 
+   try {
+     x509cert = picker.pickByUsage(window,
+       certInfo.value,
+       certUsage, // this is from enum SECCertUsage
+-      false, false, canceled);
++      false, true,
++      gIdentity.email,
++      canceled);
+   } catch(e) {
+     canceled.value = false;
+     x509cert = null;
+   }
+ 
+   if (!canceled.value) {
+     if (!x509cert) {
+-      var errorString;
+-      if (selectEncryptionCert) {
+-        errorString = "NoEncryptionCert";
++      if (gIdentity.email) {
++        alertUser(gBundle.getFormattedString(selectEncryptionCert ?
++                                             "NoEncryptionCertForThisAddress" :
++                                             "NoSigningCertForThisAddress",
++                                             [ gIdentity.email ]));
++      } else {
++        alertUser(gBundle.getString(selectEncryptionCert ?
++                                    "NoEncryptionCert" : "NoSigningCert"));
+       }
+-      else {
+-        errorString = "NoSigningCert";
+-      }
+-      alertUser(gBundle.getString(errorString));
+     }
+     else {
+       certInfo.removeAttribute("disabled");
+-      certInfo.value = x509cert.nickname;
++      certInfo.value = x509cert.nickname + " [" + x509cert.serialNumber + "]";
++      certInfo.nickname = x509cert.nickname;
++      certInfo.dbKey = x509cert.dbKey;
+ 
+       if (selectEncryptionCert) {
+         enableEncryptionControls(true);
+ 
+-        checkOtherCert(certInfo.value,
++        checkOtherCert(x509cert,
+           kSigningCertPref, email_signing_cert_usage, 
+           "signing_needCertWantSame", 
+           "signing_wantSame", 
+           "signing_needCertWantToSelect",
+           enableSigningControls);
+       } else {
+         enableSigningControls(true);
+ 
+-        checkOtherCert(certInfo.value,
++        checkOtherCert(x509cert,
+           kEncryptionCertPref, email_recipient_cert_usage, 
+           "encryption_needCertWantSame", 
+           "encryption_wantSame", 
+           "encryption_needCertWantToSelect",
+           enableEncryptionControls);
+       }
+     }
+   }
+@@ -336,34 +376,38 @@ function smimeSelectCert(smime_cert)
+ function enableEncryptionControls(do_enable)
+ {
+   if (gEncryptionChoicesLocked)
+     return;
+ 
+   if (do_enable) {
+     gEncryptAlways.removeAttribute("disabled");
+     gNeverEncrypt.removeAttribute("disabled");
++    gEncryptionCertName.removeAttribute("disabled");
+   }
+   else {
+     gEncryptAlways.setAttribute("disabled", "true");
+     gNeverEncrypt.setAttribute("disabled", "true");
++    gEncryptionCertName.setAttribute("disabled", "true");
+     gEncryptionChoices.value = 0;
+   }
+ }
+ 
+ function enableSigningControls(do_enable)
+ {
+   if (gSigningChoicesLocked)
+     return;
+ 
+   if (do_enable) {
+     gSignMessages.removeAttribute("disabled");
++    gSignCertName.removeAttribute("disabled");
+   }
+   else {
+     gSignMessages.setAttribute("disabled", "true");
++    gSignCertName.setAttribute("disabled", "true");
+     gSignMessages.checked = false;
+   }
+ }
+ 
+ function enableCertSelectButtons()
+ {
+   document.getElementById("signingCertSelectButton").removeAttribute("disabled");
+ 
+@@ -383,16 +427,18 @@ function enableCertSelectButtons()
+ function smimeClearCert(smime_cert)
+ {
+   var certInfo = document.getElementById(smime_cert);
+   if (!certInfo)
+     return;
+ 
+   certInfo.setAttribute("disabled", "true");
+   certInfo.value = "";
++  certInfo.nickname = "";
++  certInfo.dbKey = "";
+ 
+   if (smime_cert == kEncryptionCertPref) {
+     enableEncryptionControls(false);
+   } else if (smime_cert == kSigningCertPref) {
+     enableSigningControls(false);
+   }
+ 
+   enableCertSelectButtons();
+diff --git a/mailnews/extensions/smime/src/moz.build b/mailnews/extensions/smime/src/moz.build
+--- a/mailnews/extensions/smime/src/moz.build
++++ b/mailnews/extensions/smime/src/moz.build
+@@ -11,8 +11,11 @@ SOURCES += [
+ 
+ EXTRA_COMPONENTS += [
+     'smime-service.js',
+     'smime-service.manifest',
+ ]
+ 
+ FINAL_LIBRARY = 'mail'
+ 
++LOCAL_INCLUDES += [
++    '/mozilla/security/pkix/include'
++]
+diff --git a/mailnews/extensions/smime/src/nsMsgComposeSecure.cpp b/mailnews/extensions/smime/src/nsMsgComposeSecure.cpp
+--- a/mailnews/extensions/smime/src/nsMsgComposeSecure.cpp
++++ b/mailnews/extensions/smime/src/nsMsgComposeSecure.cpp
+@@ -15,26 +15,28 @@
+ #include "nsIX509CertDB.h"
+ #include "nsMimeTypes.h"
+ #include "nsMsgMimeCID.h"
+ #include "nspr.h"
+ #include "nsComponentManagerUtils.h"
+ #include "nsServiceManagerUtils.h"
+ #include "nsMemory.h"
+ #include "nsAlgorithm.h"
++#include "nsNSSComponent.h"
+ #include "mozilla/RefPtr.h"
+ #include "mozilla/Services.h"
+ #include "mozilla/mailnews/MimeEncoder.h"
+ #include "mozilla/mailnews/MimeHeaderParser.h"
+ #include "nsIMimeConverter.h"
+ #include "ScopedNSSTypes.h"
+ #include <algorithm>
+ 
+ using namespace mozilla::mailnews;
+ using namespace mozilla;
++using namespace mozilla::psm;
+ 
+ #define MK_MIME_ERROR_WRITING_FILE -1
+ 
+ #define SMIME_STRBUNDLE_URL "chrome://messenger/locale/am-smime.properties"
+ 
+ // It doesn't make sense to encode the message because the message will be
+ // displayed only if the MUA doesn't support MIME.
+ // We need to consider what to do in case the server doesn't support 8BITMIME.
+@@ -420,19 +422,21 @@ NS_IMETHODIMP nsMsgComposeSecure::BeginC
+   else if (encryptMessages)
+     mCryptoState = mime_crypto_encrypted;
+   else if (signMessage)
+     mCryptoState = mime_crypto_clear_signed;
+   else
+     PR_ASSERT(0);
+ 
+   aIdentity->GetUnicharAttribute("signing_cert_name", mSigningCertName);
++  aIdentity->GetCharAttribute("signing_cert_dbkey", mSigningCertDBKey);
+   aIdentity->GetUnicharAttribute("encryption_cert_name", mEncryptionCertName);
++  aIdentity->GetCharAttribute("encryption_cert_dbkey", mEncryptionCertDBKey);
+ 
+-  rv = MimeCryptoHackCerts(aRecipients, sendReport, encryptMessages, signMessage);
++  rv = MimeCryptoHackCerts(aRecipients, sendReport, encryptMessages, signMessage, aIdentity);
+   if (NS_FAILED(rv)) {
+     goto FAIL;
+   }
+ 
+   if (signMessage && mSelfSigningCert) {
+     rv = GetSigningHashFunction(mSelfSigningCert, &mHashType);
+     NS_ENSURE_SUCCESS(rv, rv);
+   }
+@@ -859,37 +863,93 @@ nsresult nsMsgComposeSecure::MimeFinishE
+   return rv;
+ }
+ 
+ /* Used to figure out what certs should be used when encrypting this message.
+  */
+ nsresult nsMsgComposeSecure::MimeCryptoHackCerts(const char *aRecipients,
+                                                  nsIMsgSendReport *sendReport,
+                                                  bool aEncrypt,
+-                                                 bool aSign)
++                                                 bool aSign,
++                                                 nsIMsgIdentity *aIdentity)
+ {
+   nsCOMPtr<nsIX509CertDB> certdb = do_GetService(NS_X509CERTDB_CONTRACTID);
+   nsresult res;
+ 
+   mCerts = do_CreateInstance(NS_ARRAY_CONTRACTID, &res);
+   if (NS_FAILED(res)) {
+     return res;
+   }
+ 
+   PR_ASSERT(aEncrypt || aSign);
+-  certdb->FindEmailEncryptionCert(mEncryptionCertName, getter_AddRefs(mSelfEncryptionCert));
+-  certdb->FindEmailSigningCert(mSigningCertName, getter_AddRefs(mSelfSigningCert));
++
++  /*
++   Signing and encryption certs use the following (per-identity) preferences:
++   - "signing_cert_name"/"encryption_cert_name": a string specifying the
++     nickname of the certificate
++   - "signing_cert_dbkey"/"encryption_cert_dbkey": a Base64 encoded blob
++     specifying an nsIX509Cert dbKey (represents serial number
++     and issuer DN, which is considered to be unique for X.509 certificates)
++
++   When retrieving the prefs, we try (in this order):
++   1) *_cert_dbkey, if available
++   2) *_cert_name (for maintaining backwards compatibility with preference
++      attributes written by earlier versions)
++  */
++
++  RefPtr<SharedCertVerifier> certVerifier(GetDefaultCertVerifier());
++  NS_ENSURE_TRUE(certVerifier, NS_ERROR_UNEXPECTED);
++
++  if (!mEncryptionCertDBKey.IsEmpty()) {
++    certdb->FindCertByDBKey(mEncryptionCertDBKey.get(), nullptr,
++                            getter_AddRefs(mSelfEncryptionCert));
++    if (mSelfEncryptionCert &&
++        (certVerifier->VerifyCert(mSelfEncryptionCert->GetCert(),
++                                  certificateUsageEmailRecipient,
++                                  mozilla::pkix::Now(),
++                                  nullptr, nullptr) != SECSuccess)) {
++      // not suitable for encryption, so unset cert and clear pref
++      mSelfEncryptionCert = nullptr;
++      mEncryptionCertDBKey.Truncate();
++      aIdentity->SetCharAttribute("encryption_cert_dbkey",
++                                   mEncryptionCertDBKey);
++    }
++  }
++  if (!mSelfEncryptionCert) {
++    certdb->FindEmailEncryptionCert(mEncryptionCertName,
++                                    getter_AddRefs(mSelfEncryptionCert));
++  }
++
++  // same procedure for the signing cert
++  if (!mSigningCertDBKey.IsEmpty()) {
++    certdb->FindCertByDBKey(mSigningCertDBKey.get(), nullptr,
++                            getter_AddRefs(mSelfSigningCert));
++    if (mSelfSigningCert &&
++        (certVerifier->VerifyCert(mSelfSigningCert->GetCert(),
++                                  certificateUsageEmailSigner,
++                                  mozilla::pkix::Now(),
++                                  nullptr, nullptr) != SECSuccess)) {
++      // not suitable for signing, so unset cert and clear pref
++      mSelfSigningCert = nullptr;
++      mSigningCertDBKey.Truncate();
++      aIdentity->SetCharAttribute("signing_cert_dbkey", mSigningCertDBKey);
++    }
++  }
++  if (!mSelfSigningCert) {
++    certdb->FindEmailSigningCert(mSigningCertName,
++                                 getter_AddRefs(mSelfSigningCert));
++  }
+ 
+   // must have both the signing and encryption certs to sign
+-  if ((mSelfSigningCert == nullptr) && aSign) {
++  if (!mSelfSigningCert && aSign) {
+     SetError(sendReport, MOZ_UTF16("NoSenderSigningCert"));
+     return NS_ERROR_FAILURE;
+   }
+ 
+-  if ((mSelfEncryptionCert == nullptr) && aEncrypt) {
++  if (!mSelfEncryptionCert && aEncrypt) {
+     SetError(sendReport, MOZ_UTF16("NoSenderEncryptionCert"));
+     return NS_ERROR_FAILURE;
+   }
+ 
+ 
+   if (aEncrypt && mSelfEncryptionCert) {
+     // Make sure self's configured cert is prepared for being used
+     // as an email recipient cert.
+diff --git a/mailnews/extensions/smime/src/nsMsgComposeSecure.h b/mailnews/extensions/smime/src/nsMsgComposeSecure.h
+--- a/mailnews/extensions/smime/src/nsMsgComposeSecure.h
++++ b/mailnews/extensions/smime/src/nsMsgComposeSecure.h
+@@ -59,35 +59,37 @@ public:
+   void GetOutputStream(nsIOutputStream **stream) { NS_IF_ADDREF(*stream = mStream);}
+ private:
+   virtual ~nsMsgComposeSecure();
+   typedef mozilla::mailnews::MimeEncoder MimeEncoder;
+   nsresult MimeInitMultipartSigned(bool aOuter, nsIMsgSendReport *sendReport);
+   nsresult MimeInitEncryption(bool aSign, nsIMsgSendReport *sendReport);
+   nsresult MimeFinishMultipartSigned (bool aOuter, nsIMsgSendReport *sendReport);
+   nsresult MimeFinishEncryption (bool aSign, nsIMsgSendReport *sendReport);
+-  nsresult MimeCryptoHackCerts(const char *aRecipients, nsIMsgSendReport *sendReport, bool aEncrypt, bool aSign);
++  nsresult MimeCryptoHackCerts(const char *aRecipients, nsIMsgSendReport *sendReport, bool aEncrypt, bool aSign, nsIMsgIdentity *aIdentity);
+   bool InitializeSMIMEBundle();
+   nsresult GetSMIMEBundleString(const char16_t *name,
+ 				char16_t **outString);
+   nsresult SMIMEBundleFormatStringFromName(const char16_t *name,
+ 					   const char16_t **params,
+ 					   uint32_t numParams,
+ 					   char16_t **outString);
+   nsresult ExtractEncryptionState(nsIMsgIdentity * aIdentity, nsIMsgCompFields * aComposeFields, bool * aSignMessage, bool * aEncrypt);
+ 
+   mimeDeliveryCryptoState mCryptoState;
+   nsCOMPtr<nsIOutputStream> mStream;
+   int16_t mHashType;
+   nsCOMPtr<nsICryptoHash> mDataHash;
+   nsAutoPtr<MimeEncoder> mSigEncoder;
+   char *mMultipartSignedBoundary;
+   nsString mSigningCertName;
++  nsAutoCString mSigningCertDBKey;
+   nsCOMPtr<nsIX509Cert> mSelfSigningCert;
+   nsString mEncryptionCertName;
++  nsAutoCString mEncryptionCertDBKey;
+   nsCOMPtr<nsIX509Cert> mSelfEncryptionCert;
+   nsCOMPtr<nsIMutableArray> mCerts;
+   nsCOMPtr<nsICMSMessage> mEncryptionCinfo;
+   nsCOMPtr<nsICMSEncoder> mEncryptionContext;
+   nsCOMPtr<nsIStringBundle> mSMIMEBundle;
+ 
+   nsAutoPtr<MimeEncoder> mCryptoEncoder;
+   bool mIsDraft;
+diff --git a/suite/locales/en-US/chrome/mailnews/smime/am-smime.properties b/suite/locales/en-US/chrome/mailnews/smime/am-smime.properties
+--- a/suite/locales/en-US/chrome/mailnews/smime/am-smime.properties
++++ b/suite/locales/en-US/chrome/mailnews/smime/am-smime.properties
+@@ -8,17 +8,19 @@ NoSenderSigningCert=You specified that t
+ NoSenderEncryptionCert=You specified encryption for this message, but the application either failed to find the encryption certificate specified in your Mail & Newsgroup Account Settings, or the certificate has expired.
+ MissingRecipientEncryptionCert=You specified encryption for this message, but the application failed to find an encryption certificate for %S.
+ ErrorEncryptMail=Unable to encrypt message. Please check that you have a valid email certificate for each recipient. Please check that the certificates specified in Mail & Newsgroups Account Settings for this mail account are valid and trusted for mail.
+ ErrorCanNotSignMail=Unable to sign message. Please check that the certificates specified in Mail & Newsgroups Account Settings for this mail account are valid and trusted for mail.
+ 
+ ## Strings used for in the prefs.
+ prefPanel-smime=Security
+ NoSigningCert=Certificate Manager can't locate a valid certificate that can be used to digitally sign your messages.
++NoSigningCertForThisAddress=Certificate Manager can't locate a valid certificate that can be used to digitally sign your messages with an address of <%S>.
+ NoEncryptionCert=Certificate Manager can't locate a valid certificate that other people can use to send you encrypted email messages.
++NoEncryptionCertForThisAddress=Certificate Manager can't locate a valid certificate that other people can use to send you encrypted email messages to the address <%S>.
+ 
+ encryption_needCertWantSame=You should also specify a certificate for other people to use when they send you encrypted messages. Do you want to use the same certificate to encrypt & decrypt messages sent to you?
+ encryption_wantSame=Do you want to use the same certificate to encrypt & decrypt messages sent to you?
+ encryption_needCertWantToSelect=You should also specify a certificate for other people to use when they send you encrypted messages. Do you want to configure an encryption certificate now?
+ signing_needCertWantSame=You should also specify a certificate to use for digitally signing your messages. Do you want to use the same certificate to digitally sign your messages?
+ signing_wantSame=Do you want to use the same certificate to digitally sign your messages?
+ signing_needCertWantToSelect=You should also specify a certificate to use for digitally signing your messages. Do you want to configure a certificate for digitally signing messages now?
+ 

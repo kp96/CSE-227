@@ -1,0 +1,52 @@
+Index: mozilla/client.mk
+===================================================================
+RCS file: /cvsroot/mozilla/client.mk,v
+retrieving revision 1.353
+diff -u -r1.353 client.mk
+--- mozilla/client.mk	13 Nov 2007 10:43:11 -0000	1.353
++++ mozilla/client.mk	20 Nov 2007 19:38:57 -0000
+@@ -408,7 +408,7 @@
+ # and commit this file on that tag.
+ #MOZ_CO_TAG          = <tag>
+ NSPR_CO_TAG          = NSPR_HEAD_20071016
+-NSS_CO_TAG           = NSS_3_12_ALPHA_2
++NSS_CO_TAG           = NSS_3_12_ALPHA_2B
+ LDAPCSDK_CO_TAG      = LDAPCSDK_6_0_3_CLIENT_BRANCH
+ LOCALES_CO_TAG       =
+ 
+Index: mozilla/security/manager/ssl/src/nsIdentityChecking.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsIdentityChecking.cpp,v
+retrieving revision 1.3
+diff -u -r1.3 nsIdentityChecking.cpp
+--- mozilla/security/manager/ssl/src/nsIdentityChecking.cpp	19 Nov 2007 19:33:03 -0000	1.3
++++ mozilla/security/manager/ssl/src/nsIdentityChecking.cpp	20 Nov 2007 19:38:57 -0000
+@@ -76,6 +76,14 @@
+ 
+ static struct nsMyTrustedEVInfo myTrustedEVInfos[] = {
+   {
++    "2.16.840.1.113733.1.7.23.6",
++    "Verisign EV OID",
++    SEC_OID_UNKNOWN,
++    "OU=Class 3 Public Primary Certification Authority,O=\"VeriSign, Inc.\",C=US",
++    "OU=Class 3 Public Primary Certification Authority,O=\"VeriSign, Inc.\",C=US",
++    "74:2C:31:92:E6:07:E4:24:EB:45:49:54:2B:E1:BB:C5:3E:61:74:E2"
++  },
++  {
+     "0.0.0.0",
+     0, // for real entries use a string like "Sample INVALID EV OID"
+     SEC_OID_UNKNOWN,
+@@ -540,9 +548,11 @@
+   cvin[0].type = cert_pi_policyOID;
+   cvin[0].value.arraySize = 1; 
+   cvin[0].value.array.oids = &oid_tag;
++
+   cvin[1].type = cert_pi_revocationFlags;
+-  cvin[1].value.scalar.ul = CERT_REV_FLAG_OCSP
+-                            | CERT_REV_FLAG_CRL;
++  cvin[1].value.scalar.ul = CERT_REV_FAIL_SOFT_CRL
++                            | CERT_REV_FLAG_CRL
++                            ;
+   cvin[2].type = cert_pi_end;
+ 
+   CERTValOutParam cvout[2];

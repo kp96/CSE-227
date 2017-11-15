@@ -1,0 +1,34 @@
+Index: jsscript.c
+===================================================================
+RCS file: /cvsroot/mozilla/js/src/jsscript.c,v
+retrieving revision 3.60.16.3
+diff -p -u -9 -r3.60.16.3 jsscript.c
+--- jsscript.c	12 Apr 2005 01:33:49 -0000	3.60.16.3
++++ jsscript.c	20 Apr 2005 03:01:52 -0000
+@@ -289,20 +289,24 @@ script_exec(JSContext *cx, JSObject *obj
+              * case it's the right object: the global, not the superglobal.
+              */
+             scopeobj = cx->globalObject;
+         }
+     }
+ 
+     /* Belt-and-braces: check that this script object has access to scopeobj. */
+     if (cx->findObjectPrincipals) {
+         scopePrincipals = cx->findObjectPrincipals(cx, scopeobj);
+-        if (scopePrincipals != script->principals)
+-            scopeobj = OBJ_GET_PARENT(cx, obj);
++        if (scopePrincipals != script->principals) {
++            JS_ReportErrorNumber(cx, js_GetErrorMessage, NULL,
++                                 JSMSG_BAD_INDIRECT_CALL,
++                                 "Script.prototype.exec");
++            return JS_FALSE;
++        }
+     }
+ 
+     return js_Execute(cx, scopeobj, script, caller, JSFRAME_EVAL, rval);
+ }
+ 
+ #if JS_HAS_XDR
+ 
+ static JSBool
+ XDRAtomListElement(JSXDRState *xdr, JSAtomListElement *ale)

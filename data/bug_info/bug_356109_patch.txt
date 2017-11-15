@@ -1,0 +1,131 @@
+Index: mozilla/security/manager/ssl/src/nsNSSCertificate.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSCertificate.cpp,v
+retrieving revision 1.123
+diff -u -r1.123 nsNSSCertificate.cpp
+--- mozilla/security/manager/ssl/src/nsNSSCertificate.cpp	2 Oct 2006 20:16:23 -0000	1.123
++++ mozilla/security/manager/ssl/src/nsNSSCertificate.cpp	10 Oct 2006 02:17:48 -0000
+@@ -206,6 +206,89 @@
+ }
+ 
+ nsresult
++GetKeyUsagesString(CERTCertificate *cert, nsINSSComponent *nssComponent, 
++                   nsString &text)
++{
++  text.Truncate();
++
++  SECItem keyUsageItem;
++  keyUsageItem.data = NULL;
++
++  SECStatus srv;
++
++  /* There is no extension, v1 or v2 certificate */
++  if (!cert->extensions)
++    return NS_OK;
++
++
++  srv = CERT_FindKeyUsageExtension(cert, &keyUsageItem);
++  if (srv == SECFailure) {
++    if (PORT_GetError () == SEC_ERROR_EXTENSION_NOT_FOUND)
++      return NS_OK;
++    else
++      return NS_ERROR_FAILURE;
++  }
++
++  unsigned char keyUsage = keyUsageItem.data[0];
++  nsAutoString local;
++  nsresult rv;
++  const PRUnichar *comma = NS_LITERAL_STRING(",").get();
++
++  if (keyUsage & KU_DIGITAL_SIGNATURE) {
++    rv = nssComponent->GetPIPNSSBundleString("CertDumpKUSign", local);
++    if (NS_SUCCEEDED(rv)) {
++      if (!text.IsEmpty()) text.Append(comma);
++      text.Append(local.get());
++    }
++  }
++  if (keyUsage & KU_NON_REPUDIATION) {
++    rv = nssComponent->GetPIPNSSBundleString("CertDumpKUNonRep", local);
++    if (NS_SUCCEEDED(rv)) {
++      if (!text.IsEmpty()) text.Append(comma);
++      text.Append(local.get());
++    }
++  }
++  if (keyUsage & KU_KEY_ENCIPHERMENT) {
++    rv = nssComponent->GetPIPNSSBundleString("CertDumpKUEnc", local);
++    if (NS_SUCCEEDED(rv)) {
++      if (!text.IsEmpty()) text.Append(comma);
++      text.Append(local.get());
++    }
++  }
++  if (keyUsage & KU_DATA_ENCIPHERMENT) {
++    rv = nssComponent->GetPIPNSSBundleString("CertDumpKUDEnc", local);
++    if (NS_SUCCEEDED(rv)) {
++      if (!text.IsEmpty()) text.Append(comma);
++      text.Append(local.get());
++    }
++  }
++  if (keyUsage & KU_KEY_AGREEMENT) {
++    rv = nssComponent->GetPIPNSSBundleString("CertDumpKUKA", local);
++    if (NS_SUCCEEDED(rv)) {
++      if (!text.IsEmpty()) text.Append(comma);
++      text.Append(local.get());
++    }
++  }
++  if (keyUsage & KU_KEY_CERT_SIGN) {
++    rv = nssComponent->GetPIPNSSBundleString("CertDumpKUCertSign", local);
++    if (NS_SUCCEEDED(rv)) {
++      if (!text.IsEmpty()) text.Append(comma);
++      text.Append(local.get());
++    }
++  }
++  if (keyUsage & KU_CRL_SIGN) {
++    rv = nssComponent->GetPIPNSSBundleString("CertDumpKUCRLSign", local);
++    if (NS_SUCCEEDED(rv)) {
++      if (!text.IsEmpty()) text.Append(comma);
++      text.Append(local.get());
++    }
++  }
++
++  PORT_Free (keyUsageItem.data);
++  return NS_OK;
++}
++
++nsresult
+ nsNSSCertificate::FormatUIStrings(const nsAutoString &nickname, nsAutoString &nickWithSerial, nsAutoString &details)
+ {
+   nsresult rv = NS_OK;
+@@ -310,6 +393,16 @@
+       details.Append(PRUnichar('\n'));
+     }
+ 
++    if (NS_SUCCEEDED(GetKeyUsagesString(mCert, nssComponent, temp1)) && !temp1.IsEmpty()) {
++      details.AppendLiteral("  ");
++      if (NS_SUCCEEDED(nssComponent->GetPIPNSSBundleString("CertDumpKeyUsage", info))) {
++        details.Append(info);
++        details.AppendLiteral(": ");
++      }
++      details.Append(temp1);
++      details.Append(PRUnichar('\n'));
++    }
++
+     if (NS_SUCCEEDED(nssComponent->GetPIPNSSBundleString("CertInfoIssuedBy", info))) {
+       details.Append(info);
+       details.Append(PRUnichar(' '));
+Index: mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp,v
+retrieving revision 1.119
+diff -u -r1.119 nsNSSIOLayer.cpp
+--- mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp	10 Oct 2006 02:04:40 -0000	1.119
++++ mozilla/security/manager/ssl/src/nsNSSIOLayer.cpp	10 Oct 2006 02:17:50 -0000
+@@ -2372,9 +2372,6 @@
+       if (NS_FAILED(tempCert->FormatUIStrings(i_nickname, nickWithSerial, details)))
+         continue;
+ 
+-      if (hasExplicitKeyUsageNonRepudiation(node->cert))
+-        nickWithSerial.Append(NS_LITERAL_STRING(" [NR]"));
+-
+       certNicknameList[CertsToUse] = ToNewUnicode(nickWithSerial);
+       if (!certNicknameList[CertsToUse])
+         continue;

@@ -1,0 +1,304 @@
+# HG changeset patch
+# Parent a4f834dd884f8c081915f53097671622c220bf37
+# User David Dahl <ddahl@mozilla.com>
+
+try: -b do -p linux64,ics_armv7a_gecko -u mochitests,marionette-webapi -t none --post-to-bugzilla Bug 673432
+
+diff --git a/dom/base/Crypto.cpp b/dom/base/Crypto.cpp
+--- a/dom/base/Crypto.cpp
++++ b/dom/base/Crypto.cpp
+@@ -1,18 +1,24 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
+  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+ #include "Crypto.h"
+ #include "nsIDOMClassInfo.h"
+ #include "DOMError.h"
+ #include "nsString.h"
+-#include "nsIRandomGenerator.h"
+ #include "jsapi.h"
+ #include "jsfriendapi.h"
++#include "nsIServiceManager.h"
++#include "nsCOMPtr.h"
++#include "nsIRandomGenerator.h"
++
++#include "mozilla/dom/ContentChild.h"
++
++using mozilla::dom::ContentChild;
+ 
+ using namespace js::ArrayBufferView;
+ 
+ namespace mozilla {
+ namespace dom {
+ 
+ NS_INTERFACE_MAP_BEGIN(Crypto)
+   NS_INTERFACE_MAP_ENTRY(nsISupports)
+@@ -31,16 +37,18 @@ Crypto::Crypto()
+ Crypto::~Crypto()
+ {
+   MOZ_COUNT_DTOR(Crypto);
+ }
+ 
+ NS_IMETHODIMP
+ Crypto::GetRandomValues(const jsval& aData, JSContext *cx, jsval* _retval)
+ {
++  NS_ABORT_IF_FALSE(NS_IsMainThread(), "Called on the wrong thread");
++
+   // Make sure this is a JavaScript object
+   if (!aData.isObject()) {
+     return NS_ERROR_DOM_NOT_OBJECT_ERR;
+   }
+ 
+   JSObject* view = &aData.toObject();
+ 
+   // Make sure this object is an ArrayBufferView
+@@ -67,37 +75,41 @@ Crypto::GetRandomValues(const jsval& aDa
+ 
+   if (dataLen == 0) {
+     NS_WARNING("ArrayBufferView length is 0, cannot continue");
+     return NS_OK;
+   } else if (dataLen > 65536) {
+     return NS_ERROR_DOM_QUOTA_EXCEEDED_ERR;
+   }
+ 
+-  nsCOMPtr<nsIRandomGenerator> randomGenerator;
+-  nsresult rv;
+-  randomGenerator =
+-    do_GetService("@mozilla.org/security/random-generator;1", &rv);
+-  if (NS_FAILED(rv)) {
+-    NS_WARNING("unable to continue without random number generator");
+-    return rv;
+-  }
+-
+   void *dataptr = JS_GetArrayBufferViewData(view);
+   NS_ENSURE_TRUE(dataptr, NS_ERROR_FAILURE);
+-
+   unsigned char* data =
+     static_cast<unsigned char*>(dataptr);
+ 
+-  uint8_t *buf;
+-  rv = randomGenerator->GenerateRandomBytes(dataLen, &buf);
+-  NS_ENSURE_SUCCESS(rv, NS_ERROR_FAILURE);
++  if (XRE_GetProcessType() != GeckoProcessType_Default) {
++    InfallibleTArray<uint8_t> randomValues;
++    // Tell the parent process to generate random values via PContent
++    ContentChild* cc = ContentChild::GetSingleton();
++    if (!cc->SendGetRandomValues(dataLen, &randomValues)) {
++      return NS_ERROR_FAILURE;
++    }
++    NS_ASSERTION(dataLen == randomValues.Length(),
++                 "Invalid length returned from parent process!");
++    memcpy(data, randomValues.Elements(), dataLen);
++  } else {
++    uint8_t *buf = GetRandomValues(dataLen);
+ 
+-  memcpy(data, buf, dataLen);
+-  NS_Free(buf);
++    if (!buf) {
++      return NS_ERROR_FAILURE;
++    }
++
++    memcpy(data, buf, dataLen);
++    NS_Free(buf);
++  }
+ 
+   *_retval = OBJECT_TO_JSVAL(view);
+ 
+   return NS_OK;
+ }
+ 
+ #ifndef MOZ_DISABLE_CRYPTOLEGACY
+ // Stub out the legacy nsIDOMCrypto methods. The actual
+@@ -163,10 +175,28 @@ Crypto::Logout()
+ 
+ NS_IMETHODIMP
+ Crypto::DisableRightClick()
+ {
+   return NS_ERROR_NOT_IMPLEMENTED;
+ }
+ #endif
+ 
++uint8_t*
++Crypto::GetRandomValues(uint32_t aLength)
++{
++  nsCOMPtr<nsIRandomGenerator> randomGenerator;
++  nsresult rv;
++  randomGenerator =
++    do_GetService("@mozilla.org/security/random-generator;1", &rv);
++
++  NS_ENSURE_SUCCESS(rv, nullptr);
++
++  uint8_t* buf;
++  rv = randomGenerator->GenerateRandomBytes(aLength, &buf);
++
++  NS_ENSURE_SUCCESS(rv, nullptr);
++
++  return buf;
++}
++
+ } // namespace dom
+ } // namespace mozilla
+diff --git a/dom/base/Crypto.h b/dom/base/Crypto.h
+--- a/dom/base/Crypto.h
++++ b/dom/base/Crypto.h
+@@ -20,14 +20,17 @@ namespace dom {
+ class Crypto : public nsIDOMCrypto
+ {
+ public:
+   Crypto();
+   virtual ~Crypto();
+ 
+   NS_DECL_ISUPPORTS
+   NS_DECL_NSIDOMCRYPTO
++
++  static uint8_t*
++  GetRandomValues(uint32_t aLength);
+ };
+ 
+ } // namespace dom
+ } // namespace mozilla
+ 
+ #endif // mozilla_dom_Crypto_h
+diff --git a/dom/ipc/ContentParent.cpp b/dom/ipc/ContentParent.cpp
+--- a/dom/ipc/ContentParent.cpp
++++ b/dom/ipc/ContentParent.cpp
+@@ -109,16 +109,18 @@
+ using namespace mozilla::system;
+ #endif
+ 
+ #ifdef MOZ_B2G_BT
+ #include "BluetoothParent.h"
+ #include "BluetoothService.h"
+ #endif
+ 
++#include "Crypto.h"
++
+ static NS_DEFINE_CID(kCClipboardCID, NS_CLIPBOARD_CID);
+ static const char* sClipboardTextFlavors[] = { kUnicodeMime };
+ 
+ using base::ChildPrivileges;
+ using base::KillProcess;
+ using namespace mozilla::dom::bluetooth;
+ using namespace mozilla::dom::devicestorage;
+ using namespace mozilla::dom::indexedDB;
+@@ -2162,16 +2164,32 @@ ContentParent::RecvShowFilePicker(const 
+         file->GetPath(filePath);
+         files->AppendElement(filePath);
+     }
+ 
+     return true;
+ }
+ 
+ bool
++ContentParent::RecvGetRandomValues(const uint32_t& length,
++                                   InfallibleTArray<uint8_t>* randomValues)
++{
++    uint8_t* buf = Crypto::GetRandomValues(length);
++
++    randomValues->SetCapacity(length);
++    randomValues->SetLength(length);
++
++    memcpy(randomValues->Elements(), buf, length);
++
++    NS_Free(buf);
++
++    return true;
++}
++
++bool
+ ContentParent::RecvLoadURIExternal(const URIParams& uri)
+ {
+     nsCOMPtr<nsIExternalProtocolService> extProtService(do_GetService(NS_EXTERNALPROTOCOLSERVICE_CONTRACTID));
+     if (!extProtService) {
+         return true;
+     }
+     nsCOMPtr<nsIURI> ourURI = DeserializeURI(uri);
+     if (!ourURI) {
+diff --git a/dom/ipc/ContentParent.h b/dom/ipc/ContentParent.h
+--- a/dom/ipc/ContentParent.h
++++ b/dom/ipc/ContentParent.h
+@@ -245,16 +245,19 @@ private:
+ 
+     virtual PCrashReporterParent* AllocPCrashReporter(const NativeThreadId& tid,
+                                                       const uint32_t& processType);
+     virtual bool DeallocPCrashReporter(PCrashReporterParent* crashreporter);
+     virtual bool RecvPCrashReporterConstructor(PCrashReporterParent* actor,
+                                                const NativeThreadId& tid,
+                                                const uint32_t& processType);
+ 
++    virtual bool RecvGetRandomValues(const uint32_t& length,
++                                     InfallibleTArray<uint8_t>* randomValues);
++
+     virtual PHalParent* AllocPHal() MOZ_OVERRIDE;
+     virtual bool DeallocPHal(PHalParent*) MOZ_OVERRIDE;
+ 
+     virtual PIndexedDBParent* AllocPIndexedDB();
+ 
+     virtual bool DeallocPIndexedDB(PIndexedDBParent* aActor);
+ 
+     virtual bool
+diff --git a/dom/ipc/PContent.ipdl b/dom/ipc/PContent.ipdl
+--- a/dom/ipc/PContent.ipdl
++++ b/dom/ipc/PContent.ipdl
+@@ -380,16 +380,19 @@ parent:
+         returns (uint64_t id, bool isForApp, bool isForBrowser);
+     sync GetXPCOMProcessAttributes()
+         returns (bool isOffline);
+ 
+     PDeviceStorageRequest(DeviceStorageParams params);
+ 
+     sync PCrashReporter(NativeThreadId tid, uint32_t processType);
+ 
++    sync GetRandomValues(uint32_t length)
++        returns (uint8_t[] randomValues);
++
+     PHal();
+ 
+     PIndexedDB();
+ 
+     PNecko();
+ 
+     PSms();
+     
+diff --git a/security/manager/ssl/src/nsRandomGenerator.cpp b/security/manager/ssl/src/nsRandomGenerator.cpp
+--- a/security/manager/ssl/src/nsRandomGenerator.cpp
++++ b/security/manager/ssl/src/nsRandomGenerator.cpp
+@@ -18,16 +18,17 @@ NS_IMPL_THREADSAFE_ISUPPORTS1(nsRandomGe
+ 
+ /* void generateRandomBytes(in unsigned long aLength,
+                             [retval, array, size_is(aLength)] out octet aBuffer) */
+ NS_IMETHODIMP
+ nsRandomGenerator::GenerateRandomBytes(uint32_t aLength,
+                                        uint8_t **aBuffer)
+ {
+   NS_ENSURE_ARG_POINTER(aBuffer);
++  *aBuffer = nullptr;
+ 
+   uint8_t *buf = reinterpret_cast<uint8_t *>(NS_Alloc(aLength));
+   if (!buf)
+     return NS_ERROR_OUT_OF_MEMORY;
+ 
+   mozilla::ScopedPK11SlotInfo slot(PK11_GetInternalSlot());
+   if (slot == NULL) {
+     return NS_ERROR_FAILURE;
+diff --git a/testing/mochitest/b2g.json b/testing/mochitest/b2g.json
+--- a/testing/mochitest/b2g.json
++++ b/testing/mochitest/b2g.json
+@@ -1,17 +1,14 @@
+ {
+ "runtests": {
+     "dom": "",
+     "layout": ""
+   },
+ "excludetests": {
+-    "dom/tests/mochitest/crypto/test_getRandomValues.html": "bug 440046, re-enable when bug 673432 lands",
+-    "dom/tests/mochitest/crypto/test_no_legacy.html": "bug 440046, re-enable when bug 673432 lands",
+-    "dom/tests/mochitest/crypto/test_legacy.html": "bug 440046, re-enable when bug 673432 lands",
+     "dom/tests/mochitest/dom-level0/test_innerWidthHeight_script.html": "bug 807137",
+     "dom/alarm/test/test_alarm_permitted_app.html":" navigator.mozAlarms should be an nsIDOMMozAlarmsManager object",
+     "dom/battery/test/test_battery_basics.html":" Default chargingTime should be 0 - got Infinity, expected 0",
+     "dom/browser-element/mochitest/test_browserElement_inproc_Alert.html":" uncaught exception - TypeError: mm is null at http://mochi.test:8888/tests/dom/browser-element/mochitest/browserElement_Alert.js:22",
+     "dom/browser-element/mochitest/test_browserElement_inproc_AppFramePermission.html":" uncaught exception - NS_ERROR_XPC_GS_RETURNED_FAILURE: Component returned failure code: 0x80570016 (NS_ERROR_XPC_GS_RETURNED_FAILURE) [nsIJSCID.getService] at resource://gre/modules/XPCOMUtils.jsm:202",
+     "dom/browser-element/mochitest/test_browserElement_inproc_AppWindowNamespace.html":" Test timed out.",
+     "dom/browser-element/mochitest/test_browserElement_inproc_Auth.html":" Test timed out.",
+     "dom/browser-element/mochitest/test_browserElement_inproc_BrowserWindowNamespace.html":" Test timed out.",

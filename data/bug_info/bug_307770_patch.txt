@@ -1,0 +1,163 @@
+Index: browser/base/content/browser.js
+===================================================================
+RCS file: /cvsroot/mozilla/browser/base/content/browser.js,v
+retrieving revision 1.819
+diff -u -p -8 -r1.819 browser.js
+--- browser/base/content/browser.js	29 Jul 2007 02:47:40 -0000	1.819
++++ browser/base/content/browser.js	30 Jul 2007 15:13:07 -0000
+@@ -660,17 +660,17 @@ const gXPInstallObserver = {
+     var brandBundle = document.getElementById("bundle_brand");
+     var browserBundle = document.getElementById("bundle_browser");
+     var browser, webNav, wm;
+     switch (aTopic) {
+     case "xpinstall-install-blocked":
+       var shell = aSubject.QueryInterface(Components.interfaces.nsIDocShell);
+       browser = this._getBrowser(shell);
+       if (browser) {
+-        var host = browser.docShell.QueryInterface(Components.interfaces.nsIWebNavigation).currentURI.host;
++        var host = aData;
+         var brandShortName = brandBundle.getString("brandShortName");
+         var notificationName, messageString, buttons;
+         if (!gPrefService.getBoolPref("xpinstall.enabled")) {
+           notificationName = "xpinstall-disabled"
+           if (gPrefService.prefIsLocked("xpinstall.enabled")) {
+             messageString = browserBundle.getString("xpinstallDisabledMessageLocked");
+             buttons = [];
+           }
+@@ -685,54 +685,50 @@ const gXPInstallObserver = {
+               callback: function editPrefs() {
+                 gPrefService.setBoolPref("xpinstall.enabled", true);
+                 return false;
+               }
+             }];
+           }
+         }
+         else {
+-          // XXXben - use regular software install warnings for now until we can
+-          // properly differentiate themes. It's likely in fact that themes won't
+-          // be blocked so this code path will only be reached for extensions.
+           notificationName = "xpinstall"
+           messageString = browserBundle.getFormattedString("xpinstallPromptWarning",
+                                                            [brandShortName, host]);
+ 
+           buttons = [{
+             label: browserBundle.getString("xpinstallPromptWarningButton"),
+             accessKey: browserBundle.getString("xpinstallPromptWarningButton.accesskey"),
+             popup: null,
+-            callback: function() { return xpinstallEditPermissions(shell); }
++            callback: function() { return xpinstallEditPermissions(shell, host); }
+           }];
+         }
+ 
+         var notificationBox = gBrowser.getNotificationBox(browser);
+         if (!notificationBox.getNotificationWithValue(notificationName)) {
+           const priority = notificationBox.PRIORITY_WARNING_MEDIUM;
+           const iconURL = "chrome://mozapps/skin/xpinstall/xpinstallItemGeneric.png";
+           notificationBox.appendNotification(messageString, notificationName,
+                                              iconURL, priority, buttons);
+         }
+       }
+       break;
+     }
+   }
+ };
+ 
+-function xpinstallEditPermissions(aDocShell)
++function xpinstallEditPermissions(aDocShell, aHost)
+ {
+   var browser = gXPInstallObserver._getBrowser(aDocShell);
+   if (browser) {
+     var bundlePreferences = document.getElementById("bundle_preferences");
+-    var webNav = aDocShell.QueryInterface(Components.interfaces.nsIWebNavigation);
+     var params = { blockVisible   : false,
+                    sessionVisible : false,
+                    allowVisible   : true,
+-                   prefilledHost  : webNav.currentURI.host,
++                   prefilledHost  : aHost,
+                    permissionType : "install",
+                    windowTitle    : bundlePreferences.getString("addons_permissions_title"),
+                    introText      : bundlePreferences.getString("addonspermissionstext") };
+     var wm = Components.classes["@mozilla.org/appshell/window-mediator;1"]
+                    .getService(Components.interfaces.nsIWindowMediator);
+     var existingWindow = wm.getMostRecentWindow("Browser:Permissions");
+     if (existingWindow) {
+       existingWindow.initWithParams(params);
+Index: xpinstall/src/nsInstallTrigger.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/xpinstall/src/nsInstallTrigger.cpp,v
+retrieving revision 1.78
+diff -u -p -8 -r1.78 nsInstallTrigger.cpp
+--- xpinstall/src/nsInstallTrigger.cpp	8 Jul 2007 07:08:56 -0000	1.78
++++ xpinstall/src/nsInstallTrigger.cpp	30 Jul 2007 15:13:07 -0000
+@@ -188,28 +188,33 @@ nsInstallTrigger::HandleContent(const ch
+       globalObjectOwner ? globalObjectOwner->GetScriptGlobalObject() : nsnull;
+     if ( !globalObject )
+         return NS_ERROR_INVALID_ARG;
+ 
+ 
+     // We have what we need to start an XPInstall, now figure out if we are
+     // going to honor this request based on PermissionManager settings
+     PRBool enabled = PR_FALSE;
++    // Keep the host so that it can be sent to the
++    // xpinstall-install-blocked observers to display the host to be
++    // whitelisted
++    nsCAutoString host;
+ 
+     if ( useReferrer )
+     {
+         // easiest and most common case: base decision on the page that
+         // contained the link
+         //
+         // NOTE: the XPI itself may be from elsewhere; the user can decide if
+         // they trust the actual source when they get the install confirmation
+         // dialog. The decision we're making here is whether the triggering
+         // site is one which is allowed to annoy the user with modal dialogs.
+ 
+         enabled = AllowInstall( referringURI );
++        referringURI->GetHost(host);
+     }
+     else
+     {
+         // Now we're stumbing in the dark. In the most likely case the user
+         // simply clicked on an FTP link (no referrer) and it's perfectly
+         // sane to use the current window.
+         //
+         // On the other hand the user might be opening a non-http XPI link
+@@ -236,34 +241,35 @@ nsInstallTrigger::HandleContent(const ch
+         // If a trusted site hosts an install with an exploitable flaw it
+         // might be possible that a malicious site would attempt to trick
+         // people into installing it, hoping to turn around and exploit it.
+         // This is not entirely far-fetched (it's been done with ActiveX
+         // controls) and will require community policing of the default
+         // trusted sites.
+ 
+         enabled = AllowInstall( uri );
++        uri->GetHost(host);
+     }
+ 
+ 
+     if ( enabled )
+     {
+         rv = StartSoftwareUpdate( globalObject,
+                                   NS_ConvertUTF8toUTF16(urispec),
+                                   0,
+                                   &enabled);
+     }
+     else
+     {
+         nsCOMPtr<nsPIDOMWindow> win(do_QueryInterface(globalObject));
+         nsCOMPtr<nsIObserverService> os(do_GetService("@mozilla.org/observer-service;1"));
+         if (os) {
+             os->NotifyObservers(win->GetDocShell(),
+-                                "xpinstall-install-blocked", 
+-                                NS_LITERAL_STRING("install-chrome").get());
++                                "xpinstall-install-blocked",
++                                NS_ConvertUTF8toUTF16(host).get());
+         }
+         rv = NS_ERROR_ABORT;
+     }
+     
+     return rv;
+ }
+ 
+ 

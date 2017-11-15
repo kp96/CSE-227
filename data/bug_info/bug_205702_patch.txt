@@ -1,0 +1,123 @@
+Index: mozilla/mailnews/extensions/smime/src/nsMsgComposeSecure.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/mailnews/extensions/smime/src/nsMsgComposeSecure.cpp,v
+retrieving revision 1.28
+diff -u -r1.28 nsMsgComposeSecure.cpp
+--- mozilla/mailnews/extensions/smime/src/nsMsgComposeSecure.cpp	8 Jan 2003 21:54:02 -0000	1.28
++++ mozilla/mailnews/extensions/smime/src/nsMsgComposeSecure.cpp	11 Jul 2003 16:46:01 -0000
+@@ -242,12 +242,18 @@
+   mEncryptionCinfo = 0;
+   mEncryptionContext = 0;
+   mCryptoEncoderData = 0;
++  mBuffer = 0;
++  mBufferedBytes = 0;
+ }
+ 
+ nsMsgComposeSecure::~nsMsgComposeSecure()
+ {
+   /* destructor code */
+   if (mEncryptionContext) {
++    if (mBufferedBytes) {
++      mEncryptionContext->Update(mBuffer, mBufferedBytes);
++      mBufferedBytes = 0;
++    }
+     mEncryptionContext->Finish();
+   }
+ 
+@@ -258,6 +264,8 @@
+ 	  MIME_EncoderDestroy (mCryptoEncoderData, PR_TRUE);
+   }
+ 
++  delete [] mBuffer;
++
+   PR_FREEIF(mMultipartSignedBoundary);
+ }
+ 
+@@ -638,6 +646,14 @@
+   mEncryptionContext = do_CreateInstance(NS_CMSENCODER_CONTRACTID, &rv);
+   if (NS_FAILED(rv)) return rv;
+ 
++  if (!mBuffer) {
++    mBuffer = new char[eBufferSize];
++    if (!mBuffer)
++      return NS_ERROR_OUT_OF_MEMORY;
++  }
++
++  mBufferedBytes = 0;
++
+   rv = mEncryptionContext->Start(mEncryptionCinfo, mime_crypto_write_base64, mCryptoEncoderData);
+   if (NS_FAILED(rv)) {
+     SetError(sendReport, NS_LITERAL_STRING("ErrorCanNotEncrypt").get());
+@@ -822,6 +838,15 @@
+    */
+   PR_ASSERT(mEncryptionContext);
+ 
++  if (mBufferedBytes) {
++    rv = mEncryptionContext->Update(mBuffer, mBufferedBytes);
++    mBufferedBytes = 0;
++    if (NS_FAILED(rv)) {
++      PR_ASSERT(PR_GetError() < 0);
++      goto FAIL;
++    }
++  }
++  
+   rv = mEncryptionContext->Finish();
+   if (NS_FAILED(rv)) {
+     SetError(sendReport, NS_LITERAL_STRING("ErrorCanNotEncrypt").get());
+@@ -1004,13 +1029,31 @@
+ 	  /* If we're encrypting, or signing-and-encrypting, write this data
+ 		 by filtering it through the crypto library. */
+ 
+-	  rv = mEncryptionContext->Update(buf, size);
+-    if (NS_FAILED(rv)) {
+-		  status = PR_GetError();
+-		  PR_ASSERT(status < 0);
+-		  if (status >= 0) status = -1;
+-		  goto FAIL;
+-		}
++    /* We want to create equally sized encryption strings */
++    char *inputBytesIterator = buf;
++    PRUint32 inputBytesLeft = size;
++
++    while (inputBytesLeft) {
++      const PRUint32 spaceLeftInBuffer = eBufferSize - mBufferedBytes;
++      const PRUint32 bytesToAppend = NS_MIN(inputBytesLeft, spaceLeftInBuffer);
++
++      memcpy(mBuffer+mBufferedBytes, inputBytesIterator, bytesToAppend);
++      mBufferedBytes += bytesToAppend;
++      
++      inputBytesIterator += bytesToAppend;
++      inputBytesLeft -= bytesToAppend;
++
++      if (eBufferSize == mBufferedBytes) {
++        rv = mEncryptionContext->Update(mBuffer, mBufferedBytes);
++        mBufferedBytes = 0;
++        if (NS_FAILED(rv)) {
++          status = PR_GetError();
++          PR_ASSERT(status < 0);
++          if (status >= 0) status = -1;
++          goto FAIL;
++        }
++      }
++    }
+   } else {
+ 	  /* If we're not encrypting (presumably just signing) then write this
+ 		 data directly to the file. */
+Index: mozilla/mailnews/extensions/smime/src/nsMsgComposeSecure.h
+===================================================================
+RCS file: /cvsroot/mozilla/mailnews/extensions/smime/src/nsMsgComposeSecure.h,v
+retrieving revision 1.7
+diff -u -r1.7 nsMsgComposeSecure.h
+--- mozilla/mailnews/extensions/smime/src/nsMsgComposeSecure.h	14 Oct 2002 14:49:00 -0000	1.7
++++ mozilla/mailnews/extensions/smime/src/nsMsgComposeSecure.h	11 Jul 2003 16:46:01 -0000
+@@ -100,6 +100,10 @@
+   MimeEncoderData *mCryptoEncoderData;
+   PRBool mIsDraft;
+ 
++  enum {eBufferSize = 8192};
++  char *mBuffer;
++  PRUint32 mBufferedBytes;
++
+   PRBool mErrorAlreadyReported;
+   void SetError(nsIMsgSendReport *sendReport, const PRUnichar *bundle_string);
+   void SetErrorWithParam(nsIMsgSendReport *sendReport, const PRUnichar *bundle_string, const char *param);

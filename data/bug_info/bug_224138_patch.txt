@@ -1,0 +1,17 @@
+Index: mailnews/extensions/smime/src/nsMsgComposeSecure.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/mailnews/extensions/smime/src/nsMsgComposeSecure.cpp,v
+retrieving revision 1.30
+diff -p -u -r1.30 nsMsgComposeSecure.cpp
+--- mailnews/extensions/smime/src/nsMsgComposeSecure.cpp	11 Jul 2003 20:20:14 -0000	1.30
++++ mailnews/extensions/smime/src/nsMsgComposeSecure.cpp	9 Nov 2003 17:55:06 -0000
+@@ -867,6 +867,9 @@ nsresult nsMsgComposeSecure::MimeFinishE
+   rv = MIME_EncoderDestroy(mCryptoEncoderData, PR_FALSE);
+   mCryptoEncoderData = 0;
+ 
++  if (PRInt32(mStream->write(CRLF, 2)) < 2)
++    rv = NS_ERROR_FAILURE;
++
+  FAIL:
+   return rv;
+ }

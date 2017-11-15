@@ -1,0 +1,52 @@
+Index: mozilla/security/manager/boot/src/Makefile.in
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/boot/src/Makefile.in,v
+retrieving revision 1.17
+diff -u -r1.17 Makefile.in
+--- mozilla/security/manager/boot/src/Makefile.in	1 Sep 2005 12:43:57 -0000	1.17
++++ mozilla/security/manager/boot/src/Makefile.in	28 Feb 2006 19:37:11 -0000
+@@ -73,6 +73,7 @@
+ 		  widget \
+ 		  layout \
+ 		  content \
++		  caps \
+ 		  pref \
+ 		  $(NULL)
+ 
+Index: mozilla/security/manager/boot/src/nsSecureBrowserUIImpl.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/boot/src/nsSecureBrowserUIImpl.cpp,v
+retrieving revision 1.55
+diff -u -r1.55 nsSecureBrowserUIImpl.cpp
+--- mozilla/security/manager/boot/src/nsSecureBrowserUIImpl.cpp	9 Feb 2006 18:52:28 -0000	1.55
++++ mozilla/security/manager/boot/src/nsSecureBrowserUIImpl.cpp	28 Feb 2006 19:37:12 -0000
+@@ -60,6 +60,7 @@
+ #include "nsIDocShell.h"
+ #include "nsIDocumentViewer.h"
+ #include "nsIDocument.h"
++#include "nsIPrincipal.h"
+ #include "nsIDOMElement.h"
+ #include "nsPIDOMWindow.h"
+ #include "nsIContent.h"
+@@ -358,7 +359,20 @@
+   nsCOMPtr<nsIDocument> document = formNode->GetDocument();
+   if (!document) return NS_OK;
+ 
+-  nsIURI *formURL = document->GetBaseURI();
++  nsIPrincipal *principal = formNode->GetNodePrincipal();
++  
++  if (!principal)
++  {
++    *cancelSubmit = PR_TRUE;
++    return NS_OK;
++  }
++
++  nsCOMPtr<nsIURI> formURL;
++  if (NS_FAILED(principal->GetURI(getter_AddRefs(formURL))) ||
++      !formURL)
++  {
++    formURL = document->GetDocumentURI();
++  }
+ 
+   nsCOMPtr<nsIDOMWindow> postingWindow =
+     do_QueryInterface(document->GetWindow());

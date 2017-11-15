@@ -1,0 +1,66 @@
+Index: jsfun.c
+===================================================================
+RCS file: /cvsroot/mozilla/js/src/jsfun.c,v
+retrieving revision 3.160
+diff -p -U8 -r3.160 jsfun.c
+--- jsfun.c	18 Jul 2006 18:20:49 -0000	3.160
++++ jsfun.c	19 Jul 2006 00:58:06 -0000
+@@ -2061,49 +2061,56 @@ js_InitCallClass(JSContext *cx, JSObject
+     return proto;
+ }
+ 
+ JSFunction *
+ js_NewFunction(JSContext *cx, JSObject *funobj, JSNative native, uintN nargs,
+                uintN flags, JSObject *parent, JSAtom *atom)
+ {
+     JSFunction *fun;
++    JSTempValueRooter tvr;
+ 
+     /* If funobj is null, allocate an object for it. */
+     if (funobj) {
+         OBJ_SET_PARENT(cx, funobj, parent);
+     } else {
+         funobj = js_NewObject(cx, &js_FunctionClass, NULL, parent);
+         if (!funobj)
+             return NULL;
+     }
+ 
++    /* Protect fun from any potential last-ditch GCs. */
++    JS_PUSH_SINGLE_TEMP_ROOT(cx, OBJECT_TO_JSVAL(funobj), &tvr);
++
+     /*
+      * Allocate fun after allocating funobj so slot allocation in js_NewObject
+      * does not wipe out fun from cx->newborn[GCX_PRIVATE].
+      */
+     fun = (JSFunction *) js_NewGCThing(cx, GCX_PRIVATE, sizeof(JSFunction));
+     if (!fun)
+-        return NULL;
++        goto out;
+ 
+     /* Initialize all function members. */
+     fun->object = NULL;
+     fun->nargs = nargs;
+     fun->flags = flags & JSFUN_FLAGS_MASK;
+     fun->u.n.native = native;
+     fun->u.n.extra = 0;
+     fun->u.n.spare = 0;
+     fun->atom = atom;
+     fun->clasp = NULL;
+ 
+     /* Link fun to funobj and vice versa. */
+     if (!js_LinkFunctionObject(cx, fun, funobj)) {
+         cx->newborn[GCX_OBJECT] = NULL;
+-        return NULL;
++        fun = NULL;
+     }
++
++out:
++    JS_POP_TEMP_ROOT(cx, &tvr);
+     return fun;
+ }
+ 
+ JSObject *
+ js_CloneFunctionObject(JSContext *cx, JSObject *funobj, JSObject *parent)
+ {
+     JSObject *newfunobj;
+     JSFunction *fun;

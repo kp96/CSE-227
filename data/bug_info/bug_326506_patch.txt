@@ -1,0 +1,1126 @@
+Index: caps/include/nsNullPrincipal.h
+===================================================================
+RCS file: caps/include/nsNullPrincipal.h
+diff -N caps/include/nsNullPrincipal.h
+--- /dev/null	1 Jan 1970 00:00:00 -0000
++++ caps/include/nsNullPrincipal.h	2 Apr 2006 20:50:25 -0000
+@@ -0,0 +1,86 @@
++/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is mozilla.org code.
++ *
++ * The Initial Developer of the Original Code is
++ * the Mozilla Corporation.
++ * Portions created by the Initial Developer are Copyright (C) 2006
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *   Boris Zbarsky <bzbarsky@mit.edu> (Original author)
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either of the GNU General Public License Version 2 or later (the "GPL"),
++ * or the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++/**
++ * This is the principal that has no rights and can't be accessed by
++ * anything other than itself and chrome; null principals are not
++ * same-origin with anything but themselves.
++ */
++
++#ifndef nsNullPrincipal_h__
++#define nsNullPrincipal_h__
++
++#include "nsIPrincipal.h"
++#include "nsJSPrincipals.h"
++#include "nsCOMPtr.h"
++
++class nsIURI;
++
++#define NS_NULLPRINCIPAL_CLASSNAME "nullprincipal"
++#define NS_NULLPRINCIPAL_CID \
++{ 0xdd156d62, 0xd26f, 0x4441, \
++ { 0x9c, 0xdb, 0xe8, 0xf0, 0x91, 0x07, 0xc2, 0x73 } }
++#define NS_NULLPRINCIPAL_CONTRACTID "@mozilla.org/nullprincipal;1"
++
++#define NS_NULLPRINCIPAL_SCHEME "moz-nullprincipal"
++
++class nsNullPrincipal : public nsIPrincipal
++{
++public:
++  nsNullPrincipal();
++  
++  // Our refcount is managed by mJSPrincipals.  Use this macro to avoid an
++  // extra refcount member.
++
++  // FIXME: bug 327245 -- I sorta wish there were a clean way to share the
++  // mJSPrincipals munging code between the various principal classes without
++  // giving up the NS_DECL_NSIPRINCIPAL goodness.
++  NS_DECL_ISUPPORTS_INHERITED
++  NS_DECL_NSIPRINCIPAL
++  NS_DECL_NSISERIALIZABLE
++
++  nsresult Init();
++
++protected:
++  virtual ~nsNullPrincipal();
++
++  nsJSPrincipals mJSPrincipals;
++  nsCOMPtr<nsIURI> mURI;
++};
++
++#endif // nsNullPrincipal_h__
+Index: caps/include/nsSystemPrincipal.h
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/caps/include/nsSystemPrincipal.h,v
+retrieving revision 1.18
+diff -u -p -d -8 -r1.18 nsSystemPrincipal.h
+--- caps/include/nsSystemPrincipal.h	17 Apr 2004 21:50:35 -0000	1.18
++++ caps/include/nsSystemPrincipal.h	13 Feb 2006 05:41:27 -0000
+@@ -48,16 +48,18 @@
+ { 0x4a6212db, 0xaccb, 0x11d3, \
+ { 0xb7, 0x65, 0x0, 0x60, 0xb0, 0xb6, 0xce, 0xcb }}
+ #define NS_SYSTEMPRINCIPAL_CONTRACTID "@mozilla.org/systemprincipal;1"
+ 
+ 
+ class nsSystemPrincipal : public nsIPrincipal
+ {
+ public:
++    // Our refcount is managed by mJSPrincipals.  Use this macro to avoid
++    // an extra refcount member.
+     NS_DECL_ISUPPORTS_INHERITED
+     NS_DECL_NSIPRINCIPAL
+     NS_DECL_NSISERIALIZABLE
+ 
+     nsresult Init();
+ 
+     nsSystemPrincipal();
+ 
+Index: caps/src/nsNullPrincipal.cpp
+===================================================================
+RCS file: caps/src/nsNullPrincipal.cpp
+diff -N caps/src/nsNullPrincipal.cpp
+--- /dev/null	1 Jan 1970 00:00:00 -0000
++++ caps/src/nsNullPrincipal.cpp	2 Apr 2006 20:50:48 -0000
+@@ -0,0 +1,334 @@
++/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is mozilla.org code.
++ *
++ * The Initial Developer of the Original Code is
++ * the Mozilla Corporation.
++ * Portions created by the Initial Developer are Copyright (C) 2006
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *   Boris Zbarsky <bzbarsky@mit.edu> (Original author)
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either of the GNU General Public License Version 2 or later (the "GPL"),
++ * or the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++/**
++ * This is the principal that has no rights and can't be accessed by
++ * anything other than itself and chrome; null principals are not
++ * same-origin with anything but themselves.
++ */
++
++#include "nsNullPrincipal.h"
++#include "nsMemory.h"
++#include "nsIUUIDGenerator.h"
++#include "nsID.h"
++#include "prmem.h" // For PF_Free, 'cause nsID::ToString sucks like that
++#include "nsNetUtil.h"
++#include "nsIClassInfoImpl.h"
++
++NS_IMPL_QUERY_INTERFACE2_CI(nsNullPrincipal,
++                            nsIPrincipal,
++                            nsISerializable)
++NS_IMPL_CI_INTERFACE_GETTER2(nsNullPrincipal,
++                             nsIPrincipal,
++                             nsISerializable)
++
++NS_IMETHODIMP_(nsrefcnt) 
++nsNullPrincipal::AddRef()
++{
++  NS_PRECONDITION(PRInt32(mJSPrincipals.refcount) >= 0, "illegal refcnt");
++  nsrefcnt count = PR_AtomicIncrement((PRInt32 *)&mJSPrincipals.refcount);
++  NS_LOG_ADDREF(this, count, "nsNullPrincipal", sizeof(*this));
++  return count;
++}
++
++NS_IMETHODIMP_(nsrefcnt)
++nsNullPrincipal::Release()
++{
++  NS_PRECONDITION(0 != mJSPrincipals.refcount, "dup release");
++  nsrefcnt count = PR_AtomicDecrement((PRInt32 *)&mJSPrincipals.refcount);
++  NS_LOG_RELEASE(this, count, "nsNullPrincipal");
++  if (count == 0) {
++    NS_DELETEXPCOM(this);
++  }
++
++  return count;
++}
++
++nsNullPrincipal::nsNullPrincipal()
++{
++}
++
++nsNullPrincipal::~nsNullPrincipal()
++{
++}
++
++nsresult
++nsNullPrincipal::Init()
++{
++  // FIXME: bug 327161 -- make sure the uuid generator is reseeding-resistant.
++  nsresult rv;
++  nsCOMPtr<nsIUUIDGenerator> uuidgen =
++    do_GetService("@mozilla.org/uuid-generator;1", &rv);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  nsID id;
++  rv = uuidgen->GenerateUUIDInPlace(&id);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  char* chars = id.ToString();
++  NS_ENSURE_TRUE(chars, NS_ERROR_OUT_OF_MEMORY);
++
++  nsCAutoString str(NS_NULLPRINCIPAL_SCHEME ":");
++  PRUint32 prefixLen = str.Length();
++  PRUint32 suffixLen = strlen(chars);
++
++  str.Append(chars);
++
++  PR_Free(chars);
++  
++  if (str.Length() != prefixLen + suffixLen) {
++    return NS_ERROR_OUT_OF_MEMORY;
++  }
++
++  rv = NS_NewURI(getter_AddRefs(mURI), str);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  return mJSPrincipals.Init(this, str.get());
++}
++
++/**
++ * nsIPrincipal implementation
++ */
++
++NS_IMETHODIMP
++nsNullPrincipal::GetPreferences(char** aPrefName, char** aID,
++                                char** aSubjectName,
++                                char** aGrantedList, char** aDeniedList)
++{
++  // The null principal should never be written to preferences.
++  *aPrefName = nsnull;
++  *aID = nsnull;
++  *aSubjectName = nsnull;
++  *aGrantedList = nsnull;
++  *aDeniedList = nsnull;
++
++  return NS_ERROR_FAILURE; 
++}
++
++NS_IMETHODIMP
++nsNullPrincipal::Equals(nsIPrincipal *aOther, PRBool *aResult)
++{
++  // Just equal to ourselves.  Note that nsPrincipal::Equals will return false
++  // for us since we have a unique domain/origin/etc.
++  *aResult = (aOther == this);
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++nsNullPrincipal::GetHashValue(PRUint32 *aResult)
++{
++  *aResult = (NS_PTR_TO_INT32(this) >> 2);
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++nsNullPrincipal::GetJSPrincipals(JSContext *cx, JSPrincipals **aJsprin)
++{
++  NS_PRECONDITION(mJSPrincipals.nsIPrincipalPtr,
++                  "mJSPrincipals is uninitalized!");
++
++  JSPRINCIPALS_HOLD(cx, &mJSPrincipals);
++  *aJsprin = &mJSPrincipals;
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++nsNullPrincipal::GetSecurityPolicy(void** aSecurityPolicy)
++{
++  // We don't actually do security policy caching.  And it's not like anyone
++  // can set a security policy for us anyway.
++  *aSecurityPolicy = nsnull;
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++nsNullPrincipal::SetSecurityPolicy(void* aSecurityPolicy)
++{
++  // We don't actually do security policy caching.  And it's not like anyone
++  // can set a security policy for us anyway.
++  return NS_OK;
++}
++
++NS_IMETHODIMP 
++nsNullPrincipal::CanEnableCapability(const char *aCapability, 
++                                     PRInt16 *aResult)
++{
++  // Null principal can enable no capabilities.
++  *aResult = nsIPrincipal::ENABLE_DENIED;
++  return NS_OK;
++}
++
++NS_IMETHODIMP 
++nsNullPrincipal::SetCanEnableCapability(const char *aCapability, 
++                                        PRInt16 aCanEnable)
++{
++  return NS_ERROR_NOT_AVAILABLE;
++}
++
++
++NS_IMETHODIMP 
++nsNullPrincipal::IsCapabilityEnabled(const char *aCapability, 
++                                     void *aAnnotation, 
++                                     PRBool *aResult)
++{
++  // Nope.  No capabilities, I say!
++  *aResult = PR_FALSE;
++  return NS_OK;
++}
++
++NS_IMETHODIMP 
++nsNullPrincipal::EnableCapability(const char *aCapability, void **aAnnotation)
++{
++  NS_NOTREACHED("Didn't I say it?  NO CAPABILITIES!");
++  *aAnnotation = nsnull;
++  return NS_OK;
++}
++
++NS_IMETHODIMP 
++nsNullPrincipal::RevertCapability(const char *aCapability, void **aAnnotation)
++{
++    *aAnnotation = nsnull;
++    return NS_OK;
++}
++
++NS_IMETHODIMP 
++nsNullPrincipal::DisableCapability(const char *aCapability, void **aAnnotation)
++{
++  // Just a no-op.  They're all disabled anyway.
++  *aAnnotation = nsnull;
++  return NS_OK;
++}
++
++NS_IMETHODIMP 
++nsNullPrincipal::GetURI(nsIURI** aURI)
++{
++  NS_ADDREF(*aURI = mURI);
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++nsNullPrincipal::GetDomain(nsIURI** aDomain)
++{
++  NS_ADDREF(*aDomain = mURI);
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++nsNullPrincipal::SetDomain(nsIURI* aDomain)
++{
++  // I think the right thing to do here is to just throw...  Silently failing
++  // seems counterproductive.
++  return NS_ERROR_NOT_AVAILABLE;
++}
++
++NS_IMETHODIMP 
++nsNullPrincipal::GetOrigin(char** aOrigin)
++{
++  *aOrigin = nsnull;
++  
++  nsCAutoString str;
++  nsresult rv = mURI->GetSpec(str);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  *aOrigin = ToNewCString(str);
++  NS_ENSURE_TRUE(*aOrigin, NS_ERROR_OUT_OF_MEMORY);
++
++  return NS_OK;
++}
++
++NS_IMETHODIMP 
++nsNullPrincipal::GetHasCertificate(PRBool* aResult)
++{
++  *aResult = PR_FALSE;
++  return NS_OK;
++}
++
++NS_IMETHODIMP 
++nsNullPrincipal::GetFingerprint(nsACString& aID)
++{
++    return NS_ERROR_NOT_AVAILABLE;
++}
++
++NS_IMETHODIMP 
++nsNullPrincipal::GetPrettyName(nsACString& aName)
++{
++    return NS_ERROR_NOT_AVAILABLE;
++}
++
++NS_IMETHODIMP
++nsNullPrincipal::Subsumes(nsIPrincipal *aOther, PRBool *aResult)
++{
++  // We don't subsume anything except ourselves.  Note that nsPrincipal::Equals
++  // will return false for us, since we're not about:blank and not Equals to
++  // reasonable nsPrincipals.
++  *aResult = (aOther == this);
++  return NS_OK;
++}
++
++NS_IMETHODIMP 
++nsNullPrincipal::GetSubjectName(nsACString& aName)
++{
++    return NS_ERROR_NOT_AVAILABLE;
++}
++
++NS_IMETHODIMP
++nsNullPrincipal::GetCertificate(nsISupports** aCertificate)
++{
++    *aCertificate = nsnull;
++    return NS_OK;
++}
++
++/**
++ * nsISerializable implementation
++ */
++NS_IMETHODIMP
++nsNullPrincipal::Read(nsIObjectInputStream* aStream)
++{
++  // no-op: CID is sufficient to create a useful nsNullPrincipal, since the URI
++  // is not really relevant.
++  return NS_OK;
++}
++
++NS_IMETHODIMP
++nsNullPrincipal::Write(nsIObjectOutputStream* aStream)
++{
++  // no-op: CID is sufficient to create a useful nsNullPrincipal, since the URI
++  // is not really relevant.
++  return NS_OK;
++}
++
+Index: caps/src/nsScriptSecurityManager.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/caps/src/nsScriptSecurityManager.cpp,v
+retrieving revision 1.289
+diff -u -p -d -8 -r1.289 nsScriptSecurityManager.cpp
+--- caps/src/nsScriptSecurityManager.cpp	15 Mar 2006 11:03:25 -0000	1.289
++++ caps/src/nsScriptSecurityManager.cpp	2 Apr 2006 20:51:31 -0000
+@@ -44,16 +44,17 @@
+ #include "nsIScriptObjectPrincipal.h"
+ #include "nsIScriptContext.h"
+ #include "nsIURL.h"
+ #include "nsIJARURI.h"
+ #include "nspr.h"
+ #include "nsJSPrincipals.h"
+ #include "nsSystemPrincipal.h"
+ #include "nsPrincipal.h"
++#include "nsNullPrincipal.h"
+ #include "nsXPIDLString.h"
+ #include "nsCRT.h"
+ #include "nsIJSContextStack.h"
+ #include "nsDOMError.h"
+ #include "nsDOMCID.h"
+ #include "jsdbgapi.h"
+ #include "nsIXPConnect.h"
+ #include "nsIXPCSecurityManager.h"
+@@ -241,16 +242,21 @@ nsScriptSecurityManager::GetSafeJSContex
+ 
+ NS_IMETHODIMP
+ nsScriptSecurityManager::SecurityCompareURIs(nsIURI* aSourceURI,
+                                              nsIURI* aTargetURI,
+                                              PRBool* result)
+ {
+     *result = PR_FALSE;
+ 
++    // Note that this is not an Equals() test on purpose -- for URIs that don't
++    // support host/port, we want equality to basically be object identity, for
++    // security purposes.  Otherwise, for example, two javascript: URIs that
++    // are otherwise unrelated could end up "same origin", which would be
++    // unfortunate.
+     if (aSourceURI == aTargetURI)
+     {
+         *result = PR_TRUE;
+         return NS_OK;
+     }
+ 
+     if (!aTargetURI) 
+     {
+@@ -875,22 +881,28 @@ nsScriptSecurityManager::CheckSameOrigin
+         nsCOMPtr<nsIURI> objectDomain;
+         aObject->GetDomain(getter_AddRefs(objectDomain));
+ 
+         // If both or neither explicitly set their domain, allow the access
+         if (!subjectDomain == !objectDomain)
+             return NS_OK;
+     }
+ 
+-    // Allow access to about:blank
+-    nsXPIDLCString origin;
+-    rv = aObject->GetOrigin(getter_Copies(origin));
+-    NS_ENSURE_SUCCESS(rv, rv);
+-    if (nsCRT::strcasecmp(origin, "about:blank") == 0)
+-        return NS_OK;
++    // Allow access to about:blank, except from null principals (which
++    // never have access to anything but themselves).  If SchemeIs
++    // fails, just deny access -- better safe than sorry.
++    PRBool nullSubject = PR_FALSE;
++    rv = subjectURI->SchemeIs(NS_NULLPRINCIPAL_SCHEME, &nullSubject);
++    if (NS_SUCCEEDED(rv) && !nullSubject) {
++        nsXPIDLCString origin;
++        rv = aObject->GetOrigin(getter_Copies(origin));
++        NS_ENSURE_SUCCESS(rv, rv);
++        if (nsCRT::strcasecmp(origin, "about:blank") == 0)
++            return NS_OK;
++    }
+ 
+     /*
+     ** Access tests failed, so now report error.
+     */
+     return NS_ERROR_DOM_PROP_ACCESS_DENIED;
+ }
+ 
+ 
+@@ -962,16 +974,19 @@ nsScriptSecurityManager::LookupPolicy(ns
+  
+         char *start = origin.BeginWriting();
+         const char *nextToLastDot = nsnull;
+         const char *lastDot = nsnull;
+         const char *colon = nsnull;
+         char *p = start;
+ 
+         //-- skip (nested) jar schemes to reach the "real" URI
++        // FIXME: bug 327241 -- that's not what we do in SecurityCompareURIs!
++        // We should do something more like that, except I guess this is faster
++        // than QI followed by getter, etc... :(
+         while (*p == 'j' && *(++p) == 'a' && *(++p) == 'r' && *(++p) == ':')
+             start = ++p;
+         
+         //-- search domain (stop at the end of the string or at the 3rd slash)
+         for (PRUint32 slashes=0; *p; p++)
+         {
+             if (*p == '/' && ++slashes == 3) 
+             {
+@@ -1117,27 +1132,22 @@ nsScriptSecurityManager::CheckLoadURIFro
+     nsIPrincipal* principal = GetSubjectPrincipal(cx, &rv);
+     if (NS_FAILED(rv))
+         return rv;
+ 
+     // Native code can load all URIs.
+     if (!principal)
+         return NS_OK;
+ 
+-    // The system principal can load all URIs.
+-    if (principal == mSystemPrincipal)
+-        return NS_OK;
+-
+-    // Otherwise, principal should have a codebase URI that we can use to
+-    // do the remaining tests.
+-    nsCOMPtr<nsIURI> uri;
+-    if (NS_FAILED(principal->GetURI(getter_AddRefs(uri))))
+-        return NS_ERROR_FAILURE;
+-    if (NS_SUCCEEDED(CheckLoadURI(uri, aURI, nsIScriptSecurityManager::STANDARD )))
++    rv = CheckLoadURIWithPrincipal(principal, aURI,
++                                   nsIScriptSecurityManager::STANDARD);
++    if (NS_SUCCEEDED(rv)) {
++        // OK to load
+         return NS_OK;
++    }
+ 
+     // See if we're attempting to load a file: URI. If so, let a
+     // UniversalFileRead capability trump the above check.
+     PRBool isFile = PR_FALSE;
+     PRBool isRes = PR_FALSE;
+     if (NS_FAILED(aURI->SchemeIs("file", &isFile)) ||
+         NS_FAILED(aURI->SchemeIs("resource", &isRes)))
+         return NS_ERROR_FAILURE;
+@@ -1216,19 +1226,24 @@ nsScriptSecurityManager::GetBaseURISchem
+ 
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsScriptSecurityManager::CheckLoadURI(nsIURI *aSourceURI, nsIURI *aTargetURI,
+                                       PRUint32 aFlags)
+ {
++    // FIXME: bug 327244 -- this function should really die...  Really truly.
+     NS_PRECONDITION(aSourceURI, "CheckLoadURI called with null source URI");
+     NS_ENSURE_ARG_POINTER(aSourceURI);
+-    
++
++    // Note: this is not _quite_ right if aSourceURI has
++    // NS_NULLPRINCIPAL_SCHEME, but we'll just extract the scheme in
++    // CheckLoadURIWithPrincipal anyway, so this is good enough.  This method
++    // really needs to go away....
+     nsCOMPtr<nsIPrincipal> sourcePrincipal;
+     nsresult rv = CreateCodebasePrincipal(aSourceURI,
+                                           getter_AddRefs(sourcePrincipal));
+     NS_ENSURE_SUCCESS(rv, rv);
+     return CheckLoadURIWithPrincipal(sourcePrincipal, aTargetURI, aFlags);
+ }
+ 
+ NS_IMETHODIMP
+@@ -1257,16 +1272,24 @@ nsScriptSecurityManager::CheckLoadURIWit
+ 
+     NS_ASSERTION(sourceURI, "Non-system principals passed to CheckLoadURIWithPrincipal must have a URI!");
+     
+     //-- get the source scheme
+     nsCAutoString sourceScheme;
+     nsresult rv = GetBaseURIScheme(sourceURI, sourceScheme);
+     if (NS_FAILED(rv)) return rv;
+ 
++    NS_NAMED_LITERAL_STRING(errorTag, "CheckLoadURIError");
++
++    // Don't allow null principals to load anything
++    if (sourceScheme.LowerCaseEqualsLiteral(NS_NULLPRINCIPAL_SCHEME)) {
++        ReportError(nsnull, errorTag, sourceURI, aTargetURI);
++        return NS_ERROR_DOM_BAD_URI;
++    }
++
+     // Some loads are not allowed from mail/news messages
+     if ((aFlags & nsIScriptSecurityManager::DISALLOW_FROM_MAIL) &&
+         (sourceScheme.LowerCaseEqualsLiteral("mailbox") ||
+          sourceScheme.LowerCaseEqualsLiteral("imap")    ||
+          sourceScheme.LowerCaseEqualsLiteral("news")))
+     {
+         return NS_ERROR_DOM_BAD_URI;
+     }
+@@ -1281,17 +1304,18 @@ nsScriptSecurityManager::CheckLoadURIWit
+                     nsIScriptSecurityManager::DISALLOW_SCRIPT_OR_DATA)) &&
+          targetScheme.Equals("javascript")) ||
+         ((aFlags & nsIScriptSecurityManager::DISALLOW_SCRIPT_OR_DATA) &&
+          targetScheme.Equals("data")))
+     {
+        return NS_ERROR_DOM_BAD_URI;
+     }
+ 
+-    if (nsCRT::strcasecmp(targetScheme.get(), sourceScheme.get()) == 0)
++    if (targetScheme.Equals(sourceScheme,
++                            nsCaseInsensitiveCStringComparator()))
+     {
+         // every scheme can access another URI from the same scheme
+         return NS_OK;
+     }
+ 
+     //-- If the schemes don't match, the policy is specified in this table.
+     enum Action { AllowProtocol, DenyProtocol, PrefControlled, ChromeProtocol};
+     static const struct
+@@ -1320,20 +1344,24 @@ nsScriptSecurityManager::CheckLoadURIWit
+         { "aim",             AllowProtocol  },
+         { "data",            AllowProtocol  },
+         { "keyword",         DenyProtocol   },
+         { "resource",        ChromeProtocol },
+         { "gopher",          AllowProtocol  },
+         { "datetime",        DenyProtocol   },
+         { "finger",          AllowProtocol  },
+         { "res",             DenyProtocol   },
+-        { "x-jsd",           ChromeProtocol }
++        { "x-jsd",           ChromeProtocol },
++
++        // Don't allow random people to load null-principal URIs.  Not like it
++        // matters _that_ much, since we won't have a useful handler for them,
++        // but...
++        { NS_NULLPRINCIPAL_SCHEME, DenyProtocol }
+     };
+ 
+-    NS_NAMED_LITERAL_STRING(errorTag, "CheckLoadURIError");
+     for (unsigned i=0; i < sizeof(protocolList)/sizeof(protocolList[0]); i++)
+     {
+         if (targetScheme.LowerCaseEqualsASCII(protocolList[i].name))
+         {
+             switch (protocolList[i].action)
+             {
+             case AllowProtocol:
+                 // everyone can access these schemes.
+@@ -1444,16 +1472,17 @@ nsScriptSecurityManager::ReportError(JSC
+     return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsScriptSecurityManager::CheckLoadURIStr(const nsACString& aSourceURIStr,
+                                          const nsACString& aTargetURIStr,
+                                          PRUint32 aFlags)
+ {
++    // FIXME: bug 327244 -- this function should really die...  Really truly.
+     nsCOMPtr<nsIURI> source;
+     nsresult rv = NS_NewURI(getter_AddRefs(source), aSourceURIStr,
+                             nsnull, nsnull, sIOService);
+     NS_ENSURE_SUCCESS(rv, rv);
+     nsCOMPtr<nsIURI> target;
+     rv = NS_NewURI(getter_AddRefs(target), aTargetURIStr,
+                    nsnull, nsnull, sIOService);
+     NS_ENSURE_SUCCESS(rv, rv);
+@@ -1817,16 +1846,19 @@ nsScriptSecurityManager::DoGetCertificat
+     NS_ADDREF(*result = certificate);
+ 
+     return rv;
+ }
+ 
+ nsresult
+ nsScriptSecurityManager::CreateCodebasePrincipal(nsIURI* aURI, nsIPrincipal **result)
+ {
++    // I _think_ it's safe to not create null principals here based on aURI.
++    // At least all the callers would do the right thing in those cases, as far
++    // as I can tell.  --bz
+     nsRefPtr<nsPrincipal> codebase = new nsPrincipal();
+     if (!codebase)
+         return NS_ERROR_OUT_OF_MEMORY;
+ 
+     nsresult rv = codebase->Init(EmptyCString(), EmptyCString(),
+                                  EmptyCString(), nsnull, aURI);
+     if (NS_FAILED(rv))
+         return rv;
+Index: caps/src/nsSecurityManagerFactory.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/caps/src/nsSecurityManagerFactory.cpp,v
+retrieving revision 1.43
+diff -u -p -d -8 -r1.43 nsSecurityManagerFactory.cpp
+--- caps/src/nsSecurityManagerFactory.cpp	15 Mar 2006 04:59:19 -0000	1.43
++++ caps/src/nsSecurityManagerFactory.cpp	16 Mar 2006 01:54:05 -0000
+@@ -39,16 +39,17 @@
+ #include "nsCOMPtr.h"
+ #include "nsIModule.h"
+ #include "nsIGenericFactory.h"
+ #include "nsIScriptSecurityManager.h"
+ #include "nsScriptSecurityManager.h"
+ #include "nsIPrincipal.h"
+ #include "nsPrincipal.h"
+ #include "nsSystemPrincipal.h"
++#include "nsNullPrincipal.h"
+ #include "nsIScriptNameSpaceManager.h"
+ #include "nsIScriptExternalNameSet.h"
+ #include "nsIScriptContext.h"
+ #include "nsICategoryManager.h"
+ #include "nsXPIDLString.h"
+ #include "nsCOMPtr.h"
+ #include "nsIServiceManager.h"
+ #include "nsString.h"
+@@ -336,21 +337,21 @@ nsSecurityNameSet::InitializeNameSet(nsI
+ }
+ 
+ 
+ 
+ NS_GENERIC_FACTORY_CONSTRUCTOR(nsPrincipal)
+ NS_GENERIC_FACTORY_CONSTRUCTOR(nsSecurityNameSet)
+ NS_GENERIC_FACTORY_SINGLETON_CONSTRUCTOR(nsSystemPrincipal,
+     nsScriptSecurityManager::SystemPrincipalSingletonConstructor)
+-
++NS_GENERIC_FACTORY_CONSTRUCTOR_INIT(nsNullPrincipal, Init)
+ 
+ NS_DECL_CLASSINFO(nsPrincipal)
+ NS_DECL_CLASSINFO(nsSystemPrincipal)
+-
++NS_DECL_CLASSINFO(nsNullPrincipal)
+ 
+ static NS_IMETHODIMP
+ Construct_nsIScriptSecurityManager(nsISupports *aOuter, REFNSIID aIID, 
+                                    void **aResult)
+ {
+     if (!aResult)
+         return NS_ERROR_NULL_POINTER;
+     *aResult = nsnull;
+@@ -461,16 +462,29 @@ static const nsModuleComponentInfo capsC
+       nsnull,
+       NS_CI_INTERFACE_GETTER_NAME(nsSystemPrincipal),
+       nsnull,
+       &NS_CLASSINFO_NAME(nsSystemPrincipal),
+       nsIClassInfo::SINGLETON | nsIClassInfo::MAIN_THREAD_ONLY |
+       nsIClassInfo::EAGER_CLASSINFO
+     },
+ 
++    { NS_NULLPRINCIPAL_CLASSNAME, 
++      NS_NULLPRINCIPAL_CID, 
++      NS_NULLPRINCIPAL_CONTRACTID,
++      nsNullPrincipalConstructor,
++      nsnull,
++      nsnull,
++      nsnull,
++      NS_CI_INTERFACE_GETTER_NAME(nsNullPrincipal),
++      nsnull,
++      &NS_CLASSINFO_NAME(nsNullPrincipal),
++      nsIClassInfo::MAIN_THREAD_ONLY | nsIClassInfo::EAGER_CLASSINFO
++    },
++
+     { "Security Script Name Set",
+       NS_SECURITYNAMESET_CID,
+       NS_SECURITYNAMESET_CONTRACTID,
+       nsSecurityNameSetConstructor,
+       nsnull,
+       nsnull,
+       nsnull,
+       nsnull,
+Index: caps/src/Makefile.in
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/caps/src/Makefile.in,v
+retrieving revision 1.65
+diff -u -p -d -8 -r1.65 Makefile.in
+--- caps/src/Makefile.in	2 Nov 2005 00:41:49 -0000	1.65
++++ caps/src/Makefile.in	13 Feb 2006 05:32:27 -0000
+@@ -67,16 +67,17 @@ REQUIRES	= xpcom \
+ 		  windowwatcher \
+ 		  content \
+ 		  layout \
+ 		  $(NULL)
+ 
+ CPPSRCS		= \
+ 		nsPrincipal.cpp \
+ 		nsSystemPrincipal.cpp \
++		nsNullPrincipal.cpp \
+ 		nsJSPrincipals.cpp \
+ 		nsScriptSecurityManager.cpp \
+ 		nsSecurityManagerFactory.cpp \
+ 		$(NULL)
+ 
+ ifdef XPC_IDISPATCH_SUPPORT
+ DEFINES += -DXPC_IDISPATCH_SUPPORT
+ endif
+Index: dom/src/jsurl/nsJSProtocolHandler.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/dom/src/jsurl/nsJSProtocolHandler.cpp,v
+retrieving revision 1.119
+diff -u -p -d -8 -r1.119 nsJSProtocolHandler.cpp
+--- dom/src/jsurl/nsJSProtocolHandler.cpp	3 Feb 2006 14:17:37 -0000	1.119
++++ dom/src/jsurl/nsJSProtocolHandler.cpp	14 Feb 2006 21:01:48 -0000
+@@ -256,19 +256,18 @@ nsresult nsJSThunk::EvaluateScript(nsICh
+                 uri->GetSpec(spec);
+                 if (!spec.EqualsLiteral("about:blank")) {
+                     rv = NS_ERROR_FAILURE;
+                 }
+             }
+         }
+ 
+         if (NS_FAILED(rv) || !principal) {
+-            // If all else fails, use the current URI to generate a principal.
+-            rv = securityManager->GetCodebasePrincipal(mURI,
+-                                                       getter_AddRefs(principal));
++            // If all else fails, use a null principal
++            principal = do_CreateInstance("@mozilla.org/nullprincipal;1", &rv);
+         }
+ 
+         if (NS_FAILED(rv) || !principal) {
+             return NS_ERROR_FAILURE;
+         }
+     }
+ 
+     // Finally, we have everything needed to evaluate the expression.
+Index: js/src/xpconnect/src/xpcprivate.h
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/js/src/xpconnect/src/xpcprivate.h,v
+retrieving revision 1.176
+diff -u -p -d -8 -r1.176 xpcprivate.h
+--- js/src/xpconnect/src/xpcprivate.h	30 Mar 2006 18:40:52 -0000	1.176
++++ js/src/xpconnect/src/xpcprivate.h	1 Apr 2006 07:28:56 -0000
+@@ -3506,16 +3506,45 @@ protected:
+ protected:
+     nsDiscriminatedUnion mData;
+     jsval                mJSVal;
+ };
+ 
+ NS_DEFINE_STATIC_IID_ACCESSOR(XPCVariant, XPCVARIANT_IID)
+ 
+ /***************************************************************************/
++#ifndef XPCONNECT_STANDALONE
++
++#define PRINCIPALHOLDER_IID \
++{0xbf109f49, 0xf94a, 0x43d8, {0x93, 0xdb, 0xe4, 0x66, 0x49, 0xc5, 0xd9, 0x7d}}
++
++class PrincipalHolder : public nsIScriptObjectPrincipal
++{
++public:
++    NS_DECLARE_STATIC_IID_ACCESSOR(PRINCIPALHOLDER_IID)
++
++    PrincipalHolder(nsIPrincipal *holdee)
++        : mHoldee(holdee)
++    {
++    }
++    virtual ~PrincipalHolder() { }
++
++    NS_DECL_ISUPPORTS
++
++    nsIPrincipal *GetPrincipal();
++
++private:
++    nsCOMPtr<nsIPrincipal> mHoldee;
++};
++
++NS_DEFINE_STATIC_IID_ACCESSOR(PrincipalHolder, PRINCIPALHOLDER_IID)
++
++#endif /* !XPCONNECT_STANDALONE */
++
++/***************************************************************************/
+ // Utilities
+ 
+ JSBool xpc_IsReportableErrorCode(nsresult code);
+ 
+ JSObject* xpc_CloneJSFunction(XPCCallContext &ccx, JSObject *funobj,
+                               JSObject *parent);
+ 
+ /***************************************************************************/
+Index: js/src/xpconnect/src/xpccomponents.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/js/src/xpconnect/src/xpccomponents.cpp,v
+retrieving revision 1.88
+diff -u -p -d -8 -r1.88 xpccomponents.cpp
+--- js/src/xpconnect/src/xpccomponents.cpp	22 Feb 2006 19:48:45 -0000	1.88
++++ js/src/xpconnect/src/xpccomponents.cpp	23 Feb 2006 05:31:01 -0000
+@@ -2062,40 +2062,16 @@ nsXPCComponents_Utils::ReportError()
+ #ifndef XPCONNECT_STANDALONE
+ #include "nsIScriptSecurityManager.h"
+ #include "nsIURL.h"
+ #include "nsIStandardURL.h"
+ #include "nsNetUtil.h"
+ const char kScriptSecurityManagerContractID[] = NS_SCRIPTSECURITYMANAGER_CONTRACTID;
+ const char kStandardURLContractID[] = "@mozilla.org/network/standard-url;1";
+ 
+-#define PRINCIPALHOLDER_IID \
+-{0xbf109f49, 0xf94a, 0x43d8, {0x93, 0xdb, 0xe4, 0x66, 0x49, 0xc5, 0xd9, 0x7d}}
+-
+-class PrincipalHolder : public nsIScriptObjectPrincipal
+-{
+-public:
+-    NS_DECLARE_STATIC_IID_ACCESSOR(PRINCIPALHOLDER_IID)
+-
+-    PrincipalHolder(nsIPrincipal *holdee)
+-        : mHoldee(holdee)
+-    {
+-    }
+-    virtual ~PrincipalHolder() { }
+-
+-    NS_DECL_ISUPPORTS
+-
+-    nsIPrincipal *GetPrincipal();
+-
+-private:
+-    nsCOMPtr<nsIPrincipal> mHoldee;
+-};
+-
+-NS_DEFINE_STATIC_IID_ACCESSOR(PrincipalHolder, PRINCIPALHOLDER_IID)
+-
+ NS_IMPL_ISUPPORTS1(PrincipalHolder, nsIScriptObjectPrincipal)
+ 
+ nsIPrincipal *
+ PrincipalHolder::GetPrincipal()
+ {
+     return mHoldee;
+ }
+ 
+Index: js/src/xpconnect/src/xpcthreadcontext.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/js/src/xpconnect/src/xpcthreadcontext.cpp,v
+retrieving revision 1.40
+diff -u -p -d -8 -r1.40 xpcthreadcontext.cpp
+--- js/src/xpconnect/src/xpcthreadcontext.cpp	17 Oct 2005 18:47:13 -0000	1.40
++++ js/src/xpconnect/src/xpcthreadcontext.cpp	14 Feb 2006 22:14:37 -0000
+@@ -122,44 +122,97 @@ XPCJSContextStack::DEBUG_StackHasJSConte
+ 
+ JS_STATIC_DLL_CALLBACK(JSBool)
+ SafeGlobalResolve(JSContext *cx, JSObject *obj, jsval id)
+ {
+     JSBool resolved;
+     return JS_ResolveStandardClass(cx, obj, id, &resolved);
+ }
+ 
++JS_STATIC_DLL_CALLBACK(void)
++SafeFinalize(JSContext* cx, JSObject* obj)
++{
++#ifndef XPCONNECT_STANDALONE
++    nsIScriptObjectPrincipal* sop =
++        NS_STATIC_CAST(nsIScriptObjectPrincipal*, JS_GetPrivate(cx, obj));
++    NS_IF_RELEASE(sop);
++#endif
++}
++
+ static JSClass global_class = {
+-    "global_for_XPCJSContextStack_SafeJSContext", 0,
++    "global_for_XPCJSContextStack_SafeJSContext",
++#ifndef XPCONNECT_STANDALONE
++    JSCLASS_HAS_PRIVATE | JSCLASS_PRIVATE_IS_NSISUPPORTS,
++#else
++    0,
++#endif
+     JS_PropertyStub, JS_PropertyStub, JS_PropertyStub, JS_PropertyStub,
+-    JS_EnumerateStub, SafeGlobalResolve, JS_ConvertStub, JS_FinalizeStub,
++    JS_EnumerateStub, SafeGlobalResolve, JS_ConvertStub, SafeFinalize,
+     JSCLASS_NO_OPTIONAL_MEMBERS
+ };
+ 
+ /* attribute JSContext safeJSContext; */
+ NS_IMETHODIMP
+ XPCJSContextStack::GetSafeJSContext(JSContext * *aSafeJSContext)
+ {
+     if(!mSafeJSContext)
+     {
++#ifndef XPCONNECT_STANDALONE
++        // Start by getting the principal holder and principal for this
++        // context.  If we can't manage that, don't bother with the rest.
++        nsCOMPtr<nsIPrincipal> principal =
++            do_CreateInstance("@mozilla.org/nullprincipal;1");
++        nsCOMPtr<nsIScriptObjectPrincipal> sop;
++        if(principal)
++        {
++            sop = new PrincipalHolder(principal);
++        }
++        if(!sop)
++        {
++            *aSafeJSContext = nsnull;
++            return NS_ERROR_FAILURE;
++        }        
++#endif /* !XPCONNECT_STANDALONE */
++        
+         JSRuntime *rt;
+         XPCJSRuntime* xpcrt;
+ 
+         nsXPConnect* xpc = nsXPConnect::GetXPConnect();
+         nsCOMPtr<nsIXPConnect> xpcholder(NS_STATIC_CAST(nsIXPConnect*, xpc));
+ 
+         if(xpc && (xpcrt = xpc->GetRuntime()) && (rt = xpcrt->GetJSRuntime()))
+         {
+             mSafeJSContext = JS_NewContext(rt, 8192);
+             if(mSafeJSContext)
+             {
+                 // scoped JS Request
+                 AutoJSRequestWithNoCallContext req(mSafeJSContext);
+                 JSObject *glob;
+                 glob = JS_NewObject(mSafeJSContext, &global_class, NULL, NULL);
++
++#ifndef XPCONNECT_STANDALONE
++                if(glob)
++                {
++                    // Note: make sure to set the private before calling
++                    // InitClasses
++                    nsIScriptObjectPrincipal* priv = nsnull;
++                    sop.swap(priv);
++                    if(!JS_SetPrivate(mSafeJSContext, glob, priv))
++                    {
++                        // Drop the whole thing
++                        NS_RELEASE(priv);
++                        glob = nsnull;
++                    }
++                }
++
++                // After this point either glob is null and the
++                // nsIScriptObjectPrincipal ownership is either handled by the
++                // nsCOMPtr or dealt with, or we'll release in the finalize
++                // hook.
++#endif
+                 if(!glob || NS_FAILED(xpc->InitClasses(mSafeJSContext, glob)))
+                 {
+                     // Explicitly end the request since we are about to kill
+                     // the JSContext that 'req' will try to use when it
+                     // goes out of scope.
+                     req.EndRequest();
+                     JS_DestroyContext(mSafeJSContext);
+                     mSafeJSContext = nsnull;
+Index: content/xbl/src/nsBindingManager.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/content/xbl/src/nsBindingManager.cpp,v
+retrieving revision 1.139
+diff -u -p -d -8 -r1.139 nsBindingManager.cpp
+--- content/xbl/src/nsBindingManager.cpp	22 Nov 2005 15:48:10 -0000	1.139
++++ content/xbl/src/nsBindingManager.cpp	14 Feb 2006 06:29:50 -0000
+@@ -72,21 +72,17 @@
+ 
+ #include "nsIStyleRuleProcessor.h"
+ #include "nsIWeakReference.h"
+ 
+ #include "jsapi.h"
+ #include "nsIXPConnect.h"
+ #include "nsDOMCID.h"
+ #include "nsIDOMScriptObjectFactory.h"
+-#include "nsIPrincipal.h"
+ #include "nsIScriptGlobalObject.h"
+-#include "nsIScriptObjectPrincipal.h"
+-#include "nsIConsoleService.h"
+-#include "nsIScriptError.h"
+ 
+ #include "nsIScriptContext.h"
+ #include "nsBindingManager.h"
+ 
+ // ==================================================================
+ // = nsAnonymousContentList 
+ // ==================================================================
+ 
+Index: content/xul/templates/src/nsXULContentBuilder.cpp
+===================================================================
+RCS file: /home/bzbarsky/mozilla/cvs-mirror/mozilla/content/xul/templates/src/nsXULContentBuilder.cpp,v
+retrieving revision 1.82
+diff -u -p -d -8 -r1.82 nsXULContentBuilder.cpp
+--- content/xul/templates/src/nsXULContentBuilder.cpp	24 Mar 2006 20:41:03 -0000	1.82
++++ content/xul/templates/src/nsXULContentBuilder.cpp	1 Apr 2006 07:24:49 -0000
+@@ -40,17 +40,16 @@
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #include "nsContentCID.h"
+ #include "nsIDocument.h"
+ #include "nsIDOMNodeList.h"
+ #include "nsIDOMXULDocument.h"
+ #include "nsINodeInfo.h"
+-#include "nsIPrincipal.h"
+ #include "nsIServiceManager.h"
+ #include "nsITextContent.h"
+ #include "nsIXULDocument.h"
+ #include "nsIXULSortService.h"
+ 
+ #include "nsContentSupportMap.h"
+ #include "nsRDFConMemberTestNode.h"
+ #include "nsRDFPropertyTestNode.h"

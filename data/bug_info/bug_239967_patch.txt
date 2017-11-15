@@ -1,0 +1,16 @@
+Index: mozilla/caps/src/nsScriptSecurityManager.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/caps/src/nsScriptSecurityManager.cpp,v
+retrieving revision 1.249
+diff -u -r1.249 mozilla/caps/src/nsScriptSecurityManager.cpp
+--- mozilla/caps/src/nsScriptSecurityManager.cpp
++++ mozilla/caps/src/nsScriptSecurityManager.cpp
+@@ -1775,7 +1775,7 @@
+     return NS_OK;
+ }
+ 
+-nsresult
++NS_IMETHODIMP
+ nsScriptSecurityManager::GetPrincipalFromContext(JSContext *cx,
+                                                  nsIPrincipal **result)
+ {

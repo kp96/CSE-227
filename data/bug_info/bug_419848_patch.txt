@@ -1,0 +1,196 @@
+# HG changeset patch
+# User Blake Kaplan <mrbkap@gmail.com>
+# Date 1204833917 28800
+# Node ID fbc2a243b9a0329d44540985156fad17f6b88cba
+# Parent  5d86d8ae7410b8201119fdf0a7fc38b119d449f2
+Don't assume that chrome:// implies system principals. bug 419848
+
+diff --git a/dom/src/base/nsJSTimeoutHandler.cpp b/dom/src/base/nsJSTimeoutHandler.cpp
+--- a/dom/src/base/nsJSTimeoutHandler.cpp
++++ b/dom/src/base/nsJSTimeoutHandler.cpp
+@@ -254,17 +254,12 @@ nsJSScriptTimeoutHandler::Init(nsGlobalW
+     mExpr = expr;
+ 
+     nsIPrincipal *prin = aWindow->GetPrincipal();
+-    JSPrincipals *jsprins;
+-    rv = prin->GetJSPrincipals(cx, &jsprins);
+-    NS_ENSURE_SUCCESS(rv, rv);
+ 
+     // Get the calling location.
+     const char *filename;
+-    if (nsJSUtils::GetCallingLocation(cx, &filename, &mLineNo, jsprins)) {
++    if (nsJSUtils::GetCallingLocation(cx, &filename, &mLineNo, prin)) {
+       mFileName.Assign(filename);
+     }
+-
+-    JSPRINCIPALS_DROP(cx, jsprins);
+   } else if (funobj) {
+     rv = NS_HOLD_JS_OBJECTS(this, nsJSScriptTimeoutHandler);
+     NS_ENSURE_SUCCESS(rv, rv);
+diff --git a/dom/src/base/nsJSUtils.cpp b/dom/src/base/nsJSUtils.cpp
+--- a/dom/src/base/nsJSUtils.cpp
++++ b/dom/src/base/nsJSUtils.cpp
+@@ -62,7 +62,7 @@
+ 
+ JSBool
+ nsJSUtils::GetCallingLocation(JSContext* aContext, const char* *aFilename,
+-                              PRUint32* aLineno, JSPrincipals* aPrincipals)
++                              PRUint32* aLineno, nsIPrincipal* aPrincipal)
+ {
+   // Get the current filename and line number
+   JSStackFrame* frame = nsnull;
+@@ -78,32 +78,24 @@ nsJSUtils::GetCallingLocation(JSContext*
+   if (script) {
+     // If aPrincipals is non-null then our caller is asking us to ensure
+     // that the filename we return does not have elevated privileges.
+-    if (aPrincipals) {
+-      // The principals might not be in the script, but we can always
+-      // find the right principals in the frame's callee.
+-      JSPrincipals* scriptPrins = JS_GetScriptPrincipals(aContext, script);
+-      if (!scriptPrins) {
+-        JSObject *callee = JS_GetFrameCalleeObject(aContext, frame);
+-        nsCOMPtr<nsIPrincipal> prin;
++    if (aPrincipal) {
++      uint32 flags = JS_GetScriptFilenameFlags(script);
++
++      // Use the principal for the filename if it shouldn't be receiving
++      // implicit XPCNativeWrappers.
++      PRBool system;
++      if (flags & JSFILENAME_PROTECTED) {
+         nsIScriptSecurityManager *ssm = nsContentUtils::GetSecurityManager();
+-        if (NS_FAILED(ssm->GetObjectPrincipal(aContext, callee,
+-                                              getter_AddRefs(prin))) ||
+-            !prin) {
+-          return JS_FALSE;
++
++        if (NS_FAILED(ssm->IsSystemPrincipal(aPrincipal, &system)) || !system) {
++          JSPrincipals* jsprins;
++          aPrincipal->GetJSPrincipals(aContext, &jsprins);
++
++          *aFilename = jsprins->codebase;
++          *aLineno = 0;
++          JSPRINCIPALS_DROP(aContext, jsprins);
++          return JS_TRUE;
+         }
+-
+-        prin->GetJSPrincipals(aContext, &scriptPrins);
+-
+-        // The script has a reference to the principals.
+-        JSPRINCIPALS_DROP(aContext, scriptPrins);
+-      }
+-
+-      // Return the weaker of the two principals if they differ.
+-      if (scriptPrins != aPrincipals &&
+-          scriptPrins->subsume(scriptPrins, aPrincipals)) {
+-        *aFilename = aPrincipals->codebase;
+-        *aLineno = 0;
+-        return JS_TRUE;
+       }
+     }
+ 
+diff --git a/dom/src/base/nsJSUtils.h b/dom/src/base/nsJSUtils.h
+--- a/dom/src/base/nsJSUtils.h
++++ b/dom/src/base/nsJSUtils.h
+@@ -52,12 +52,13 @@ class nsIDOMEventListener;
+ class nsIDOMEventListener;
+ class nsIScriptContext;
+ class nsIScriptGlobalObject;
++class nsIPrincipal;
+ 
+ class nsJSUtils
+ {
+ public:
+   static JSBool GetCallingLocation(JSContext* aContext, const char* *aFilename,
+-                                   PRUint32* aLineno, JSPrincipals* aPrincipals);
++                                   PRUint32* aLineno, nsIPrincipal* aPrincipal);
+ 
+   static jsval ConvertStringToJSVal(const nsString& aProp,
+                                     JSContext* aContext);
+diff --git a/js/src/jsfun.c b/js/src/jsfun.c
+--- a/js/src/jsfun.c
++++ b/js/src/jsfun.c
+@@ -1755,13 +1755,7 @@ Function(JSContext *cx, JSObject *obj, u
+     caller = JS_GetScriptedCaller(cx, fp);
+     if (caller) {
+         principals = JS_EvalFramePrincipals(cx, fp, caller);
+-        if (principals == caller->script->principals) {
+-            filename = caller->script->filename;
+-            lineno = js_PCToLineNumber(cx, caller->script, caller->pc);
+-        } else {
+-            filename = principals->codebase;
+-            lineno = 0;
+-        }
++        filename = js_ComputeFilename(cx, caller, principals, &lineno);
+     } else {
+         filename = NULL;
+         lineno = 0;
+diff --git a/js/src/jsobj.c b/js/src/jsobj.c
+--- a/js/src/jsobj.c
++++ b/js/src/jsobj.c
+@@ -1133,6 +1133,23 @@ bad:
+     return NULL;
+ }
+ 
++const char *
++js_ComputeFilename(JSContext *cx, JSStackFrame *caller,
++                   JSPrincipals *principals, uintN *linenop)
++{
++    uint32 flags;
++
++    flags = JS_GetScriptFilenameFlags(caller->script);
++    if (!(flags & JSFILENAME_PROTECTED) ||
++        !strcmp(principals->codebase, "[System Principal]")) {
++        *linenop = js_PCToLineNumber(cx, caller->script, caller->pc);
++        return caller->script->filename;
++    }
++
++    *linenop = 0;
++    return principals->codebase;
++}
++
+ static JSBool
+ obj_eval(JSContext *cx, JSObject *obj, uintN argc, jsval *argv, jsval *rval)
+ {
+@@ -1272,13 +1289,7 @@ obj_eval(JSContext *cx, JSObject *obj, u
+     str = JSVAL_TO_STRING(argv[0]);
+     if (caller) {
+         principals = JS_EvalFramePrincipals(cx, fp, caller);
+-        if (principals == caller->script->principals) {
+-            file = caller->script->filename;
+-            line = js_PCToLineNumber(cx, caller->script, caller->pc);
+-        } else {
+-            file = principals->codebase;
+-            line = 0;
+-        }
++        file = js_ComputeFilename(cx, caller, principals, &line);
+     } else {
+         file = NULL;
+         line = 0;
+diff --git a/js/src/jsobj.h b/js/src/jsobj.h
+--- a/js/src/jsobj.h
++++ b/js/src/jsobj.h
+@@ -699,6 +699,10 @@ extern JSObject *
+ extern JSObject *
+ js_GetWrappedObject(JSContext *cx, JSObject *obj);
+ 
++/* NB: Infallible. */
++extern const char *
++js_ComputeFilename(JSContext *cx, JSStackFrame *caller,
++                   JSPrincipals *principals, uintN *linenop);
+ JS_END_EXTERN_C
+ 
+ #endif /* jsobj_h___ */
+diff --git a/js/src/jsscript.c b/js/src/jsscript.c
+--- a/js/src/jsscript.c
++++ b/js/src/jsscript.c
+@@ -235,9 +235,8 @@ script_compile_sub(JSContext *cx, JSObje
+             fp->scopeChain = scopeobj;  /* for the compiler's benefit */
+         }
+ 
+-        file = caller->script->filename;
+-        line = js_PCToLineNumber(cx, caller->script, caller->pc);
+         principals = JS_EvalFramePrincipals(cx, fp, caller);
++        file = js_ComputeFilename(cx, caller, principals, &line);
+     } else {
+         file = NULL;
+         line = 0;

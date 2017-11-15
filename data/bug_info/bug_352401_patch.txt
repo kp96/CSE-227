@@ -1,0 +1,29 @@
+? mozilla/security/manager/ssl/src/nsSSLThread.cpp-good
+Index: mozilla/security/manager/ssl/src/nsCertTree.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsCertTree.cpp,v
+retrieving revision 1.42.4.1
+diff -u -p -r1.42.4.1 nsCertTree.cpp
+--- mozilla/security/manager/ssl/src/nsCertTree.cpp	16 Aug 2005 00:23:42 -0000	1.42.4.1
++++ mozilla/security/manager/ssl/src/nsCertTree.cpp	12 Sep 2006 21:17:47 -0000
+@@ -423,7 +423,10 @@ nsCertTree::UpdateUIContents()
+   nsCOMPtr<nsISupports> isupport = dont_AddRef(mCertArray->ElementAt(j));
+   nsCOMPtr<nsIX509Cert> orgCert = do_QueryInterface(isupport);
+   for (PRInt32 i=0; i<mNumOrgs; i++) {
+-    orgCert->GetIssuerOrganization(mTreeArray[i].orgName);
++    nsString &orgNameRef = mTreeArray[i].orgName;
++    orgCert->GetIssuerOrganization(orgNameRef);
++    if (orgNameRef.IsEmpty())
++      orgCert->GetCommonName(orgNameRef);
+     mTreeArray[i].open = PR_TRUE;
+     mTreeArray[i].certIndex = j;
+     mTreeArray[i].numChildren = 1;
+@@ -964,6 +967,8 @@ nsCertTree::CmpInitCriterion(nsIX509Cert
+   switch (crit) {
+     case sort_IssuerOrg:
+       cert->GetIssuerOrganization(str);
++      if (str.IsEmpty())
++        cert->GetCommonName(str);
+       break;
+     case sort_Org:
+       cert->GetOrganization(str);

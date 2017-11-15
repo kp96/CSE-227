@@ -1,0 +1,58 @@
+Index: mozilla/Makefile.in
+===================================================================
+RCS file: /cvsroot/mozilla/Makefile.in,v
+retrieving revision 1.368
+diff -u -8 -r1.368 Makefile.in
+--- mozilla/Makefile.in	26 Mar 2007 14:55:27 -0000	1.368
++++ mozilla/Makefile.in	28 Mar 2007 16:14:18 -0000
+@@ -157,24 +157,19 @@
+ 
+ uploadsymbols:
+ ifdef MOZ_DEBUG_SYMBOLS
+ ifdef MOZ_AIRBAG
+ 	$(topsrcdir)/toolkit/airbag/tools/upload_symbols.sh $(topsrcdir)/../$(BUILDID)/airbag-symbols-$(BUILDID).zip
+ endif
+ endif
+ 
+-## XXXvlad -- the test and cp should be removed once bug 249782 is
+-## completely fixed
+ signnss:
+ ifdef MOZILLA_OFFICIAL
+ 	echo signing NSS libs
+-ifdef MSMANIFEST_TOOL
+-	test -f $(DEPTH)/nss/shlibsign.exe.manifest && cp $(DEPTH)/nss/shlibsign.exe.manifest $(DIST)/bin
+-endif
+ 	cd $(DIST)/bin; ./shlibsign.exe -v -i softokn3.dll
+ 	cd $(DIST)/bin; ./shlibsign.exe -v -i freebl3.dll
+ endif # MOZILLA_OFFICIAL
+ 
+ BUILDID = $(shell cat $(DEPTH)/config/build_number)
+ deliver: splitsymbols rebase signnss
+ 
+ endif # WINNT
+Index: mozilla/toolkit/mozapps/installer/packager.mk
+===================================================================
+RCS file: /cvsroot/mozilla/toolkit/mozapps/installer/packager.mk,v
+retrieving revision 1.43
+diff -u -8 -r1.43 packager.mk
+--- mozilla/toolkit/mozapps/installer/packager.mk	27 Feb 2007 19:43:58 -0000	1.43
++++ mozilla/toolkit/mozapps/installer/packager.mk	28 Mar 2007 16:14:18 -0000
+@@ -173,17 +173,17 @@
+ ifdef MOZ_PSM
+ SIGN_NSS		= @echo signing nss libraries;
+ 
+ ifdef UNIVERSAL_BINARY
+ NATIVE_ARCH	= $(shell uname -p | sed -e s/powerpc/ppc/)
+ NATIVE_DIST	= $(DIST)/../../$(NATIVE_ARCH)/dist
+ SIGN_CMD	= $(NATIVE_DIST)/bin/run-mozilla.sh $(NATIVE_DIST)/bin/shlibsign -v -i
+ else
+-SIGN_CMD	= $(DIST)/bin/run-mozilla.sh $(DEPTH)/nss/shlibsign -v -i
++SIGN_CMD	= $(RUN_TEST_PROGRAM) $(DIST)/bin/shlibsign -v -i
+ endif
+ 
+ SOFTOKN		= $(DIST)/$(STAGEPATH)$(MOZ_PKG_APPNAME)$(_BINPATH)/$(DLL_PREFIX)softokn3$(DLL_SUFFIX)
+ FREEBL		= $(DIST)/$(STAGEPATH)$(MOZ_PKG_APPNAME)$(_BINPATH)/$(DLL_PREFIX)freebl3$(DLL_SUFFIX)
+ FREEBL_32FPU	= $(DIST)/$(STAGEPATH)$(MOZ_PKG_APPNAME)$(_BINPATH)/$(DLL_PREFIX)freebl_32fpu_3$(DLL_SUFFIX)
+ FREEBL_32INT	= $(DIST)/$(STAGEPATH)$(MOZ_PKG_APPNAME)$(_BINPATH)/$(DLL_PREFIX)freebl_32int_3$(DLL_SUFFIX)
+ FREEBL_32INT64	= $(DIST)/$(STAGEPATH)$(MOZ_PKG_APPNAME)$(_BINPATH)/$(DLL_PREFIX)freebl_32int64_3$(DLL_SUFFIX)
+ FREEBL_64FPU	= $(DIST)/$(STAGEPATH)$(MOZ_PKG_APPNAME)$(_BINPATH)/$(DLL_PREFIX)freebl_64fpu_3$(DLL_SUFFIX)

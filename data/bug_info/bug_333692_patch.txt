@@ -1,0 +1,22 @@
+Index: mozilla/security/manager/ssl/src/nsNTLMAuthModule.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNTLMAuthModule.cpp,v
+retrieving revision 1.13
+diff -p -u -1 -0 -r1.13 nsNTLMAuthModule.cpp
+--- mozilla/security/manager/ssl/src/nsNTLMAuthModule.cpp	3 Feb 2006 14:18:28 -0000	1.13
++++ mozilla/security/manager/ssl/src/nsNTLMAuthModule.cpp	12 Apr 2006 09:38:44 -0000
+@@ -956,13 +956,13 @@ static void md5sum(const PRUint8 *input,
+   if (ctxt)
+   {
+     if (PK11_DigestBegin(ctxt) == SECSuccess)
+     {
+       if (PK11_DigestOp(ctxt, input, inputLen) == SECSuccess)
+       {
+         PRUint32 resultLen = 16;
+         PK11_DigestFinal(ctxt, result, &resultLen, resultLen);
+       }
+     }
++    PK11_DestroyContext(ctxt, PR_TRUE);
+   }
+-  PK11_DestroyContext(ctxt, PR_TRUE);
+ }

@@ -1,0 +1,148 @@
+diff --git a/caps/src/nsPrincipal.cpp b/caps/src/nsPrincipal.cpp
+--- a/caps/src/nsPrincipal.cpp
++++ b/caps/src/nsPrincipal.cpp
+@@ -48,23 +48,81 @@
+ #include "nsIFileURL.h"
+ #include "nsIProtocolHandler.h"
+ #include "nsNetUtil.h"
+ #include "nsJSPrincipals.h"
+ #include "nsVoidArray.h"
+ #include "nsHashtable.h"
+ #include "nsIObjectInputStream.h"
+ #include "nsIObjectOutputStream.h"
+-#include "nsIPrefBranch.h"
++#include "nsIPrefBranch2.h"
+ #include "nsIPrefService.h"
+ #include "nsIClassInfoImpl.h"
+ #include "nsDOMError.h"
+ 
+ #include "nsPrincipal.h"
+ 
++class nsCodeBasePrefObserver : nsIObserver
++{
++public:
++  nsCodeBasePrefObserver()
++  {
++    NS_ASSERTION(!sObserverInstalled, "Shouldn't recreate observer\n");
++  }
++  ~nsCodeBasePrefObserver()
++  {
++    sObserverInstalled = PR_FALSE;
++  }
++
++  void Init()
++  {
++    nsCOMPtr<nsIPrefBranch2> prefBranch =
++      do_GetService(NS_PREFSERVICE_CONTRACTID);
++    if (prefBranch) {
++      prefBranch->GetBoolPref(PrefName(), &sPrefValue);
++      nsresult rv = prefBranch->AddObserver(PrefName(), this, PR_FALSE);
++      if (NS_SUCCEEDED(rv)) {
++        sObserverInstalled = PR_TRUE;
++      }
++    }
++  }
++
++  NS_DECL_ISUPPORTS
++
++  NS_IMETHOD Observe(nsISupports* aSubject,
++                     const char* aTopic,
++                     const PRUnichar* aData)
++  {
++    if (!strcmp(aTopic,  NS_PREFBRANCH_PREFCHANGE_TOPIC_ID)) {
++      nsCOMPtr<nsIPrefBranch> prefBranch(do_QueryInterface(aSubject));
++      if (prefBranch)
++        prefBranch->GetBoolPref(PrefName(), &sPrefValue);
++    }
++    return NS_OK;
++  }
++
++  const char* PrefName()
++  {
++    static const char pref[] = "signed.applets.codebase_principal_support";
++    return pref;
++  }
++
++  static PRBool PrefValue() { return sPrefValue; }
++  static PRBool Installed() { return sObserverInstalled; }
++
++
++protected:
++  static PRBool sPrefValue;
++  static PRBool sObserverInstalled;
++};
++
++PRBool nsCodeBasePrefObserver::sPrefValue = PR_FALSE;
++PRBool nsCodeBasePrefObserver::sObserverInstalled = PR_FALSE;
++NS_IMPL_ISUPPORTS1(nsCodeBasePrefObserver, nsIObserver)
++
+ static PRBool URIIsImmutable(nsIURI* aURI)
+ {
+   nsCOMPtr<nsIMutable> mutableObj(do_QueryInterface(aURI));
+   PRBool isMutable;
+   return
+     mutableObj &&
+     NS_SUCCEEDED(mutableObj->GetMutable(&isMutable)) &&
+     !isMutable;                               
+@@ -108,16 +166,23 @@ nsPrincipal::Release()
+ nsPrincipal::nsPrincipal()
+   : mCapabilities(nsnull),
+     mSecurityPolicy(nsnull),
+     mTrusted(PR_FALSE),
+     mInitialized(PR_FALSE),
+     mCodebaseImmutable(PR_FALSE),
+     mDomainImmutable(PR_FALSE)
+ {
++  if (!nsCodeBasePrefObserver::Installed()) {
++    nsRefPtr<nsCodeBasePrefObserver> obs = new nsCodeBasePrefObserver();
++    if (obs)
++      obs->Init();
++    NS_WARN_IF_FALSE(nsCodeBasePrefObserver::Installed(),
++                     "Installing nsCodeBasePrefObserver failed!");
++  }
+ }
+ 
+ nsresult
+ nsPrincipal::Init(const nsACString& aCertFingerprint,
+                   const nsACString& aSubjectName,
+                   const nsACString& aPrettyName,
+                   nsISupports* aCert,
+                   nsIURI *aCodebase)
+@@ -421,31 +486,25 @@ nsPrincipal::CanEnableCapability(const c
+                                "uninitialized principal");
+ 
+     // If we are a non-trusted codebase principal, capabilities can not
+     // be enabled if the user has not set the pref allowing scripts to
+     // request enhanced capabilities; however, the file: and resource:
+     // schemes are special and may be able to get extra capabilities
+     // even with the pref disabled.
+ 
+-    static const char pref[] = "signed.applets.codebase_principal_support";
+-    nsCOMPtr<nsIPrefBranch> prefBranch =
+-      do_GetService(NS_PREFSERVICE_CONTRACTID);
+-    if (prefBranch) {
+-      PRBool mightEnable;
+-      nsresult rv = prefBranch->GetBoolPref(pref, &mightEnable);
++    if (!nsCodeBasePrefObserver::PrefValue()) {
++      PRBool mightEnable = PR_FALSE;
++      nsresult rv = mCodebase->SchemeIs("file", &mightEnable);
+       if (NS_FAILED(rv) || !mightEnable) {
+-        rv = mCodebase->SchemeIs("file", &mightEnable);
++        rv = mCodebase->SchemeIs("resource", &mightEnable);
+         if (NS_FAILED(rv) || !mightEnable) {
+-          rv = mCodebase->SchemeIs("resource", &mightEnable);
+-          if (NS_FAILED(rv) || !mightEnable) {
+-            *result = nsIPrincipal::ENABLE_DENIED;
++          *result = nsIPrincipal::ENABLE_DENIED;
+ 
+-            return NS_OK;
+-          }
++          return NS_OK;
+         }
+       }
+     }
+   }
+ 
+   const char *start = capability;
+   *result = nsIPrincipal::ENABLE_GRANTED;
+   for(;;) {

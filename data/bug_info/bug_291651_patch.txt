@@ -1,0 +1,66 @@
+Index: browser/base/content/browser.js
+===================================================================
+RCS file: /cvsroot/mozilla/browser/base/content/browser.js,v
+retrieving revision 1.479.2.4
+diff -u -p -8 -r1.479.2.4 browser.js
+--- browser/base/content/browser.js	16 Aug 2005 19:47:06 -0000	1.479.2.4
++++ browser/base/content/browser.js	22 Aug 2005 22:32:45 -0000
+@@ -2258,18 +2258,25 @@ var urlbarObserver = {
+     {
+       var url = transferUtils.retrieveURLFromData(aXferData.data, aXferData.flavour.contentType);
+ 
+       // The URL bar automatically handles inputs with newline characters,
+       // so we can get away with treating text/x-moz-url flavours as text/unicode.
+       if (url) {
+         getBrowser().dragDropSecurityCheck(aEvent, aDragSession, url);
+ 
+-        // XXXBlake Workaround caret crash when you try to set the textbox's value on dropping
+-        setTimeout(function(u) { gURLBar.value = u; handleURLBarCommand(); }, 0, url);
++        try {
++          gURLBar.value = url;
++          var uri = makeURI(gURLBar.value);
++          const secMan = Components.classes["@mozilla.org/scriptsecuritymanager;1"]
++                                   .getService(Components.interfaces.nsIScriptSecurityManager);
++          const nsIScriptSecMan = Components.interfaces.nsIScriptSecurityManager;
++          secMan.checkLoadURI(gBrowser.currentURI, uri, nsIScriptSecMan.DISALLOW_SCRIPT_OR_DATA);
++          handleURLBarCommand();
++        } catch (ex) {}
+       }
+     },
+   getSupportedFlavours: function ()
+     {
+       var flavourSet = new FlavourSet();
+ 
+       // Plain text drops are often misidentified as "text/x-moz-url", so favor plain text.
+       flavourSet.appendFlavour("text/unicode");
+@@ -2664,22 +2671,26 @@ var goButtonObserver = {
+     {
+       var statusTextFld = document.getElementById("statusbar-display");
+       statusTextFld.label = "";
+       aEvent.target.removeAttribute("dragover");
+     },
+   onDrop: function (aEvent, aXferData, aDragSession)
+     {
+       var xferData = aXferData.data.split("\n");
+-      var uri = xferData[0] ? xferData[0] : xferData[1];
+-      if (uri) {
++      var url = xferData[0] ? xferData[0] : xferData[1];
++      try {
++        var uri = makeURI(url);
+         getBrowser().dragDropSecurityCheck(aEvent, aDragSession, uri);
+-
++        const secMan = Components.classes["@mozilla.org/scriptsecuritymanager;1"]
++                                 .getService(Components.interfaces.nsIScriptSecurityManager);
++        const nsIScriptSecMan = Components.interfaces.nsIScriptSecurityManager;
++        secMan.checkLoadURI(gBrowser.currentURI, uri, nsIScriptSecMan.DISALLOW_SCRIPT_OR_DATA);
+         loadURI(uri, null, null);
+-      }
++      } catch (ex) {}
+     },
+   getSupportedFlavours: function ()
+     {
+       var flavourSet = new FlavourSet();
+       flavourSet.appendFlavour("text/unicode");
+       flavourSet.appendFlavour("text/x-moz-url");
+       flavourSet.appendFlavour("application/x-moz-file", "nsIFile");
+       return flavourSet;

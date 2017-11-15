@@ -1,0 +1,96 @@
+diff --git a/netwerk/base/public/security-prefs.js b/netwerk/base/public/security-prefs.js
+--- a/netwerk/base/public/security-prefs.js
++++ b/netwerk/base/public/security-prefs.js
+@@ -1,11 +1,12 @@
+ pref("security.enable_ssl3",             true);
+ pref("security.enable_tls",		 true);
+ pref("security.enable_tls_session_tickets", true);
++pref("security.enable_md5_signatures", true);
+ 
+ pref("security.ssl.allow_unrestricted_renego_everywhere__temporarily_available_pref", false);
+ pref("security.ssl.renego_unrestricted_hosts", "");
+ pref("security.ssl.treat_unsafe_negotiation_as_broken", false);
+ pref("security.ssl.require_safe_negotiation",  false);
+ pref("security.ssl.warn_missing_rfc5746",  1);
+ pref("security.ssl.enable_false_start", false);
+ 
+diff --git a/security/manager/ssl/src/nsNSSComponent.cpp b/security/manager/ssl/src/nsNSSComponent.cpp
+--- a/security/manager/ssl/src/nsNSSComponent.cpp
++++ b/security/manager/ssl/src/nsNSSComponent.cpp
+@@ -1592,16 +1592,36 @@ nsNSSComponent::TryCFM2MachOMigration(ns
+   }
+ 
+   if (bExists) {
+     cfm_cert8->CopyToFollowingLinksNative(machoPath, cstr_cert8db);
+   }
+ }
+ #endif
+ 
++static void configureMD5(bool enabled)
++{
++  if (enabled) { // set flags
++    NSS_SetAlgorithmPolicy(SEC_OID_MD5, 
++        NSS_USE_ALG_IN_CERT_SIGNATURE | NSS_USE_ALG_IN_CMS_SIGNATURE, 0);
++    NSS_SetAlgorithmPolicy(SEC_OID_PKCS1_MD5_WITH_RSA_ENCRYPTION,
++        NSS_USE_ALG_IN_CERT_SIGNATURE | NSS_USE_ALG_IN_CMS_SIGNATURE, 0);
++    NSS_SetAlgorithmPolicy(SEC_OID_PKCS5_PBE_WITH_MD5_AND_DES_CBC,
++        NSS_USE_ALG_IN_CERT_SIGNATURE | NSS_USE_ALG_IN_CMS_SIGNATURE, 0);
++  }
++  else { // clear flags
++    NSS_SetAlgorithmPolicy(SEC_OID_MD5,
++        0, NSS_USE_ALG_IN_CERT_SIGNATURE | NSS_USE_ALG_IN_CMS_SIGNATURE);
++    NSS_SetAlgorithmPolicy(SEC_OID_PKCS1_MD5_WITH_RSA_ENCRYPTION,
++        0, NSS_USE_ALG_IN_CERT_SIGNATURE | NSS_USE_ALG_IN_CMS_SIGNATURE);
++    NSS_SetAlgorithmPolicy(SEC_OID_PKCS5_PBE_WITH_MD5_AND_DES_CBC,
++        0, NSS_USE_ALG_IN_CERT_SIGNATURE | NSS_USE_ALG_IN_CMS_SIGNATURE);
++  }
++}
++
+ nsresult
+ nsNSSComponent::InitializeNSS(bool showWarningBox)
+ {
+   // Can be called both during init and profile change.
+   // Needs mutex protection.
+ 
+   PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("nsNSSComponent::InitializeNSS\n"));
+ 
+@@ -1783,16 +1803,18 @@ nsNSSComponent::InitializeNSS(bool showW
+ 
+       SSL_OptionSetDefault(SSL_ENABLE_SSL2, false);
+       SSL_OptionSetDefault(SSL_V2_COMPATIBLE_HELLO, false);
+       bool enabled;
+       mPrefBranch->GetBoolPref("security.enable_ssl3", &enabled);
+       SSL_OptionSetDefault(SSL_ENABLE_SSL3, enabled);
+       mPrefBranch->GetBoolPref("security.enable_tls", &enabled);
+       SSL_OptionSetDefault(SSL_ENABLE_TLS, enabled);
++      mPrefBranch->GetBoolPref("security.enable_md5_signatures", &enabled);
++      configureMD5(enabled);
+ 
+       // Configure TLS session tickets
+       mPrefBranch->GetBoolPref("security.enable_tls_session_tickets", &enabled);
+       SSL_OptionSetDefault(SSL_ENABLE_SESSION_TICKETS, enabled);
+ 
+       mPrefBranch->GetBoolPref("security.ssl.require_safe_negotiation", &enabled);
+       SSL_OptionSetDefault(SSL_REQUIRE_SAFE_NEGOTIATION, enabled);
+ 
+@@ -2305,16 +2327,20 @@ nsNSSComponent::Observe(nsISupports *aSu
+     if (prefName.Equals("security.enable_ssl3")) {
+       mPrefBranch->GetBoolPref("security.enable_ssl3", &enabled);
+       SSL_OptionSetDefault(SSL_ENABLE_SSL3, enabled);
+       clearSessionCache = true;
+     } else if (prefName.Equals("security.enable_tls")) {
+       mPrefBranch->GetBoolPref("security.enable_tls", &enabled);
+       SSL_OptionSetDefault(SSL_ENABLE_TLS, enabled);
+       clearSessionCache = true;
++    } else if (prefName.Equals("security.enable_md5_signatures")) {
++      mPrefBranch->GetBoolPref("security.enable_md5_signatures", &enabled);
++      configureMD5(enabled);
++      clearSessionCache = true;
+     } else if (prefName.Equals("security.enable_tls_session_tickets")) {
+       mPrefBranch->GetBoolPref("security.enable_tls_session_tickets", &enabled);
+       SSL_OptionSetDefault(SSL_ENABLE_SESSION_TICKETS, enabled);
+     } else if (prefName.Equals("security.ssl.require_safe_negotiation")) {
+       mPrefBranch->GetBoolPref("security.ssl.require_safe_negotiation", &enabled);
+       SSL_OptionSetDefault(SSL_REQUIRE_SAFE_NEGOTIATION, enabled);
+     } else if (prefName.Equals("security.ssl.allow_unrestricted_renego_everywhere__temporarily_available_pref")) {
+       mPrefBranch->GetBoolPref("security.ssl.allow_unrestricted_renego_everywhere__temporarily_available_pref", &enabled);

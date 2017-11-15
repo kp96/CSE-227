@@ -1,0 +1,33 @@
+Index: nsNSSCertificate.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSCertificate.cpp,v
+retrieving revision 1.134
+diff -u -8 -p -r1.134 nsNSSCertificate.cpp
+--- nsNSSCertificate.cpp	9 Nov 2007 15:09:58 -0000	1.134
++++ nsNSSCertificate.cpp	26 Nov 2007 20:33:28 -0000
+@@ -105,21 +105,23 @@ NSSCleanupAutoPtrClass(NSSCMSSignedData,
+ // This is being stored in an PRUint32 that can otherwise
+ // only take values from nsIX509Cert's list of cert types.
+ // As nsIX509Cert is frozen, we choose a value not contained
+ // in the list to mean not yet initialized.
+ #define CERT_TYPE_NOT_YET_INITIALIZED (1 << 30)
+ 
+ /* nsNSSCertificate */
+ 
+-NS_IMPL_THREADSAFE_ISUPPORTS5(nsNSSCertificate, nsIX509Cert,
++NS_IMPL_THREADSAFE_ISUPPORTS7(nsNSSCertificate, nsIX509Cert,
+                                                 nsIX509Cert2,
+                                                 nsIX509Cert3,
+                                                 nsIIdentityInfo,
+-                                                nsISMimeCert)
++                                                nsISMimeCert,
++                                                nsISerializable,
++                                                nsIClassInfo)
+ 
+ nsNSSCertificate*
+ nsNSSCertificate::ConstructFromDER(char *certDER, int derLen)
+ {
+   nsNSSCertificate* newObject = new nsNSSCertificate();
+   if (!newObject->InitFromDER(certDER, derLen)) {
+     delete newObject;
+     newObject = nsnull;

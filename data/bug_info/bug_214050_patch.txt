@@ -1,0 +1,50 @@
+Index: caps/src/nsScriptSecurityManager.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/caps/src/nsScriptSecurityManager.cpp,v
+retrieving revision 1.212
+diff -p -u -d -1 -5 -r1.212 nsScriptSecurityManager.cpp
+--- caps/src/nsScriptSecurityManager.cpp	29 Jul 2003 05:28:00 -0000	1.212
++++ caps/src/nsScriptSecurityManager.cpp	29 Jul 2003 09:03:39 -0000
+@@ -766,36 +766,36 @@ nsScriptSecurityManager::CheckPropertyAc
+         case nsIXPCSecurityManager::ACCESS_SET_PROPERTY:
+             stringName.Assign(NS_LITERAL_STRING("SetPropertyDenied"));
+             break;
+         case nsIXPCSecurityManager::ACCESS_CALL_METHOD:
+             stringName.Assign(NS_LITERAL_STRING("CallMethodDenied"));
+         }
+ 
+         NS_ConvertUTF8toUTF16 className(classInfoData.GetName());
+         const PRUnichar *formatStrings[] =
+         {
+             className.get(),
+             JSValIDToString(cx, aProperty)
+         };
+ 
+         nsXPIDLString errorMsg;
+-        rv = sStrBundle->FormatStringFromName(stringName.get(),
+-                                              formatStrings,
+-                                              NS_ARRAY_LENGTH(formatStrings),
+-                                              getter_Copies(errorMsg));
+-        NS_ENSURE_SUCCESS(rv, rv);
+- 
++        nsresult rv2 = sStrBundle->FormatStringFromName(stringName.get(),
++                                                        formatStrings,
++                                                        NS_ARRAY_LENGTH(formatStrings),
++                                                        getter_Copies(errorMsg));
++        NS_ENSURE_SUCCESS(rv2, rv2);
++
+         JS_SetPendingException(cx,
+             STRING_TO_JSVAL(JS_NewUCStringCopyZ(cx,
+                 NS_REINTERPRET_CAST(const jschar*, errorMsg.get()))));
+ 
+         if (sXPConnect)
+         {
+             nsCOMPtr<nsIXPCNativeCallContext> xpcCallContext;
+             sXPConnect->GetCurrentNativeCallContext(getter_AddRefs(xpcCallContext));
+             if (xpcCallContext)
+                 xpcCallContext->SetExceptionWasThrown(PR_TRUE);
+         }
+     }
+ 
+     return rv;
+ }

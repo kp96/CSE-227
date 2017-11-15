@@ -1,0 +1,16 @@
+Index: Makefile
+===================================================================
+RCS file: /cvsroot/mozilla/security/nss/lib/pk11wrap/Makefile,v
+retrieving revision 1.4
+diff -u -r1.4 Makefile
+--- Makefile	15 Feb 2002 22:53:55 -0000	1.4
++++ Makefile	18 Jun 2003 18:11:08 -0000
+@@ -86,3 +86,8 @@
+ endif
+ endif
+ endif
++ifdef XP_OS2_VACPP
++$(OBJDIR)/pk11skey.obj: pk11skey.c
++	@$(MAKE_OBJDIR)
++	$(CC) -Fo$@ -c $(filter-out /O+, $(CFLAGS)) $(call abspath,$<)
++endif

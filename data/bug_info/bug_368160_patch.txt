@@ -1,0 +1,26 @@
+Index: caps/src/nsScriptSecurityManager.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/caps/src/nsScriptSecurityManager.cpp,v
+retrieving revision 1.315
+diff -u -p -d -8 -r1.315 nsScriptSecurityManager.cpp
+--- caps/src/nsScriptSecurityManager.cpp	22 Nov 2006 18:27:52 -0000	1.315
++++ caps/src/nsScriptSecurityManager.cpp	22 Jan 2007 22:04:26 -0000
+@@ -1273,17 +1273,17 @@ nsScriptSecurityManager::CheckLoadURIWit
+     if ((aFlags & nsIScriptSecurityManager::DISALLOW_SCRIPT) &&
+          targetScheme.EqualsLiteral("javascript"))
+     {
+        return NS_ERROR_DOM_BAD_URI;
+     }
+ 
+     //-- get the source scheme
+     nsCAutoString sourceScheme;
+-    rv = sourceURI->GetScheme(sourceScheme);
++    rv = sourceBaseURI->GetScheme(sourceScheme);
+     if (NS_FAILED(rv)) return rv;
+ 
+     if (targetScheme.Equals(sourceScheme,
+                             nsCaseInsensitiveCStringComparator()) &&
+         !sourceScheme.LowerCaseEqualsLiteral(NS_NULLPRINCIPAL_SCHEME))
+     {
+         // every scheme can access another URI from the same scheme,
+         // as long as they don't represent null principals.

@@ -1,0 +1,16 @@
+diff -r 2af3e11314df security/manager/ssl/src/nsNSSCallbacks.cpp
+--- a/security/manager/ssl/src/nsNSSCallbacks.cpp	Mon May 11 15:15:36 2009 -0400
++++ b/security/manager/ssl/src/nsNSSCallbacks.cpp	Mon Jun 15 15:44:34 2009 -0500
+@@ -1087,7 +1087,13 @@
+     "CN=Network Solutions EV SSL CA,O=Network Solutions L.L.C.,C=US",
+     nsnull, "tk6FnYQfGx3UUolOB5Yt+d7xj8w=", nsnull,
+     "http://ocsp.netsolssl.com"
+-  }
++  },
++  /* Trustwave */
++  {
++    "CN=SecureTrust CA,O=SecureTrust Corporation,C=US",
++    nsnull, "QjK2FvoE/f5dS3rD/fdMQB1aQ68=", nsnull,
++    "http://ocsp.trustwave.com"
++   }
+ };

@@ -1,0 +1,136 @@
+Index: mailnews/news/src/nsNNTPProtocol.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/mailnews/news/src/nsNNTPProtocol.cpp,v
+retrieving revision 1.397
+diff -u -8 -p -r1.397 nsNNTPProtocol.cpp
+--- mailnews/news/src/nsNNTPProtocol.cpp	1 Apr 2008 01:27:01 -0000	1.397
++++ mailnews/news/src/nsNNTPProtocol.cpp	15 Apr 2008 01:48:15 -0000
+@@ -4200,17 +4200,16 @@ PRInt32 nsNNTPProtocol::DoCancel()
+ {
+     PRInt32 status = 0;
+     PRBool failure = PR_FALSE;
+     nsresult rv = NS_OK;
+     char *id = nsnull;
+     char *subject = nsnull;
+     char *newsgroups = nsnull;
+     char *distribution = nsnull;
+-    char *other_random_headers = nsnull;
+     char *body = nsnull;
+     cancelInfoEntry cancelInfo;
+     PRBool requireConfirmationForCancel = PR_TRUE;
+     PRBool showAlertAfterCancel = PR_TRUE;
+ 
+     int L;
+ 
+   /* #### Should we do a more real check than this?  If the POST command
+@@ -4250,23 +4249,25 @@ PRInt32 nsNNTPProtocol::DoCancel()
+   m_cancelNewsgroups = nsnull;
+   m_cancelDistribution = nsnull;
+   m_cancelFromHdr = nsnull;
+   m_cancelID = nsnull;
+ 
+   L = PL_strlen (id);
+ 
+   subject = (char *) PR_Malloc (L + 20);
+-  other_random_headers = (char *) PR_Malloc (L + 20);
+   body = (char *) PR_Malloc (PL_strlen (XP_AppCodeName) + 100);
+ 
+   nsString alertText;
+   nsString confirmText;
+   PRInt32 confirmCancelResult = 0;
+ 
++  // A little early to declare, but the goto causes problems
++  nsCAutoString otherHeaders;
++
+   /* Make sure that this loser isn't cancelling someone else's posting.
+      Yes, there are occasionally good reasons to do so.  Those people
+      capable of making that decision (news admins) have other tools with
+      which to cancel postings (like telnet.)
+ 
+      Don't do this if server tells us it will validate user. DMB 3/19/97
+    */
+   PRBool cancelchk=PR_FALSE;
+@@ -4321,33 +4322,33 @@ reported here */
+ 
+   if (confirmCancelResult != 1) {
+       // they cancelled the cancel
+       status = MK_NNTP_NOT_CANCELLED;
+       failure = PR_TRUE;
+       goto FAIL;
+   }
+ 
+-  if (!subject || !other_random_headers || !body)
++  if (!subject || !body)
+   {
+     status = MK_OUT_OF_MEMORY;
+     failure = PR_TRUE;
+     goto FAIL;
+   }
+ 
+   PL_strcpy (subject, "cancel ");
+   PL_strcat (subject, id);
+ 
+-  PL_strcpy (other_random_headers, "Control: cancel ");
+-  PL_strcat (other_random_headers, id);
+-  PL_strcat (other_random_headers, CRLF);
++  otherHeaders.AppendLiteral("Control: cancel ");
++  otherHeaders += id;
++  otherHeaders.AppendLiteral(CRLF);
+   if (distribution) {
+-    PL_strcat (other_random_headers, "Distribution: ");
+-    PL_strcat (other_random_headers, distribution);
+-    PL_strcat (other_random_headers, CRLF);
++    otherHeaders.AppendLiteral("Distribution: ");
++    otherHeaders += distribution;
++    otherHeaders.AppendLiteral(CRLF);
+   }
+ 
+   PL_strcpy (body, "This message was cancelled from within ");
+   PL_strcat (body, XP_AppCodeName);
+   PL_strcat (body, "." CRLF);
+ 
+ 
+   m_cancelStatus = 0;
+@@ -4355,22 +4356,22 @@ reported here */
+   {
+     /* NET_BlockingWrite() should go away soon? I think. */
+     /* The following are what we really need to cancel a posted message */
+     char *data;
+     data = PR_smprintf("From: %s" CRLF
+                        "Newsgroups: %s" CRLF
+                        "Subject: %s" CRLF
+                        "References: %s" CRLF
+-                       "%s" /* other_random_headers, already with CRLF */
++                       "%s" /* otherHeaders, already with CRLF */
+                        CRLF /* body separator */
+                        "%s" /* body, already with CRLF */
+                        "." CRLF, /* trailing message terminator "." */
+                        cancelInfo.from.get(), newsgroups, subject, id,
+-                       other_random_headers, body);
++                       otherHeaders.get(), body);
+ 
+     nsCOMPtr<nsIMsgMailNewsUrl> mailnewsurl = do_QueryInterface(m_runningURL);
+     if (mailnewsurl)
+       status = SendData(mailnewsurl, data);
+     PR_Free (data);
+     if (status < 0) {
+       nsCAutoString errorText;
+       errorText.AppendInt(status);
+@@ -4405,17 +4406,16 @@ FAIL:
+   if (m_newsFolder)
+     rv = ( failure ) ? m_newsFolder->CancelFailed()
+                      : m_newsFolder->CancelComplete();
+ 
+   PR_Free (id);
+   PR_Free (subject);
+   PR_Free (newsgroups);
+   PR_Free (distribution);
+-  PR_Free (other_random_headers);
+   PR_Free (body);
+ 
+   return status;
+ }
+ 
+ PRInt32 nsNNTPProtocol::XPATSend()
+ {
+   int status = 0;

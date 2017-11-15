@@ -1,0 +1,158 @@
+# HG changeset patch
+# Parent 9f18d05d1ba1f216ba7e4277315ffb912270548f
+# User Cykesiopka <cykesiopka@hotmail.com>
+Bug 273949 - Replace cacertexists.xul with a call to nsIPromptService::alert v2
+
+diff --git a/security/manager/locales/en-US/chrome/pippki/pippki.dtd b/security/manager/locales/en-US/chrome/pippki/pippki.dtd
+--- a/security/manager/locales/en-US/chrome/pippki/pippki.dtd
++++ b/security/manager/locales/en-US/chrome/pippki/pippki.dtd
+@@ -41,20 +41,16 @@
+ <!ENTITY downloadCert.trustEmail "Trust this CA to identify email users.">
+ <!ENTITY downloadCert.trustObjSign "Trust this CA to identify software developers.">
+ <!ENTITY downloadCert.message3 "Before trusting this CA for any purpose, you should examine its certificate and its policy and procedures (if available).">
+ <!ENTITY downloadCert.viewCert.label "View">
+ <!ENTITY downloadCert.viewPolicy.label "Policy">
+ <!ENTITY downloadCert.viewCert.text "Examine CA certificate">
+ <!ENTITY downloadCert.viewPolicy.text "Examine CA policies and procedures">
+ 
+-<!-- Certificate Exists in database -->
+-<!ENTITY caCertExists.title "Certificate Exists">
+-<!ENTITY caCertExists.message "The Certificate already exists.">
+-
+ <!-- Strings for the SSL client auth ask dialog -->
+ <!ENTITY clientAuthAsk.title "User Identification Request">
+ <!ENTITY clientAuthAsk.message1 "This site has requested that you identify yourself with a certificate:">
+ <!ENTITY clientAuthAsk.message2 "Choose a certificate to present as identification:">
+ <!ENTITY clientAuthAsk.message3 "Details of selected certificate:">
+ 
+ <!-- Strings for the cert picker dialog -->
+ <!ENTITY certPicker.title "Select Certificate">
+diff --git a/security/manager/locales/en-US/chrome/pippki/pippki.properties b/security/manager/locales/en-US/chrome/pippki/pippki.properties
+--- a/security/manager/locales/en-US/chrome/pippki/pippki.properties
++++ b/security/manager/locales/en-US/chrome/pippki/pippki.properties
+@@ -181,12 +181,16 @@ addExceptionDomainMismatchShort=Wrong Si
+ addExceptionDomainMismatchLong=Certificate belongs to a different site, which could indicate an identity theft.
+ addExceptionExpiredShort=Outdated Information
+ addExceptionExpiredLong=Certificate is not currently valid. It is impossible to verify whether this identity was reported as stolen or lost.
+ addExceptionUnverifiedOrBadSignatureShort=Unknown Identity
+ addExceptionUnverifiedOrBadSignatureLong=Certificate is not trusted, because it hasn't been verified by a recognized authority using a secure signature.
+ addExceptionValidShort=Valid Certificate
+ addExceptionValidLong=This site provides valid, verified identification.  There is no need to add an exception.
+ addExceptionCheckingShort=Checking Information
+ addExceptionCheckingLong=Attempting to identify the site…
+ addExceptionNoCertShort=No Information Available
+ addExceptionNoCertLong=Unable to obtain identification status for the given site.
+ addExceptionConnectionFailed=Connection Failed
++
++#Certificate Exists in database
++caCertExistsTitle=Certificate Exists
++caCertExistsMessage=The Certificate already exists.
+diff --git a/security/manager/pki/resources/content/cacertexists.xul b/security/manager/pki/resources/content/cacertexists.xul
+deleted file mode 100644
+--- a/security/manager/pki/resources/content/cacertexists.xul
++++ /dev/null
+@@ -1,18 +0,0 @@
+-<?xml version="1.0"?>
+-<!-- This Source Code Form is subject to the terms of the Mozilla Public
+-   - License, v. 2.0. If a copy of the MPL was not distributed with this
+-   - file, You can obtain one at http://mozilla.org/MPL/2.0/. -->
+-
+-<?xml-stylesheet href="chrome://global/skin/" type="text/css"?>
+-
+-<!DOCTYPE dialog SYSTEM "chrome://pippki/locale/pippki.dtd">
+-
+-<dialog id="cacertexists" 
+-  title="&caCertExists.title;"
+-  xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+-  buttons="accept">
+-
+-  <description>&caCertExists.message;</description>
+-    
+-</dialog>
+-
+diff --git a/security/manager/pki/resources/jar.mn b/security/manager/pki/resources/jar.mn
+--- a/security/manager/pki/resources/jar.mn
++++ b/security/manager/pki/resources/jar.mn
+@@ -8,17 +8,16 @@ pippki.jar:
+     content/pippki/getpassword.xul           (content/getpassword.xul)
+     content/pippki/password.js               (content/password.js)
+     content/pippki/resetpassword.xul         (content/resetpassword.xul)
+     content/pippki/resetpassword.js          (content/resetpassword.js)
+     content/pippki/certerror.js              (content/certerror.js)
+ *   content/pippki/certerror.xul             (content/certerror.xul)
+     content/pippki/downloadcert.js           (content/downloadcert.js)
+     content/pippki/downloadcert.xul          (content/downloadcert.xul)
+-    content/pippki/cacertexists.xul          (content/cacertexists.xul)
+     content/pippki/certManager.js            (content/certManager.js)
+     content/pippki/certManager.xul           (content/certManager.xul)
+     content/pippki/CAOverlay.xul             (content/CAOverlay.xul)
+     content/pippki/WebSitesOverlay.xul       (content/WebSitesOverlay.xul)
+     content/pippki/OthersOverlay.xul         (content/OthersOverlay.xul)
+     content/pippki/MineOverlay.xul           (content/MineOverlay.xul)
+     content/pippki/OrphanOverlay.xul         (content/OrphanOverlay.xul)
+     content/pippki/viewCertDetails.xul       (content/viewCertDetails.xul)
+diff --git a/security/manager/pki/src/nsNSSDialogs.cpp b/security/manager/pki/src/nsNSSDialogs.cpp
+--- a/security/manager/pki/src/nsNSSDialogs.cpp
++++ b/security/manager/pki/src/nsNSSDialogs.cpp
+@@ -28,16 +28,19 @@
+ #include "nsPKIParamBlock.h"
+ #include "nsIKeygenThread.h"
+ #include "nsIProtectedAuthThread.h"
+ #include "nsNSSDialogHelper.h"
+ #include "nsIWindowWatcher.h"
+ #include "nsIX509CertValidity.h"
+ #include "nsICRLInfo.h"
+ 
++#include "nsEmbedCID.h"
++#include "nsIPromptService.h"
++
+ #define PIPSTRING_BUNDLE_URL "chrome://pippki/locale/pippki.properties"
+ 
+ /* ==== */
+ 
+ nsNSSDialogs::nsNSSDialogs()
+ {
+ }
+ 
+@@ -209,27 +212,34 @@ nsNSSDialogs::ConfirmDownloadCACert(nsII
+ }
+ 
+ 
+ NS_IMETHODIMP 
+ nsNSSDialogs::NotifyCACertExists(nsIInterfaceRequestor *ctx)
+ {
+   nsresult rv;
+ 
++  nsCOMPtr<nsIPromptService> promptSvc(do_GetService(NS_PROMPTSERVICE_CONTRACTID));
++  if (!promptSvc)
++    return NS_ERROR_FAILURE;
++
+   // Get the parent window for the dialog
+   nsCOMPtr<nsIDOMWindow> parent = do_GetInterface(ctx);
+ 
+-  nsCOMPtr<nsIDialogParamBlock> block =
+-           do_CreateInstance(NS_DIALOGPARAMBLOCK_CONTRACTID);
+-  if (!block) return NS_ERROR_FAILURE;
++  nsAutoString title;
++  rv = mPIPStringBundle->GetStringFromName(NS_LITERAL_STRING("caCertExistsTitle").get(),
++                                           getter_Copies(title));
++  NS_ENSURE_SUCCESS(rv, rv);
+ 
+-  
+-  rv = nsNSSDialogHelper::openDialog(parent, 
+-                                     "chrome://pippki/content/cacertexists.xul",
+-                                     block);
++  nsAutoString msg;
++  rv = mPIPStringBundle->GetStringFromName(NS_LITERAL_STRING("caCertExistsMessage").get(),
++                                           getter_Copies(msg));
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  rv = promptSvc->Alert(parent, title.get(), msg.get());
+ 
+   return rv;
+ }
+ 
+ 
+ NS_IMETHODIMP
+ nsNSSDialogs::ChooseCertificate(nsIInterfaceRequestor *ctx, const PRUnichar *cn, const PRUnichar *organization, const PRUnichar *issuer, const PRUnichar **certNickList, const PRUnichar **certDetailsList, uint32_t count, int32_t *selectedIndex, bool *canceled) 
+ {

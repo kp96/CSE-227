@@ -1,0 +1,700 @@
+Index: toolkit/components/commandlines/public/Makefile.in
+===================================================================
+RCS file: /cvsroot/mozilla/toolkit/components/commandlines/public/Makefile.in,v
+retrieving revision 1.2
+diff -u -w -r1.2 Makefile.in
+--- toolkit/components/commandlines/public/Makefile.in	17 Jan 2005 18:50:14 -0000	1.2
++++ toolkit/components/commandlines/public/Makefile.in	29 Jul 2007 20:55:56 -0000
+@@ -49,6 +49,7 @@
+ 	nsICommandLine.idl \
+ 	nsICommandLineRunner.idl \
+ 	nsICommandLineHandler.idl \
++	nsICommandLineValidator.idl \
+ 	$(NULL)
+ 
+ include $(topsrcdir)/config/rules.mk
+Index: toolkit/components/commandlines/public/nsICommandLineValidator.idl
+===================================================================
+RCS file: toolkit/components/commandlines/public/nsICommandLineValidator.idl
+diff -N toolkit/components/commandlines/public/nsICommandLineValidator.idl
+--- /dev/null	1 Jan 1970 00:00:00 -0000
++++ toolkit/components/commandlines/public/nsICommandLineValidator.idl	29 Jul 2007 20:55:56 -0000
+@@ -0,0 +1,70 @@
++/* ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is the Mozilla toolkit.
++ *
++ * The Initial Developer of the Original Code is
++ * Robert Strong <robert.bugzilla@gmail.com>
++ * Portions created by the Initial Developer are Copyright (C) 2007
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either the GNU General Public License Version 2 or later (the "GPL"), or
++ * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++#include "nsISupports.idl"
++
++interface nsICommandLine;
++
++/**
++ * Validates arguments on the command line of an XUL application.
++ *
++ * Each validator is registered in the category "command-line-validator".
++ * The entries in this category are read in alphabetical order, and each
++ * category value is treated as a service contractid implementing this
++ * interface.
++ *
++ * By convention, validator with ordinary priority should begin with "m".
++ *
++ * Example:
++ * Category               Entry          Value
++ * command-line-validator b-browser      @mozilla.org/browser/clh;1
++ * command-line-validator m-edit         @mozilla.org/composer/clh;1
++ * command-line-validator m-irc          @mozilla.org/chatzilla/clh;1
++ *
++ */
++
++[scriptable, uuid(5ecaa593-7660-4a3a-957a-92d5770671c7)]
++interface nsICommandLineValidator : nsISupports
++{
++  /**
++   * Process the command-line validators in the proper order, calling
++   * "validate()" on each.
++   *
++   * @throws NS_ERROR_ABORT if any validator throws NS_ERROR_ABORT. All other
++   *         errors thrown by validators will be silently ignored.
++   */
++  void validate(in nsICommandLine aCommandLine);
++};
+Index: toolkit/components/commandlines/src/nsCommandLine.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/toolkit/components/commandlines/src/nsCommandLine.cpp,v
+retrieving revision 1.13
+diff -u -w -r1.13 nsCommandLine.cpp
+--- toolkit/components/commandlines/src/nsCommandLine.cpp	22 Jul 2005 20:05:41 -0000	1.13
++++ toolkit/components/commandlines/src/nsCommandLine.cpp	29 Jul 2007 20:55:57 -0000
+@@ -39,6 +39,7 @@
+ 
+ #include "nsICategoryManager.h"
+ #include "nsICommandLineHandler.h"
++#include "nsICommandLineValidator.h"
+ #include "nsIDOMWindow.h"
+ #include "nsIFile.h"
+ #include "nsISimpleEnumerator.h"
+@@ -85,12 +86,16 @@
+ protected:
+   ~nsCommandLine() { }
+ 
+-  typedef nsresult (*EnumerateCallback)(nsICommandLineHandler* aHandler,
++  typedef nsresult (*EnumerateHandlersCallback)(nsICommandLineHandler* aHandler,
++					nsICommandLine* aThis,
++					void *aClosure);
++  typedef nsresult (*EnumerateValidatorsCallback)(nsICommandLineValidator* aValidator,
+ 					nsICommandLine* aThis,
+ 					void *aClosure);
+ 
+   void appendArg(const char* arg);
+-  nsresult EnumerateHandlers(EnumerateCallback aCallback, void *aClosure);
++  nsresult EnumerateHandlers(EnumerateHandlersCallback aCallback, void *aClosure);
++  nsresult EnumerateValidators(EnumerateValidatorsCallback aCallback, void *aClosure);
+ 
+   nsStringArray     mArgs;
+   PRUint32          mState;
+@@ -536,7 +541,7 @@
+ }
+ 
+ nsresult
+-nsCommandLine::EnumerateHandlers(EnumerateCallback aCallback, void *aClosure)
++nsCommandLine::EnumerateHandlers(EnumerateHandlersCallback aCallback, void *aClosure)
+ {
+   nsresult rv;
+ 
+@@ -578,6 +583,55 @@
+   return rv;
+ }
+ 
++nsresult
++nsCommandLine::EnumerateValidators(EnumerateValidatorsCallback aCallback, void *aClosure)
++{
++  nsresult rv;
++
++  nsCOMPtr<nsICategoryManager> catman
++    (do_GetService(NS_CATEGORYMANAGER_CONTRACTID));
++  NS_ENSURE_TRUE(catman, NS_ERROR_UNEXPECTED);
++
++  nsCOMPtr<nsISimpleEnumerator> entenum;
++  rv = catman->EnumerateCategory("command-line-validator",
++                                 getter_AddRefs(entenum));
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  nsCOMPtr<nsIUTF8StringEnumerator> strenum (do_QueryInterface(entenum));
++  NS_ENSURE_TRUE(strenum, NS_ERROR_UNEXPECTED);
++
++  nsCAutoString entry;
++  PRBool hasMore;
++  while (NS_SUCCEEDED(strenum->HasMore(&hasMore)) && hasMore) {
++    strenum->GetNext(entry);
++
++    nsXPIDLCString contractID;
++    rv = catman->GetCategoryEntry("command-line-validator",
++				  entry.get(),
++				  getter_Copies(contractID));
++    if (!contractID)
++      continue;
++
++    nsCOMPtr<nsICommandLineValidator> clv(do_GetService(contractID.get()));
++    if (!clv)
++      continue;
++
++    rv = (aCallback)(clv, this, aClosure);
++    if (rv == NS_ERROR_ABORT)
++      break;
++
++    rv = NS_OK;
++  }
++
++  return rv;
++}
++
++static nsresult
++EnumValidate(nsICommandLineValidator* aValidator, nsICommandLine* aThis, void*)
++{
++  return aValidator->Validate(aThis);
++}  
++
+ static nsresult
+ EnumRun(nsICommandLineHandler* aHandler, nsICommandLine* aThis, void*)
+ {
+@@ -589,6 +643,10 @@
+ {
+   nsresult rv;
+ 
++  rv = EnumerateValidators(EnumValidate, nsnull);
++  if (rv == NS_ERROR_ABORT)
++    return rv;
++
+   rv = EnumerateHandlers(EnumRun, nsnull);
+   if (rv == NS_ERROR_ABORT)
+     return rv;
+Index: toolkit/xre/nsAppRunner.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/toolkit/xre/nsAppRunner.cpp,v
+retrieving revision 1.113.2.4.2.5
+diff -u -w -r1.113.2.4.2.5 nsAppRunner.cpp
+--- toolkit/xre/nsAppRunner.cpp	9 Nov 2006 20:55:12 -0000	1.113.2.4.2.5
++++ toolkit/xre/nsAppRunner.cpp	29 Jul 2007 20:56:02 -0000
+@@ -321,13 +321,16 @@
+  * --arg (or /arg on win32/OS2).
+  *
+  * @param aArg the parameter to check. Must be lowercase.
++ * @param aCheckOSInt if true returns ARG_BAD if the osint argument is present
++ *        when aArg is also present.
+  * @param if non-null, the -arg <data> will be stored in this pointer. This is *not*
+  *        allocated, but rather a pointer to the argv data.
+  */
+ static ArgResult
+-CheckArg(const char* aArg, const char **aParam = nsnull)
++CheckArg(const char* aArg, PRBool aCheckOSInt = PR_FALSE, const char **aParam = nsnull)
+ {
+   char **curarg = gArgv + 1; // skip argv[0]
++  ArgResult ar = ARG_NONE;
+ 
+   while (*curarg) {
+     char *arg = curarg[0];
+@@ -344,7 +347,8 @@
+       if (strimatch(aArg, arg)) {
+         RemoveArg(curarg);
+         if (!aParam) {
+-          return ARG_FOUND;
++          ar = ARG_FOUND;
++          break;
+         }
+ 
+         if (*curarg) {
+@@ -357,7 +361,8 @@
+ 
+           *aParam = *curarg;
+           RemoveArg(curarg);
+-          return ARG_FOUND;
++          ar = ARG_FOUND;
++          break;
+         }
+         return ARG_BAD;
+       }
+@@ -366,7 +371,15 @@
+     ++curarg;
+   }
+ 
+-  return ARG_NONE;
++  if (aCheckOSInt && ar == ARG_FOUND) {
++    ArgResult arOSInt = CheckArg("osint");
++    if (arOSInt == ARG_FOUND) {
++      ar = ARG_BAD;
++      PR_fprintf(PR_STDERR, "Error: argument -osint is invalid\n");
++    }
++  }
++
++  return ar;
+ }
+ 
+ PRBool gSafeMode = PR_FALSE;
+@@ -931,14 +944,14 @@
+   ToLowerCase(program);
+   const char *username = getenv("LOGNAME");
+ 
+-  ar = CheckArg("p", &profile);
++  ar = CheckArg("p", PR_FALSE, &profile);
+   if (ar == ARG_BAD) {
+     PR_fprintf(PR_STDERR, "Error: argument -p requires a profile name\n");
+     return 1;
+   }
+ 
+   const char *temp = nsnull;
+-  ar = CheckArg("a", &temp);
++  ar = CheckArg("a", PR_FALSE, &temp);
+   if (ar == ARG_BAD) {
+     PR_fprintf(PR_STDERR, "Error: argument -a requires an application name\n");
+     return 1;
+@@ -946,7 +959,7 @@
+     program.Assign(temp);
+   }
+ 
+-  ar = CheckArg("u", &username);
++  ar = CheckArg("u", PR_FALSE, &username);
+   if (ar == ARG_BAD) {
+     PR_fprintf(PR_STDERR, "Error: argument -u requires a username\n");
+     return 1;
+@@ -989,7 +1002,7 @@
+   const char *username = getenv("LOGNAME");
+ 
+   const char *temp = nsnull;
+-  ar = CheckArg("a", &temp);
++  ar = CheckArg("a", PR_TRUE, &temp);
+   if (ar == ARG_BAD) {
+     PR_fprintf(PR_STDERR, "Error: argument -a requires an application name\n");
+     return PR_FALSE;
+@@ -997,7 +1010,7 @@
+     program.Assign(temp);
+   }
+ 
+-  ar = CheckArg("u", &username);
++  ar = CheckArg("u", PR_TRUE, &username);
+   if (ar == ARG_BAD) {
+     PR_fprintf(PR_STDERR, "Error: argument -u requires a username\n");
+     return PR_FALSE;
+@@ -1436,10 +1449,17 @@
+   *aResult = nsnull;
+   *aStartOffline = PR_FALSE;
+ 
++  ar = CheckArg("offline", PR_TRUE);
++  if (ar == ARG_BAD) {
++    PR_fprintf(PR_STDERR, "Error: argument -offline is invalid when argument -osint is specified\n");
++    return NS_ERROR_FAILURE;
++  }
++
+   arg = PR_GetEnv("XRE_START_OFFLINE");
+-  if ((arg && *arg) || CheckArg("offline"))
++  if ((arg && *arg) || ar)
+     *aStartOffline = PR_TRUE;
+ 
++
+   arg = PR_GetEnv("XRE_PROFILE_PATH");
+   if (arg && *arg) {
+     nsCOMPtr<nsILocalFile> lf;
+@@ -1459,17 +1479,22 @@
+ 
+     // Clear out flags that we handled (or should have handled!) last startup.
+     const char *dummy;
+-    CheckArg("p", &dummy);
+-    CheckArg("profile", &dummy);
++    CheckArg("p", PR_FALSE, &dummy);
++    CheckArg("profile", PR_FALSE, &dummy);
+     CheckArg("profilemanager");
+ 
+     return NS_LockProfilePath(lf, localDir, nsnull, aResult);
+   }
+ 
+-  if (CheckArg("migration"))
++  ar = CheckArg("migration", PR_TRUE);
++  if (ar == ARG_BAD) {
++    PR_fprintf(PR_STDERR, "Error: argument -migration is invalid when argument -osint is specified\n");
++    return NS_ERROR_FAILURE;
++  } else if (ar == ARG_FOUND) {
+     gDoMigration = PR_TRUE;
++  }
+ 
+-  ar = CheckArg("profile", &arg);
++  ar = CheckArg("profile", PR_TRUE, &arg);
+   if (ar == ARG_BAD) {
+     PR_fprintf(PR_STDERR, "Error: argument -profile requires a path\n");
+     return NS_ERROR_FAILURE;
+@@ -1494,7 +1519,7 @@
+   rv = NS_NewToolkitProfileService(getter_AddRefs(profileSvc));
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+-  ar = CheckArg("createprofile", &arg);
++  ar = CheckArg("createprofile", PR_TRUE, &arg);
+   if (ar == ARG_BAD) {
+     PR_fprintf(PR_STDERR, "Error: argument -createprofile requires a profile name\n");
+     return NS_ERROR_FAILURE;
+@@ -1551,11 +1576,21 @@
+     }
+   }
+ 
+-  ar = CheckArg("p", &arg);
++  ar = CheckArg("p", PR_FALSE, &arg);
+   if (ar == ARG_BAD) {
++    ar = CheckArg("osint");
++    if (ar == ARG_FOUND) {
++      PR_fprintf(PR_STDERR, "Error: argument -p is invalid when argument -osint is specified\n");
++      return NS_ERROR_FAILURE;
++    }
+     return ShowProfileManager(profileSvc, aNative);
+   }
+   if (ar) {
++    ar = CheckArg("osint");
++    if (ar == ARG_FOUND) {
++      PR_fprintf(PR_STDERR, "Error: argument -p is invalid when argument -osint is specified\n");
++      return NS_ERROR_FAILURE;
++    }
+     nsCOMPtr<nsIToolkitProfile> profile;
+     rv = profileSvc->GetProfileByName(nsDependentCString(arg),
+                                       getter_AddRefs(profile));
+@@ -1580,7 +1615,11 @@
+     return ShowProfileManager(profileSvc, aNative);
+   }
+ 
+-  if (CheckArg("profilemanager")) {
++  ar = CheckArg("profilemanager", PR_TRUE);
++  if (ar == ARG_BAD) {
++    PR_fprintf(PR_STDERR, "Error: argument -profilemanager is invalid when argument -osint is specified\n");
++    return NS_ERROR_FAILURE;
++  } else if (ar == ARG_FOUND) {
+     return ShowProfileManager(profileSvc, aNative);
+   }
+ 
+@@ -1855,6 +1894,7 @@
+ XRE_main(int argc, char* argv[], const nsXREAppData* aAppData)
+ {
+   nsresult rv;
++  ArgResult ar;
+   NS_TIMELINE_MARK("enter main");
+ 
+ #ifdef DEBUG
+@@ -1932,9 +1972,13 @@
+   ScopedFPHandler handler;
+ #endif /* XP_OS2 */
+ 
+-  if (CheckArg("safe-mode"))
++  ar = CheckArg("safe-mode", PR_TRUE);
++  if (ar == ARG_BAD) {
++    PR_fprintf(PR_STDERR, "Error: argument -safe-mode is invalid when argument -osint is specified\n");
++    return 1;
++  } else if (ar == ARG_FOUND) {
+     gSafeMode = PR_TRUE;
+-
++  }
+   // Handle -help and -version command line arguments.
+   // They should return quickly, so we deal with them here.
+   if (CheckArg("h") || CheckArg("help") || CheckArg("?")) {
+@@ -1959,7 +2003,12 @@
+   }
+ 
+   // Check for -register, which registers chrome and then exits immediately.
+-  if (CheckArg("register")) {
++
++  ar = CheckArg("register", PR_TRUE);
++  if (ar == ARG_BAD) {
++    PR_fprintf(PR_STDERR, "Error: argument -register is invalid when argument -osint is specified\n");
++    return 1;
++  } else if (ar == ARG_FOUND) {
+     ScopedXPCOMStartup xpcom;
+     rv = xpcom.Initialize();
+     NS_ENSURE_SUCCESS(rv, 1);
+@@ -2057,7 +2106,7 @@
+   // handle -remote now that xpcom is fired up
+ 
+   const char* xremotearg;
+-  ArgResult ar = CheckArg("remote", &xremotearg);
++  ar = CheckArg("remote", PR_TRUE, &xremotearg);
+   if (ar == ARG_BAD) {
+     PR_fprintf(PR_STDERR, "Error: -remote requires an argument\n");
+     return 1;
+@@ -2275,7 +2324,21 @@
+         nsCOMPtr<nsIExtensionManager> em(do_GetService("@mozilla.org/extensions/manager;1"));
+         NS_ENSURE_TRUE(em, 1);
+ 
+-        if (CheckArg("install-global-extension") || CheckArg("install-global-theme")) {
++        ar = CheckArg("install-global-extension", PR_TRUE);
++        if (ar == ARG_BAD) {
++          PR_fprintf(PR_STDERR, "Error: argument -install-global-extension is invalid when argument -osint is specified\n");
++          return 1;
++        } else if (ar == ARG_FOUND) {
++          // Do the required processing and then shut down.
++          em->HandleCommandLineArgs(cmdLine);
++          return 0;
++        }
++
++        ar = CheckArg("install-global-theme", PR_TRUE);
++        if (ar == ARG_BAD) {
++          PR_fprintf(PR_STDERR, "Error: argument -install-global-theme is invalid when argument -osint is specified\n");
++          return 1;
++        } else if (ar == ARG_FOUND) {
+           // Do the required processing and then shut down.
+           em->HandleCommandLineArgs(cmdLine);
+           return 0;
+Index: browser/components/nsBrowserContentHandler.js
+===================================================================
+RCS file: /cvsroot/mozilla/browser/components/nsBrowserContentHandler.js,v
+retrieving revision 1.12.2.5.2.4
+diff -u -w -r1.12.2.5.2.4 nsBrowserContentHandler.js
+--- browser/components/nsBrowserContentHandler.js	16 Jan 2007 22:39:43 -0000	1.12.2.5.2.4
++++ browser/components/nsBrowserContentHandler.js	29 Jul 2007 20:56:02 -0000
+@@ -60,6 +60,7 @@
+ const nsIWindowWatcher       = Components.interfaces.nsIWindowWatcher;
+ const nsICategoryManager     = Components.interfaces.nsICategoryManager;
+ const nsIWebNavigationInfo   = Components.interfaces.nsIWebNavigationInfo;
++const nsICommandLineValidator = Components.interfaces.nsICommandLineValidator;
+ 
+ const NS_BINDING_ABORTED = 0x80020006;
+ const NS_ERROR_WONT_HANDLE_CONTENT = 0x805d0001;
+@@ -221,6 +222,7 @@
+         !iid.equals(nsICommandLineHandler) &&
+         !iid.equals(nsIBrowserHandler) &&
+         !iid.equals(nsIContentHandler) &&
++        !iid.equals(nsICommandLineValidator) &&
+         !iid.equals(nsIFactory))
+       throw Components.errors.NS_ERROR_NO_INTERFACE;
+ 
+@@ -477,6 +479,21 @@
+     request.cancel(NS_BINDING_ABORTED);
+   },
+ 
++  /* nsICommandLineValidator */
++  validate : function bch_validate(cmdLine) {
++    // Other handlers may use osint so only handle the osint flag if the url
++    // flag is also present and the command line is valid.
++    var osintFlagIdx = cmdLine.findFlag("osint", false);
++    var urlFlagIdx = cmdLine.findFlag("url", false);
++    if (urlFlagIdx > -1 && (osintFlagIdx > -1 ||
++        cmdLine.state == nsICommandLine.STATE_REMOTE_EXPLICIT)) {
++      var urlParam = cmdLine.getArgument(urlFlagIdx + 1);
++      if (cmdLine.length != urlFlagIdx + 2 || /firefox\.?url:/.test(urlParam))
++        throw NS_ERROR_ABORT;
++      cmdLine.handleFlag("osint", false)
++    }
++  },
++
+   /* nsIFactory */
+   createInstance: function bch_CI(outer, iid) {
+     if (outer != null)
+@@ -691,6 +708,9 @@
+     catMan.addCategoryEntry("command-line-handler",
+                             "x-default",
+                             dch_contractID, true, true);
++    catMan.addCategoryEntry("command-line-validator",
++                            "b-browser",
++                            bch_contractID, true, true);
+   },
+     
+   unregisterSelf : function mod_unregself(compMgr, location, type) {
+@@ -705,6 +725,8 @@
+                                "m-browser", true);
+     catMan.deleteCategoryEntry("command-line-handler",
+                                "x-default", true);
++    catMan.deleteCategoryEntry("command-line-validator",
++                               "b-browser", true);
+   },
+ 
+   canUnload: function(compMgr) {
+Index: browser/components/shell/src/nsWindowsShellService.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/browser/components/shell/src/nsWindowsShellService.cpp,v
+retrieving revision 1.21
+diff -u -w -r1.21 nsWindowsShellService.cpp
+--- browser/components/shell/src/nsWindowsShellService.cpp	24 Jul 2005 22:56:48 -0000	1.21
++++ browser/components/shell/src/nsWindowsShellService.cpp	29 Jul 2007 20:56:03 -0000
+@@ -196,7 +196,7 @@
+ 
+ #define CLS_HTML "FirefoxHTML"
+ #define VAL_ICON "%APPPATH%,1"
+-#define VAL_OPEN "%APPPATH% -url \"%1\""
++#define VAL_OPEN "%APPPATH% -osint -url \"%1\""
+ 
+ #define MAKE_KEY_NAME1(PREFIX, MID) \
+   PREFIX MID
+Index: mail/installer/windows/mail.jst
+===================================================================
+RCS file: /cvsroot/mozilla/mail/installer/windows/Attic/mail.jst,v
+retrieving revision 1.25.2.3.2.1
+diff -u -w -r1.25.2.3.2.1 mail.jst
+--- mail/installer/windows/mail.jst	2 Feb 2007 07:49:43 -0000	1.25.2.3.2.1
++++ mail/installer/windows/mail.jst	29 Jul 2007 20:56:04 -0000
+@@ -64,7 +64,7 @@
+     winreg.createKey(subkey      + "\\protocols\\mailto\\shell", "");
+     winreg.createKey(subkey      + "\\protocols\\mailto\\shell\\open", "");
+     winreg.createKey(subkey      + "\\protocols\\mailto\\shell\\open\\command", "");
+-    winreg.setValueString(subkey + "\\protocols\\mailto\\shell\\open\\command", "", sfpMainExePath + " -compose \"%1\"");
++    winreg.setValueString(subkey + "\\protocols\\mailto\\shell\\open\\command", "", sfpMainExePath + " -osint -compose \"%1\"");
+     winreg.createKey(subkey      + "\\protocols\\mailto\\DefaultIcon", "");
+     winreg.setValueString(subkey + "\\protocols\\mailto\\DefaultIcon", sfpMainExePath + ",0");
+ 
+@@ -102,7 +102,7 @@
+     winreg.createKey(subkey      + "\\protocols\\news\\shell", "");
+     winreg.createKey(subkey      + "\\protocols\\news\\shell\\open", "");
+     winreg.createKey(subkey      + "\\protocols\\news\\shell\\open\\command", "");
+-    winreg.setValueString(subkey + "\\protocols\\news\\shell\\open\\command", "", sfpMainExePath + " -mail \"%1\"");
++    winreg.setValueString(subkey + "\\protocols\\news\\shell\\open\\command", "", sfpMainExePath + " -osint -mail \"%1\"");
+     winreg.createKey(subkey      + "\\protocols\\news\\DefaultIcon", "");
+     winreg.setValueString(subkey + "\\protocols\\news\\DefaultIcon", sfpMainExePath + ",0");
+ 
+@@ -112,7 +112,7 @@
+     winreg.createKey(subkey      + "\\protocols\\nntp\\shell", "");
+     winreg.createKey(subkey      + "\\protocols\\nntp\\shell\\open", "");
+     winreg.createKey(subkey      + "\\protocols\\nntp\\shell\\open\\command", "");
+-    winreg.setValueString(subkey + "\\protocols\\nntp\\shell\\open\\command", "", sfpMainExePath + " -mail \"%1\"");
++    winreg.setValueString(subkey + "\\protocols\\nntp\\shell\\open\\command", "", sfpMainExePath + " -osint -mail \"%1\"");
+     winreg.createKey(subkey      + "\\protocols\\nntp\\DefaultIcon", "");
+     winreg.setValueString(subkey + "\\protocols\\nntp\\DefaultIcon", sfpMainExePath + ",0");
+ 
+@@ -122,7 +122,7 @@
+     winreg.createKey(subkey      + "\\protocols\\snews\\shell", "");
+     winreg.createKey(subkey      + "\\protocols\\snews\\shell\\open", "");
+     winreg.createKey(subkey      + "\\protocols\\snews\\shell\\open\\command", "");
+-    winreg.setValueString(subkey + "\\protocols\\snews\\shell\\open\\command", "", sfpMainExePath + " -mail \"%1\"");
++    winreg.setValueString(subkey + "\\protocols\\snews\\shell\\open\\command", "", sfpMainExePath + " -osint -mail \"%1\"");
+     winreg.createKey(subkey      + "\\protocols\\snews\\DefaultIcon", "");
+     winreg.setValueString(subkey + "\\protocols\\snews\\DefaultIcon", sfpMainExePath + ",0");
+ 
+@@ -146,7 +146,7 @@
+     {
+       // check to see if the location of the default mail protocol handler matches the location we just wrote to...
+       // if it does not, then 
+-      var szNewMailtoProtocolHandler = sfpMainExePath + " -compose \"%1\"";
++      var szNewMailtoProtocolHandler = sfpMainExePath + " -osint -compose \"%1\"";
+       var szOldMailtoProtocolHandler = winreg.getValueString("Software\\Classes\\mailto\\shell\\open\\command", "");
+ 
+       if ((szOldMailtoProtocolHandler != null) && (szNewMailtoProtocolHandler != szOldMailtoProtocolHandler))
+Index: mail/components/nsMailDefaultHandler.js
+===================================================================
+RCS file: /cvsroot/mozilla/mail/components/nsMailDefaultHandler.js,v
+retrieving revision 1.4.4.2.2.1
+diff -u -w -r1.4.4.2.2.1 nsMailDefaultHandler.js
+--- mail/components/nsMailDefaultHandler.js	26 Apr 2006 03:49:00 -0000	1.4.4.2.2.1
++++ mail/components/nsMailDefaultHandler.js	29 Jul 2007 20:56:04 -0000
+@@ -39,6 +39,7 @@
+ 
+ const nsICommandLine           = Components.interfaces.nsICommandLine;
+ const nsICommandLineHandler    = Components.interfaces.nsICommandLineHandler;
++const nsICommandLineValidator  = Components.interfaces.nsICommandLineValidator;
+ const nsIDOMWindowInternal     = Components.interfaces.nsIDOMWindowInternal;
+ const nsIFactory               = Components.interfaces.nsIFactory;
+ const nsISupportsString        = Components.interfaces.nsISupportsString;
+@@ -87,6 +88,7 @@
+ 
+   QueryInterface : function mdh_QI(iid) {
+     if (iid.equals(nsICommandLineHandler) ||
++        iid.equals(nsICommandLineValidator) ||
+         iid.equals(nsIFactory) ||
+         iid.equals(nsISupports))
+       return this;
+@@ -274,6 +276,30 @@
+                       "chrome,dialog=no,all", argstring);
+   },
+ 
++  /* nsICommandLineValidator */
++  validate : function mdh_validate(cmdLine) {
++    // Other handlers may use osint so only handle the osint flag if the mail
++    // or compose flag is also present and the command line is valid.
++    var osintFlagIdx = cmdLine.findFlag("osint", false);
++    var mailFlagIdx = cmdLine.findFlag("mail", false);
++    var composeFlagIdx = cmdLine.findFlag("compose", false);
++
++    // If both flags are present use the first flag found so the command line
++    // length test will fail.
++    if (mailFlagIdx > -1 && composeFlagIdx > -1)
++      var actionFlagIdx = mailFlagIdx > composeFlagIdx ? composeFlagIdx : mailFlagIdx;
++    else
++      actionFlagIdx = mailFlagIdx > -1 ? mailFlagIdx : composeFlagIdx;
++
++    if (actionFlagIdx && (osintFlagIdx > -1)) {
++      var param = cmdLine.getArgument(actionFlagIdx + 1);
++      if (cmdLine.length != actionFlagIdx + 2 ||
++          /thunderbird.url.(mailto|news):/.test(param))
++        throw NS_ERROR_ABORT;
++      cmdLine.handleFlag("osint", false)
++    }
++  },
++
+   helpInfo : "",
+ 
+   /* nsIFactory */
+@@ -329,6 +355,9 @@
+     catMan.addCategoryEntry("command-line-handler",
+                             "x-default",
+                             mdh_contractID, true, true);
++    catMan.addCategoryEntry("command-line-validator",
++                            "b-default",
++                            mdh_contractID, true, true);
+   },
+     
+   unregisterSelf : function mod_unregself(compMgr, location, type) {
+@@ -339,7 +368,9 @@
+                            .getService(Components.interfaces.nsICategoryManager);
+ 
+     catMan.deleteCategoryEntry("command-line-handler",
+-                               "y-default", true);
++                               "x-default", true);
++    catMan.deleteCategoryEntry("command-line-validator",
++                               "b-default", true);
+   },
+ 
+   canUnload: function(compMgr) {
+Index: mailnews/mapi/mapihook/src/nsMapiRegistryUtils.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/mailnews/mapi/mapihook/src/nsMapiRegistryUtils.cpp,v
+retrieving revision 1.29
+diff -u -w -r1.29 nsMapiRegistryUtils.cpp
+--- mailnews/mapi/mapihook/src/nsMapiRegistryUtils.cpp	14 Jul 2005 20:03:04 -0000	1.29
++++ mailnews/mapi/mapihook/src/nsMapiRegistryUtils.cpp	29 Jul 2007 20:56:06 -0000
+@@ -683,14 +683,10 @@
+       // Protocols\<protocol scheme>\shell\open\command value
+       nsCAutoString appPath (thisApplication());
+ 
+-      appPath += " ";
+-      if (aCmdLineText) 
+-      {
++      appPath += " -osint ";
+         appPath += aCmdLineText;
+-        appPath += " ";
+-      }
++      appPath += " \"%1\"";
+       
+-      appPath += "%1";
+       nsCAutoString shellOpenKey (keyName);
+       shellOpenKey.AppendLiteral("\\shell\\open\\command");
+ 

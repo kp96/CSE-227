@@ -1,0 +1,27 @@
+diff -r 09dabbaa4e8b content/base/src/CSPUtils.jsm
+--- a/content/base/src/CSPUtils.jsm	Fri Feb 26 16:44:54 2010 -0800
++++ b/content/base/src/CSPUtils.jsm	Fri Feb 26 16:46:09 2010 -0800
+@@ -1144,22 +1144,18 @@ CSPHost.fromString = function(aStr) {
+   var invalidChar = aStr.match(/[^a-zA-Z0-9\-\.\*]/);
+   if (invalidChar) {
+     CSPdebug("Invalid character '" + invalidChar + "' in host " + aStr);
+     return null;
+   }
+ 
+   var hObj = new CSPHost();
+   hObj._segments = aStr.split(/\./);
+-  if (hObj._segments.length < 1 ||
+-      hObj._segments.length == 1 && hObj._segments[0] != "*"
+-                                 && hObj._segments[0] != "localhost") {
+-    // only short hosts allowed are "*" and "localhost"
++  if (hObj._segments.length < 1)
+     return null;
+-  }
+ 
+   // validate data in segments
+   for (var i in hObj._segments) {
+     var seg = hObj._segments[i];
+     if (seg == "*") {
+       if (i > 0) {
+         // Wildcard must be FIRST
+         CSPdebug("Wildcard char located at invalid position in '" + aStr + "'");

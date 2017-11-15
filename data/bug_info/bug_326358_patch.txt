@@ -1,0 +1,41 @@
+? fake-import
+? x
+Index: nsSecureBrowserUIImpl.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/boot/src/nsSecureBrowserUIImpl.cpp,v
+retrieving revision 1.48.2.4
+diff -u -1 -0 -r1.48.2.4 nsSecureBrowserUIImpl.cpp
+--- nsSecureBrowserUIImpl.cpp	31 Jan 2006 13:14:17 -0000	1.48.2.4
++++ nsSecureBrowserUIImpl.cpp	8 Feb 2006 05:45:15 -0000
+@@ -189,24 +189,27 @@
+     NS_WARNING("Trying to init an nsSecureBrowserUIImpl twice");
+     return NS_ERROR_ALREADY_INITIALIZED;
+   }
+   
+   nsresult rv = NS_OK;
+   mWindow = window;
+ 
+   nsCOMPtr<nsIStringBundleService> service(do_GetService(NS_STRINGBUNDLE_CONTRACTID, &rv));
+   if (NS_FAILED(rv)) return rv;
+   
+-  rv = service->CreateBundle(SECURITY_STRING_BUNDLE_URL,
+-                             getter_AddRefs(mStringBundle));
+-  if (NS_FAILED(rv)) return rv;
+-  
++  // We do not need to test for mStringBundle here...
++  // Anywhere we use it, we will test before using.  Some
++  // embedded users of PSM may want to reuse our
++  // nsSecureBrowserUIImpl implementation without the
++  // bundle.
++  service->CreateBundle(SECURITY_STRING_BUNDLE_URL, getter_AddRefs(mStringBundle));
++
+   // hook up to the form post notifications:
+   nsCOMPtr<nsIObserverService> svc(do_GetService("@mozilla.org/observer-service;1", &rv));
+   if (NS_SUCCEEDED(rv)) {
+     rv = svc->AddObserver(this, NS_FORMSUBMIT_SUBJECT, PR_TRUE);
+   }
+   
+   nsCOMPtr<nsIScriptGlobalObject> sgo(do_QueryInterface(mWindow));
+   if (!sgo) return NS_ERROR_FAILURE;
+ 
+   nsIDocShell *docShell = sgo->GetDocShell();

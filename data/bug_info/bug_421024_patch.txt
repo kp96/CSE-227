@@ -1,0 +1,302 @@
+Index: suite/browser/linkToolbarOverlay.js
+===================================================================
+RCS file: /cvsroot/mozilla/suite/browser/linkToolbarOverlay.js,v
+retrieving revision 1.17
+diff -u -r1.17 linkToolbarOverlay.js
+--- suite/browser/linkToolbarOverlay.js	2 Feb 2008 01:09:30 -0000	1.17
++++ suite/browser/linkToolbarOverlay.js	13 Mar 2008 20:31:30 -0000
+@@ -171,7 +171,7 @@
+   // We have to do a security check here, because we are loading URIs given
+   // to us by a web page from chrome, which is privileged.
+   try {
+-    urlSecurityCheck(content.document.nodePrincipal, destURL,
++    urlSecurityCheck(destURL, content.document.nodePrincipal,
+                      Components.interfaces.nsIScriptSecurityManager.STANDARD);
+     loadURI(destURL, content.document.documentURIObject);
+   } catch (e) {
+Index: suite/common/nsContextMenu.js
+===================================================================
+RCS file: /cvsroot/mozilla/suite/common/nsContextMenu.js,v
+retrieving revision 1.123
+diff -u -r1.123 nsContextMenu.js
+--- suite/common/nsContextMenu.js	2 Feb 2008 23:19:50 -0000	1.123
++++ suite/common/nsContextMenu.js	13 Mar 2008 20:31:31 -0000
+@@ -671,7 +671,7 @@
+     },
+     // Reload image
+     reloadImage : function () {
+-        urlSecurityCheck( this.target.nodePrincipal, this.imageURL,
++        urlSecurityCheck( this.imageURL, this.target.nodePrincipal,
+                           Components.interfaces.nsIScriptSecurityManager.ALLOW_CHROME );
+         if (this.target instanceof Components.interfaces.nsIImageLoadingContent)
+           this.target.forceReload();
+@@ -683,14 +683,14 @@
+           viewURL = this.target.toDataURL();
+         else {
+           viewURL = this.imageURL;
+-          urlSecurityCheck( this.target.nodePrincipal, viewURL,
++          urlSecurityCheck( viewURL, this.target.nodePrincipal,
+                             Components.interfaces.nsIScriptSecurityManager.ALLOW_CHROME );
+         }
+         openTopWin( viewURL, this.target.ownerDocument.defaultView );
+     },
+     // Change current window to the URL of the background image.
+     viewBGImage : function () {
+-        urlSecurityCheck( this.target.nodePrincipal, this.bgImageURL,
++        urlSecurityCheck( this.bgImageURL, this.target.nodePrincipal,
+                           Components.interfaces.nsIScriptSecurityManager.ALLOW_CHROME );
+         openTopWin( this.bgImageURL, this.target.ownerDocument.defaultView );
+     },
+Index: suite/common/utilityOverlay.js
+===================================================================
+RCS file: /cvsroot/mozilla/suite/common/utilityOverlay.js,v
+retrieving revision 1.110
+diff -u -r1.110 utilityOverlay.js
+--- suite/common/utilityOverlay.js	2 Feb 2008 01:09:31 -0000	1.110
++++ suite/common/utilityOverlay.js	13 Mar 2008 20:31:32 -0000
+@@ -828,7 +828,7 @@
+ 
+   if (aIsFeed) {
+     try {
+-      urlSecurityCheck(aPrincipal, aData.href,
++      urlSecurityCheck(aData.href, aPrincipal,
+                        Components.interfaces.nsIScriptSecurityManager.DISALLOW_INHERIT_PRINCIPAL);
+     }
+     catch(ex) {
+Index: suite/common/contentAreaUtils.js
+===================================================================
+RCS file: /cvsroot/mozilla/suite/common/contentAreaUtils.js,v
+retrieving revision 1.152
+diff -u -r1.152 contentAreaUtils.js
+--- suite/common/contentAreaUtils.js	18 Dec 2007 05:48:09 -0000	1.152
++++ suite/common/contentAreaUtils.js	13 Mar 2008 20:31:32 -0000
+@@ -51,14 +51,34 @@
+   return (aFocusedWindow.top == window.content);
+ }
+ 
+-function urlSecurityCheck(aPrincipal, aURI, aFlags)
++/**
++ * urlSecurityCheck: JavaScript wrapper for checkLoadURIWithPrincipal
++ * and checkLoadURIStrWithPrincipal.
++ * If |aPrincipal| is not allowed to link to |aURL|, this function throws with
++ * an error message.
++ *
++ * @param aURI
++ *        The URL a page has linked to. This could be passed either as a string
++ *        or as an nsIURI object.
++ * @param aPrincipal
++ *        The principal of the node from which aURL came.
++ * @param aFlags
++ *        Flags to be passed to checkLoadURIStrWithPrincipal.
++ *        nsIScriptSecurityManager.STANDARD is the default value.
++ */
++function urlSecurityCheck(aURI, aPrincipal, aFlags)
+ {
+   // URL Loading Security Check
+-  const nsIScriptSecurityManager = Components.interfaces.nsIScriptSecurityManager;
++  const nsIScriptSecurityManager =
++    Components.interfaces.nsIScriptSecurityManager;
+   var secMan = Components.classes["@mozilla.org/scriptsecuritymanager;1"]
+                          .getService(nsIScriptSecurityManager);
++
+   try {
+-    secMan.checkLoadURIStrWithPrincipal(aPrincipal, aURI, aFlags);
++    if (aURI instanceof Components.interfaces.nsIURI)
++      secMan.checkLoadURIWithPrincipal(aPrincipal, aURI, aFlags);
++    else
++      secMan.checkLoadURIStrWithPrincipal(aPrincipal, aURI, aFlags);
+   } catch (e) {
+     throw "Load of " + aURI + " denied.";
+   }
+@@ -104,7 +124,7 @@
+ {
+   // Make sure we are allowed to open this url
+   if (aDoc)
+-    urlSecurityCheck(aDoc.nodePrincipal, aURL,
++    urlSecurityCheck(aURL, aDoc.nodePrincipal,
+                      Components.interfaces.nsIScriptSecurityManager.STANDARD);
+ 
+   // get referrer, if as external should be null
+Index: suite/common/Makefile.in
+===================================================================
+RCS file: /cvsroot/mozilla/suite/common/Makefile.in,v
+retrieving revision 1.4
+diff -u -r1.4 Makefile.in
+--- suite/common/Makefile.in	5 Mar 2008 14:29:09 -0000	1.4
++++ suite/common/Makefile.in	13 Mar 2008 20:31:32 -0000
+@@ -44,6 +44,10 @@
+ 
+ DIRS = public src
+ 
++ifdef ENABLE_TESTS
++DIRS += tests
++endif
++
+ EXTRA_COMPONENTS = \
+ 	sidebar/nsSidebar.js \
+ 	$(NULL)
+Index: suite/common/tests/Makefile.in
+===================================================================
+RCS file: suite/common/tests/Makefile.in
+diff -N suite/common/tests/Makefile.in
+--- /dev/null	1 Jan 1970 00:00:00 -0000
++++ suite/common/tests/Makefile.in	13 Mar 2008 20:31:32 -0000
+@@ -0,0 +1,50 @@
++#
++# ***** BEGIN LICENSE BLOCK *****
++# Version: MPL 1.1/GPL 2.0/LGPL 2.1
++#
++# The contents of this file are subject to the Mozilla Public License Version
++# 1.1 (the "License"); you may not use this file except in compliance with
++# the License. You may obtain a copy of the License at
++# http://www.mozilla.org/MPL/
++#
++# Software distributed under the License is distributed on an "AS IS" basis,
++# WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++# for the specific language governing rights and limitations under the
++# License.
++#
++# The Original Code is mozilla.org code.
++#
++# The Initial Developer of the Original Code is
++# Mozilla.org.
++# Portions created by the Initial Developer are Copyright (C) 2005
++# the Initial Developer. All Rights Reserved.
++#
++# Contributor(s):
++#     Boris Zbarsky <bzbarsky@mit.edu>  (Original author)
++#
++# Alternatively, the contents of this file may be used under the terms of
++# either of the GNU General Public License Version 2 or later (the "GPL"),
++# or the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++# in which case the provisions of the GPL or the LGPL are applicable instead
++# of those above. If you wish to allow use of your version of this file only
++# under the terms of either the GPL or the LGPL, and not to allow others to
++# use your version of this file under the terms of the MPL, indicate your
++# decision by deleting the provisions above and replace them with the notice
++# and other provisions required by the GPL or the LGPL. If you do not delete
++# the provisions above, a recipient may use your version of this file under
++# the terms of any one of the MPL, the GPL or the LGPL.
++#
++# ***** END LICENSE BLOCK *****
++
++DEPTH		= ../../..
++topsrcdir	= @top_srcdir@
++srcdir		= @srcdir@
++VPATH		= @srcdir@
++
++include $(DEPTH)/config/autoconf.mk
++
++MODULE		= test_suite_common
++
++XPCSHELL_TESTS = unit
++
++include $(topsrcdir)/config/rules.mk
+Index: suite/common/tests/unit/test_contentAreaUtils.js
+===================================================================
+RCS file: suite/common/tests/unit/test_contentAreaUtils.js
+diff -N suite/common/tests/unit/test_contentAreaUtils.js
+--- /dev/null	1 Jan 1970 00:00:00 -0000
++++ suite/common/tests/unit/test_contentAreaUtils.js	13 Mar 2008 20:31:33 -0000
+@@ -0,0 +1,86 @@
++/* -*- Mode: C++; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
++/* ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is bug 342485 unit test.
++ *
++ * The Initial Developer of the Original Code is Mozilla Corporation
++ * Portions created by the Initial Developer are Copyright (C) 2007
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *  Asaf Romano <mano@mozilla.com>
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either the GNU General Public License Version 2 or later (the "GPL"), or
++ * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++const Ci = Components.interfaces;
++const Cc = Components.classes;
++const Cr = Components.results;
++
++function loadUtilsScript() {
++  var loader = Cc["@mozilla.org/moz/jssubscript-loader;1"].
++               getService(Ci.mozIJSSubScriptLoader);
++  loader.loadSubScript("chrome://communicator/content/contentAreaUtils.js");
++}
++
++function test_urlSecurityCheck() {
++  var nullPrincipal = Cc["@mozilla.org/nullprincipal;1"].
++                      createInstance(Ci.nsIPrincipal);
++
++  const HTTP_URI = "http://www.mozilla.org/";
++  const CHROME_URI = "chrome://navigator/content/navigator.xul";
++  const DISALLOW_INHERIT_PRINCIPAL =
++    Ci.nsIScriptSecurityManager.DISALLOW_INHERIT_PRINCIPAL;
++
++  try {
++    urlSecurityCheck(makeURI(HTTP_URI), nullPrincipal,
++                     DISALLOW_INHERIT_PRINCIPAL);
++  }
++  catch(ex) {
++    do_throw("urlSecurityCheck should not throw when linking to a http uri with a null principal");
++  }
++
++  // urlSecurityCheck also supports passing the url as a string
++  try {
++    urlSecurityCheck(HTTP_URI, nullPrincipal,
++                     DISALLOW_INHERIT_PRINCIPAL);
++  }
++  catch(ex) {
++    do_throw("urlSecurityCheck failed to handle the http URI as a string (uri spec)");
++  }
++
++  try {
++    urlSecurityCheck(CHROME_URI, nullPrincipal,
++                     DISALLOW_INHERIT_PRINCIPAL);
++    do_throw("urlSecurityCheck should throw when linking to a chrome uri with a null principal");
++  }
++  catch(ex) { }
++}
++
++function run_test()
++{
++  loadUtilsScript();
++  test_urlSecurityCheck();
++}
+Index: suite/makefiles.sh
+===================================================================
+RCS file: /cvsroot/mozilla/suite/makefiles.sh,v
+retrieving revision 1.8
+diff -u -r1.8 makefiles.sh
+--- suite/makefiles.sh	27 Feb 2008 20:28:10 -0000	1.8
++++ suite/makefiles.sh	13 Mar 2008 20:31:33 -0000
+@@ -48,6 +48,7 @@
+   suite/common/Makefile
+   suite/common/public/Makefile
+   suite/common/src/Makefile
++  suite/common/tests/Makefile
+   suite/installer/Makefile
+   suite/installer/windows/Makefile
+   suite/locales/Makefile

@@ -1,0 +1,34 @@
+Index: security/manager/pki/resources/content/exceptionDialog.xul
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/exceptionDialog.xul,v
+retrieving revision 1.5
+diff -u -8 -p -r1.5 exceptionDialog.xul
+--- security/manager/pki/resources/content/exceptionDialog.xul	19 Nov 2007 15:32:44 -0000	1.5
++++ security/manager/pki/resources/content/exceptionDialog.xul	20 Nov 2007 18:38:09 -0000
+@@ -61,22 +61,23 @@
+   <script type="application/x-javascript" src="chrome://pippki/content/exceptionDialog.js"/>
+   
+   <hbox>
+     <vbox>
+       <image src="chrome://global/skin/icons/warning-large.png"/>
+       <spacer flex="1"/>
+     </vbox>
+     <vbox flex="1">
++      <!-- Note that because of the styling, there must be no whitespace within
++      the description tags -->
+       <description id="warningText"
+                    style="white-space: -moz-pre-wrap"/>
+       <description id="warningSupplemental"
+-                   style="font-weight: bold; white-space: -moz-pre-wrap;">
+-        &exceptionMgr.supplementalWarning;
+-      </description>
++                   style="font-weight: bold; white-space: -moz-pre-wrap;"
++                   >&exceptionMgr.supplementalWarning;</description>
+     </vbox>
+   </hbox>
+ 
+   <groupbox id="locationGroupBox">
+     <caption label="&exceptionMgr.certlocation.caption2;"/>
+     <hbox align="center">
+       <label control="locationTextBox" value="&exceptionMgr.certlocation.url;"/>
+       <textbox id="locationTextBox" flex="1" oninput="handleTextChange();"

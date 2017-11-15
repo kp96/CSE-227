@@ -1,0 +1,32 @@
+# HG changeset patch
+# Parent 84117219ded0603cce66ead4aa821d5ea6f67bc1
+# User Jared Wein <jwein@mozilla.com>
+Bug 633691 - Mitigate clickjacking of about:certerror
+
+diff --git a/browser/components/certerror/content/aboutCertError.xhtml b/browser/components/certerror/content/aboutCertError.xhtml
+--- a/browser/components/certerror/content/aboutCertError.xhtml
++++ b/browser/components/certerror/content/aboutCertError.xhtml
+@@ -118,19 +118,20 @@
+         };
+         replaceWithHost(intro);
+         
+         if (getCSSClass() == "expertBadCert") {
+           toggle('technicalContent');
+           toggle('expertContent');
+         }
+ 
+-        // if this is a Strict-Transport-Security host and the cert
+-        // is bad, don't allow overrides (STS Spec section 7.3).
+-        if (getCSSClass() == "badStsCert") {
++        // Disallow overrides if this is a Strict-Transport-Security
++        // host and the cert is bad (STS Spec section 7.3) or if the
++        // certerror is in a frame (bug 633691).
++        if (getCSSClass() == "badStsCert" || top !== self) {
+           var ec = document.getElementById('expertContent');
+           document.getElementById('errorLongContent').removeChild(ec);
+         }
+         
+         var tech = document.getElementById("technicalContentText");
+         if (tech)
+           tech.textContent = getDescription();
+         

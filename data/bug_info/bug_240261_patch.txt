@@ -1,0 +1,294 @@
+Index: mozilla/security/manager/pki/resources/content/domainMismatch.js
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/Attic/domainMismatch.js,v
+retrieving revision 1.14.18.3
+diff -u -u -r1.14.18.3 domainMismatch.js
+--- mozilla/security/manager/pki/resources/content/domainMismatch.js	24 Jun 2006 12:50:26 -0000	1.14.18.3
++++ mozilla/security/manager/pki/resources/content/domainMismatch.js	25 Apr 2008 22:41:38 -0000
+@@ -41,6 +41,7 @@
+ const nsIPKIParamBlock    = Components.interfaces.nsIPKIParamBlock;
+ const nsIDialogParamBlock = Components.interfaces.nsIDialogParamBlock;
+ const nsIX509Cert         = Components.interfaces.nsIX509Cert;
++const nsIX509Cert18Branch = Components.interfaces.nsIX509Cert18Branch;
+ 
+ var pkiParams;
+ var dialogParams;
+@@ -54,10 +55,26 @@
+   dialogParams = pkiParams.QueryInterface(nsIDialogParamBlock);
+   var connectURL = dialogParams.GetString(1); 
+ 
++  var validNames;
++  var cert18 = cert.QueryInterface(nsIX509Cert18Branch);
++  if (cert18) {
++    var tmp = new Object;
++    var nameCount = cert18.getValidNames(tmp);
++    if (nameCount > 1) {
++      validNames = "(" + tmp.value + ")";
++    }
++    else {
++      validNames = tmp.value;
++    }
++  }
++  else {
++    validNames = cert.commonName;
++  }
++
+   var bundle = srGetStrBundle("chrome://pippki/locale/pippki.properties");
+ 
+   var message1 = bundle.formatStringFromName("mismatchDomainMsg1", 
+-                                             [ connectURL, cert.commonName ],
++                                             [ connectURL, validNames ],
+                                              2);
+   var message2 = bundle.formatStringFromName("mismatchDomainMsg2", 
+                                              [ connectURL ],
+Index: mozilla/security/manager/ssl/public/Makefile.in
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/public/Makefile.in,v
+retrieving revision 1.24.4.2
+diff -u -u -r1.24.4.2 Makefile.in
+--- mozilla/security/manager/ssl/public/Makefile.in	14 Aug 2006 23:22:51 -0000	1.24.4.2
++++ mozilla/security/manager/ssl/public/Makefile.in	25 Apr 2008 22:41:38 -0000
+@@ -63,6 +63,7 @@
+     nsIFormSigningDialog.idl \
+     nsICertSelect.idl \
+     nsIX509Cert3.idl \
++    nsIX509Cert18Branch.idl \
+     nsIX509CertDB2.idl \
+     nsIPKCS11Slot.idl \
+     nsIPK11TokenDB.idl \
+Index: mozilla/security/manager/ssl/public/nsIX509Cert18Branch.idl
+===================================================================
+RCS file: mozilla/security/manager/ssl/public/nsIX509Cert18Branch.idl
+diff -N mozilla/security/manager/ssl/public/nsIX509Cert18Branch.idl
+--- /dev/null	1 Jan 1970 00:00:00 -0000
++++ mozilla/security/manager/ssl/public/nsIX509Cert18Branch.idl	25 Apr 2008 22:41:38 -0000
+@@ -0,0 +1,57 @@
++/* ***** BEGIN LICENSE BLOCK *****
++ * Version: MPL 1.1/GPL 2.0/LGPL 2.1
++ *
++ * The contents of this file are subject to the Mozilla Public License Version
++ * 1.1 (the "License"); you may not use this file except in compliance with
++ * the License. You may obtain a copy of the License at
++ * http://www.mozilla.org/MPL/
++ *
++ * Software distributed under the License is distributed on an "AS IS" basis,
++ * WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++ * for the specific language governing rights and limitations under the
++ * License.
++ *
++ * The Original Code is mozilla.org code.
++ *
++ * The Initial Developer of the Original Code is
++ * Red Hat, Inc.
++ * Portions created by the Initial Developer are Copyright (C) 2008
++ * the Initial Developer. All Rights Reserved.
++ *
++ * Contributor(s):
++ *   Kai Engert <kengert@redhat.com>
++ *
++ * Alternatively, the contents of this file may be used under the terms of
++ * either the GNU General Public License Version 2 or later (the "GPL"), or
++ * the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++ * in which case the provisions of the GPL or the LGPL are applicable instead
++ * of those above. If you wish to allow use of your version of this file only
++ * under the terms of either the GPL or the LGPL, and not to allow others to
++ * use your version of this file under the terms of the MPL, indicate your
++ * decision by deleting the provisions above and replace them with the notice
++ * and other provisions required by the GPL or the LGPL. If you do not delete
++ * the provisions above, a recipient may use your version of this file under
++ * the terms of any one of the MPL, the GPL or the LGPL.
++ *
++ * ***** END LICENSE BLOCK ***** */
++
++#include "nsISupports.idl"
++
++interface nsIX509Cert;
++
++/**
++ * Extending nsIX509Cert
++ * 
++ * TODO: nsIX509Cert3 should be derived from nsIX509Cert2
++ *       (and nsIX509Cert2 derived from nsIX509Cert)
++ */
++[scriptable, uuid(b02aabbc-f444-4639-8021-52c73b8f1b24)]
++interface nsIX509Cert18Branch : nsISupports {
++
++  /**
++   * Returns a count of valid names, and a string with all
++   * valid names (or patterns or IP addresses)
++   * separated by " , " (space comma space).
++   */
++  PRUint32 getValidNames(out wstring names);
++};
+Index: mozilla/security/manager/ssl/src/nsNSSCertificate.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSCertificate.cpp,v
+retrieving revision 1.112.4.3
+diff -u -u -r1.112.4.3 nsNSSCertificate.cpp
+--- mozilla/security/manager/ssl/src/nsNSSCertificate.cpp	13 Apr 2006 22:07:18 -0000	1.112.4.3
++++ mozilla/security/manager/ssl/src/nsNSSCertificate.cpp	25 Apr 2008 22:41:38 -0000
+@@ -91,8 +91,9 @@
+ 
+ /* nsNSSCertificate */
+ 
+-NS_IMPL_THREADSAFE_ISUPPORTS3(nsNSSCertificate, nsIX509Cert,
++NS_IMPL_THREADSAFE_ISUPPORTS4(nsNSSCertificate, nsIX509Cert,
+                                                 nsIX509Cert3,
++                                                nsIX509Cert18Branch,
+                                                 nsISMimeCert)
+ 
+ nsNSSCertificate*
+@@ -1235,3 +1236,122 @@
+   return nickname;
+ }
+ 
++// returns TRUE if SAN was used to produce names
++// return FALSE if nothing was produced
++// names => a single name or a list of names
++// multipleNames => whether multiple names were delivered
++static PRBool
++GetSubjectAltNames(CERTCertificate *nssCert,
++                   nsAString &allNames,
++                   PRUint32 &nameCount)
++{
++  allNames.Truncate();
++  nameCount = 0;
++
++  PRArenaPool *san_arena = nsnull;
++  SECItem altNameExtension = {siBuffer, NULL, 0 };
++  CERTGeneralName *sanNameList = nsnull;
++
++  nsresult rv;
++  rv = CERT_FindCertExtension(nssCert, SEC_OID_X509_SUBJECT_ALT_NAME,
++                              &altNameExtension);
++  if (rv != SECSuccess)
++    return PR_FALSE;
++
++  san_arena = PORT_NewArena(DER_DEFAULT_CHUNKSIZE);
++  if (!san_arena)
++    return PR_FALSE;
++
++  sanNameList = CERT_DecodeAltNameExtension(san_arena, &altNameExtension);
++  if (!sanNameList)
++    return PR_FALSE;
++
++  SECITEM_FreeItem(&altNameExtension, PR_FALSE);
++
++  CERTGeneralName *current = sanNameList;
++  do {
++    nsAutoString name;
++    switch (current->type) {
++      case certDNSName:
++        name.AssignASCII((char*)current->name.other.data, current->name.other.len);
++        if (!allNames.IsEmpty()) {
++          allNames.Append(NS_LITERAL_STRING(" , "));
++        }
++        ++nameCount;
++        allNames.Append(name);
++        break;
++
++      case certIPAddress:
++        {
++          char buf[INET6_ADDRSTRLEN];
++          PRNetAddr addr;
++          if (current->name.other.len == 4) {
++            addr.inet.family = PR_AF_INET;
++            memcpy(&addr.inet.ip, current->name.other.data, current->name.other.len);
++            PR_NetAddrToString(&addr, buf, sizeof(buf));
++            name.AssignASCII(buf);
++          } else if (current->name.other.len == 16) {
++            addr.ipv6.family = PR_AF_INET6;
++            memcpy(&addr.ipv6.ip, current->name.other.data, current->name.other.len);
++            PR_NetAddrToString(&addr, buf, sizeof(buf));
++            name.AssignASCII(buf);
++          } else {
++            /* invalid IP address */
++          }
++          if (!name.IsEmpty()) {
++            if (!allNames.IsEmpty()) {
++              allNames.Append(NS_LITERAL_STRING(" , "));
++            }
++            ++nameCount;
++            allNames.Append(name);
++          }
++          break;
++        }
++
++      default: // all other types of names are ignored
++        break;
++    }
++    current = CERT_GetNextGeneralName(current);
++  } while (current != sanNameList); // double linked
++
++  PORT_FreeArena(san_arena, PR_FALSE);
++  return PR_TRUE;
++}
++
++NS_IMETHODIMP
++nsNSSCertificate::GetValidNames(PRUnichar **aNames, PRUint32 *aCount)
++{
++  NS_ENSURE_ARG_POINTER(aNames);
++  NS_ENSURE_ARG_POINTER(aCount);
++
++  nsNSSShutDownPreventionLock locker;
++  if (isAlreadyShutDown())
++    return NS_ERROR_NOT_AVAILABLE;
++
++  if (!mCert)
++    return NS_ERROR_NOT_AVAILABLE;
++
++  nsString names;
++  PRUint32 nameCount = 0;
++  PRBool useSAN = PR_FALSE;
++  useSAN = GetSubjectAltNames(mCert, names, nameCount);
++
++  if (!useSAN) {
++    char *certName = nsnull;
++    // currently CERT_FindNSStringExtension is not being exported by NSS.
++    // If it gets exported, enable the following line.
++    //   certName = CERT_FindNSStringExtension(mCert, SEC_OID_NS_CERT_EXT_SSL_SERVER_NAME);
++    // However, it has been discussed to treat the extension as obsolete and ignore it.
++    if (!certName)
++      certName = CERT_GetCommonName(&mCert->subject);
++    if (certName) {
++      ++nameCount;
++      names.AssignASCII(certName);
++      PORT_Free(certName);
++    }
++  }
++
++  *aNames = ToNewUnicode(names);
++  *aCount = nameCount;
++  return NS_OK;
++}
+Index: mozilla/security/manager/ssl/src/nsNSSCertificate.h
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSCertificate.h,v
+retrieving revision 1.29.28.1
+diff -u -u -r1.29.28.1 nsNSSCertificate.h
+--- mozilla/security/manager/ssl/src/nsNSSCertificate.h	13 Apr 2006 22:07:18 -0000	1.29.28.1
++++ mozilla/security/manager/ssl/src/nsNSSCertificate.h	25 Apr 2008 22:41:38 -0000
+@@ -42,6 +42,7 @@
+ 
+ #include "nsIX509Cert.h"
+ #include "nsIX509Cert3.h"
++#include "nsIX509Cert18Branch.h"
+ #include "nsIX509CertDB.h"
+ #include "nsIASN1Object.h"
+ #include "nsISMimeCert.h"
+@@ -55,6 +56,7 @@
+ /* Certificate */
+ class nsNSSCertificate : public nsIX509Cert,
+                          public nsIX509Cert3,
++                         public nsIX509Cert18Branch,
+                          public nsISMimeCert,
+                          public nsNSSShutDownObject
+ {
+@@ -62,6 +64,7 @@
+   NS_DECL_ISUPPORTS
+   NS_DECL_NSIX509CERT
+   NS_DECL_NSIX509CERT3
++  NS_DECL_NSIX509CERT18BRANCH
+   NS_DECL_NSISMIMECERT
+ 
+   nsNSSCertificate(CERTCertificate *cert);

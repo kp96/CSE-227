@@ -1,0 +1,23 @@
+Index: mozilla/mailnews/compose/src/nsMsgSend.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/mailnews/compose/src/nsMsgSend.cpp,v
+retrieving revision 1.372
+diff -u -u -r1.372 nsMsgSend.cpp
+--- mozilla/mailnews/compose/src/nsMsgSend.cpp	30 Apr 2005 15:24:22 -0000	1.372
++++ mozilla/mailnews/compose/src/nsMsgSend.cpp	23 May 2005 03:39:05 -0000
+@@ -3213,6 +3213,15 @@
+     rv = pPrefBranch->GetIntPref(PREF_MAIL_MESSAGE_WARNING_SIZE, (PRInt32 *) &mMessageWarningSize);
+   }
+ 
++  if (!strictly_mime)
++  {
++    nsresult rv = NS_OK;
++    nsCOMPtr<nsIMsgComposeSecure> secureCompose;
++    secureCompose = do_CreateInstance(NS_MSGCOMPOSESECURE_CONTRACTID, &rv);
++    if (NS_SUCCEEDED(rv) && secureCompose)
++      secureCompose->RequiresCryptoEncapsulation(aUserIdentity, fields, &strictly_mime);
++  }
++
+   nsMsgMIMESetConformToStandard(strictly_mime);
+   mime_use_quoted_printable_p = strictly_mime;
+ 

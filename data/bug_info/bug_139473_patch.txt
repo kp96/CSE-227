@@ -1,0 +1,56 @@
+? security/manager/ssl/src/dependentLibs.h
+Index: security/manager/ssl/src/nsKeygenHandler.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsKeygenHandler.cpp,v
+retrieving revision 1.29
+diff -u -r1.29 nsKeygenHandler.cpp
+--- security/manager/ssl/src/nsKeygenHandler.cpp	4 Mar 2004 07:09:02 -0000	1.29
++++ security/manager/ssl/src/nsKeygenHandler.cpp	5 Mar 2004 06:31:40 -0000
+@@ -353,15 +353,13 @@
+ 
+ nsresult
+ nsKeygenFormProcessor::GetPublicKey(nsAString& aValue, nsAString& aChallenge, 
+-				    nsAString& aKeyType,
++				    nsAFlatString& aKeyType,
+ 				    nsAString& aOutPublicKey, nsAString& aPqg)
+ {
+     nsNSSShutDownPreventionLock locker;
+     nsresult rv = NS_ERROR_FAILURE;
+     char *keystring = nsnull;
+     char *pqgString = nsnull, *str = nsnull;
+-    nsAutoString rsaStr;
+-    nsAutoString dsaStr;
+     KeyType type;
+     PRUint32 keyGenMechanism;
+     PRInt32 primeBits;
+@@ -403,12 +401,10 @@
+     }
+ 
+     // Set the keygen mechanism
+-    rsaStr.Assign(NS_LITERAL_STRING("rsa"));
+-    dsaStr.Assign(NS_LITERAL_STRING("dsa"));
+-    if (aKeyType.IsEmpty() || aKeyType.Equals(rsaStr)) {
++    if (aKeyType.IsEmpty() || aKeyType.EqualsIgnoreCase("rsa")) {
+         type = rsaKey;
+         keyGenMechanism = CKM_RSA_PKCS_KEY_PAIR_GEN;
+-    } else  if (aKeyType.Equals(dsaStr)) {
++    } else if (aKeyType.EqualsIgnoreCase("dsa")) {
+         char * end;
+         pqgString = ToNewCString(aPqg);
+         type = dsaKey;
+Index: security/manager/ssl/src/nsKeygenHandler.h
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsKeygenHandler.h,v
+retrieving revision 1.3
+diff -u -r1.3 nsKeygenHandler.h
+--- security/manager/ssl/src/nsKeygenHandler.h	26 Feb 2004 04:07:22 -0000	1.3
++++ security/manager/ssl/src/nsKeygenHandler.h	5 Mar 2004 06:31:40 -0000
+@@ -59,10 +59,10 @@
+ 
+ protected:
+   nsresult GetPublicKey(nsAString& aValue, nsAString& aChallenge, 
+-			nsAString& akeyType, nsAString& aOutPublicKey,
++			nsAFlatString& akeyType, nsAString& aOutPublicKey,
+ 			nsAString& aPqg);
+   nsresult GetSlot(PRUint32 aMechanism, PK11SlotInfo** aSlot);
+ private:

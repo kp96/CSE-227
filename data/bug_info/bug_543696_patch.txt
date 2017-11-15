@@ -1,0 +1,235 @@
+diff --git a/caps/idl/nsIScriptSecurityManager.idl b/caps/idl/nsIScriptSecurityManager.idl
+--- a/caps/idl/nsIScriptSecurityManager.idl
++++ b/caps/idl/nsIScriptSecurityManager.idl
+@@ -41,7 +41,7 @@
+ interface nsIURI;
+ interface nsIChannel;
+ 
+-[scriptable, uuid(c0dbfd5e-b7ae-4c18-8674-82492f35d715)]
++[scriptable, uuid(50eda256-4dd2-4c7c-baed-96983910af9f)]
+ interface nsIScriptSecurityManager : nsIXPCSecurityManager
+ {
+     ///////////////// Security Checks //////////////////
+@@ -55,14 +55,6 @@
+                                         in PRUint32 aAction);
+ 
+     /**
+-     * Checks whether the running script is allowed to connect to aTargetURI
+-     */
+-    [noscript] void checkConnect(in JSContextPtr aJSContext,
+-                                 in nsIURI aTargetURI,
+-                                 in string aClassName,
+-                                 in string aProperty);
+-
+-    /**
+      * Check that the script currently running in context "cx" can load "uri".
+      *
+      * Will return error code NS_ERROR_DOM_BAD_URI if the load request 
+diff --git a/caps/include/nsScriptSecurityManager.h b/caps/include/nsScriptSecurityManager.h
+--- a/caps/include/nsScriptSecurityManager.h
++++ b/caps/include/nsScriptSecurityManager.h
+@@ -410,8 +410,7 @@
+ 
+     static nsresult
+     CheckSameOriginPrincipal(nsIPrincipal* aSubject,
+-                             nsIPrincipal* aObject,
+-                             PRBool aIsCheckConnect);
++                             nsIPrincipal* aObject);
+     static PRUint32
+     HashPrincipalByOrigin(nsIPrincipal* aPrincipal);
+ 
+@@ -458,8 +457,7 @@
+     nsresult
+     CheckSameOriginDOMProp(nsIPrincipal* aSubject, 
+                            nsIPrincipal* aObject,
+-                           PRUint32 aAction,
+-                           PRBool aIsCheckConnect);
++                           PRUint32 aAction);
+ 
+     nsresult
+     LookupPolicy(nsIPrincipal* principal,
+diff --git a/caps/src/nsPrincipal.cpp b/caps/src/nsPrincipal.cpp
+--- a/caps/src/nsPrincipal.cpp
++++ b/caps/src/nsPrincipal.cpp
+@@ -363,8 +363,7 @@
+     // Codebases are equal if they have the same origin.
+     *aResult =
+       NS_SUCCEEDED(nsScriptSecurityManager::CheckSameOriginPrincipal(this,
+-                                                                     aOther,
+-                                                                     PR_FALSE));
++                                                                     aOther));
+     return NS_OK;
+   }
+ 
+diff --git a/caps/src/nsScriptSecurityManager.cpp b/caps/src/nsScriptSecurityManager.cpp
+--- a/caps/src/nsScriptSecurityManager.cpp
++++ b/caps/src/nsScriptSecurityManager.cpp
+@@ -564,34 +564,6 @@
+ }
+ 
+ NS_IMETHODIMP
+-nsScriptSecurityManager::CheckConnect(JSContext* cx,
+-                                      nsIURI* aTargetURI,
+-                                      const char* aClassName,
+-                                      const char* aPropertyName)
+-{
+-    // Get a context if necessary
+-    if (!cx)
+-    {
+-        cx = GetCurrentJSContext();
+-        if (!cx)
+-            return NS_OK; // No JS context, so allow the load
+-    }
+-
+-    nsresult rv = CheckLoadURIFromScript(cx, aTargetURI);
+-    if (NS_FAILED(rv)) return rv;
+-
+-    JSAutoRequest ar(cx);
+-
+-    JSString* propertyName = ::JS_InternString(cx, aPropertyName);
+-    if (!propertyName)
+-        return NS_ERROR_OUT_OF_MEMORY;
+-
+-    return CheckPropertyAccessImpl(nsIXPCSecurityManager::ACCESS_CALL_METHOD, nsnull,
+-                                   cx, nsnull, nsnull, aTargetURI,
+-                                   nsnull, aClassName, STRING_TO_JSVAL(propertyName), nsnull);
+-}
+-
+-NS_IMETHODIMP
+ nsScriptSecurityManager::CheckSameOrigin(JSContext* cx,
+                                          nsIURI* aTargetURI)
+ {
+@@ -750,7 +722,7 @@
+                 }
+                 if(NS_SUCCEEDED(rv))
+                     rv = CheckSameOriginDOMProp(subjectPrincipal, objectPrincipal,
+-                                                aAction, aTargetURI != nsnull);
++                                                aAction);
+                 break;
+             }
+         default:
+@@ -943,8 +915,7 @@
+ /* static */
+ nsresult
+ nsScriptSecurityManager::CheckSameOriginPrincipal(nsIPrincipal* aSubject,
+-                                                  nsIPrincipal* aObject,
+-                                                  PRBool aIsCheckConnect)
++                                                  nsIPrincipal* aObject)
+ {
+     /*
+     ** Get origin of subject and object and compare.
+@@ -952,36 +923,25 @@
+     if (aSubject == aObject)
+         return NS_OK;
+ 
+-    // These booleans are only used when !aIsCheckConnect.  Default
+-    // them to false, and change if that turns out wrong.
++    // Default to false, and change if that turns out wrong.
+     PRBool subjectSetDomain = PR_FALSE;
+     PRBool objectSetDomain = PR_FALSE;
+     
+     nsCOMPtr<nsIURI> subjectURI;
+     nsCOMPtr<nsIURI> objectURI;
+ 
+-    if (aIsCheckConnect)
+-    {
+-        // Don't use domain for CheckConnect calls, since that's called for
+-        // data-only load checks like XMLHTTPRequest (bug 290100).
++    aSubject->GetDomain(getter_AddRefs(subjectURI));
++    if (!subjectURI) {
+         aSubject->GetURI(getter_AddRefs(subjectURI));
++    } else {
++        subjectSetDomain = PR_TRUE;
++    }
++
++    aObject->GetDomain(getter_AddRefs(objectURI));
++    if (!objectURI) {
+         aObject->GetURI(getter_AddRefs(objectURI));
+-    }
+-    else
+-    {
+-        aSubject->GetDomain(getter_AddRefs(subjectURI));
+-        if (!subjectURI) {
+-            aSubject->GetURI(getter_AddRefs(subjectURI));
+-        } else {
+-            subjectSetDomain = PR_TRUE;
+-        }
+-
+-        aObject->GetDomain(getter_AddRefs(objectURI));
+-        if (!objectURI) {
+-            aObject->GetURI(getter_AddRefs(objectURI));
+-        } else {
+-            objectSetDomain = PR_TRUE;
+-        }
++    } else {
++        objectSetDomain = PR_TRUE;
+     }
+ 
+     if (SecurityCompareURIs(subjectURI, objectURI))
+@@ -990,12 +950,6 @@
+         // done so in order to be considered the same origin. This prevents
+         // DNS spoofing based on document.domain (154930)
+ 
+-        // But this restriction does not apply to CheckConnect calls, since
+-        // that's called for data-only load checks like XMLHTTPRequest where
+-        // we ignore domain (bug 290100).
+-        if (aIsCheckConnect)
+-            return NS_OK;
+-
+         // If both or neither explicitly set their domain, allow the access
+         if (subjectSetDomain == objectSetDomain)
+             return NS_OK;
+@@ -1009,7 +963,7 @@
+ 
+ // It's important that
+ //
+-//   CheckSameOriginPrincipal(A, B, PR_FALSE) == NS_OK
++//   CheckSameOriginPrincipal(A, B) == NS_OK
+ //
+ // imply
+ //
+@@ -1032,21 +986,13 @@
+ nsresult
+ nsScriptSecurityManager::CheckSameOriginDOMProp(nsIPrincipal* aSubject,
+                                                 nsIPrincipal* aObject,
+-                                                PRUint32 aAction,
+-                                                PRBool aIsCheckConnect)
++                                                PRUint32 aAction)
+ {
+     nsresult rv;
+-    if (aIsCheckConnect) {
+-        // Don't do equality compares, just do a same-origin compare,
+-        // since the object principal isn't a real principal, just a
+-        // GetCodebasePrincipal() on whatever URI we started with.
+-        rv = CheckSameOriginPrincipal(aSubject, aObject, aIsCheckConnect);
+-    } else {
+-        PRBool subsumes;
+-        rv = aSubject->Subsumes(aObject, &subsumes);
+-        if (NS_SUCCEEDED(rv) && !subsumes) {
+-            rv = NS_ERROR_DOM_PROP_ACCESS_DENIED;
+-        }
++    PRBool subsumes;
++    rv = aSubject->Subsumes(aObject, &subsumes);
++    if (NS_SUCCEEDED(rv) && !subsumes) {
++        rv = NS_ERROR_DOM_PROP_ACCESS_DENIED;
+     }
+     
+     if (NS_SUCCEEDED(rv))
+diff --git a/js/src/xpconnect/shell/xpcshell.cpp b/js/src/xpconnect/shell/xpcshell.cpp
+--- a/js/src/xpconnect/shell/xpcshell.cpp
++++ b/js/src/xpconnect/shell/xpcshell.cpp
+@@ -1310,14 +1310,6 @@
+     return NS_OK;
+ }
+ 
+-/* [noscript] void checkConnect (in JSContextPtr aJSContext, in nsIURI aTargetURI, in string aClassName, in string aProperty); */
+-NS_IMETHODIMP
+-FullTrustSecMan::CheckConnect(JSContext * aJSContext, nsIURI *aTargetURI,
+-                              const char *aClassName, const char *aProperty)
+-{
+-    return NS_OK;
+-}
+-
+ /* [noscript] void checkLoadURIFromScript (in JSContextPtr cx, in nsIURI uri); */
+ NS_IMETHODIMP
+ FullTrustSecMan::CheckLoadURIFromScript(JSContext * cx, nsIURI *uri)

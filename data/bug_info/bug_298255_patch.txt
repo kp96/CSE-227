@@ -1,0 +1,256 @@
+Index: browser/base/content/browser.js
+===================================================================
+RCS file: /cvsroot/mozilla/browser/base/content/browser.js,v
+retrieving revision 1.296.2.3.2.134.2.13
+diff -u -p -6 -r1.296.2.3.2.134.2.13 browser.js
+--- browser/base/content/browser.js	6 Jul 2005 10:39:00 -0000	1.296.2.3.2.134.2.13
++++ browser/base/content/browser.js	6 Jul 2005 12:07:10 -0000
+@@ -508,13 +508,21 @@ function Startup()
+   window.tryToClose = WindowIsClosing;
+ 
+   var uriToLoad = null;
+   // Check for window.arguments[0]. If present, use that for uriToLoad.
+   if ("arguments" in window && window.arguments.length >= 1 && window.arguments[0])
+     uriToLoad = window.arguments[0];
+-    
++
++  try {
++    if (makeURL(uriToLoad).schemeIs("chrome")) {
++      dump("Preventing external load of chrome: URI\n");
++      window.close();
++      return;
++    }
++  } catch(e) {}
++
+   gIsLoadingBlank = uriToLoad == "about:blank";
+ 
+   if (!gIsLoadingBlank)
+     prepareForStartup();
+ 
+ #ifdef ENABLE_PAGE_CYCLER
+@@ -3192,12 +3200,20 @@ nsBrowserAccess.prototype =
+   },
+ 
+   openURI : function(aURI, aOpener, aWhere, aContext)
+   {
+     var newWindow = null;
+     var referrer = null;
++    var isExternal = (aContext == nsCI.nsIBrowserDOMWindow.OPEN_EXTERNAL);
++
++    if (isExternal && aURI && aURI.schemeIs("chrome"))
++      return null;
++
++    var loadflags = isExternal ?
++                       nsCI.nsIWebNavigation.LOAD_FLAGS_FROM_EXTERNAL :
++                       nsCI.nsIWebNavigation.LOAD_FLAGS_NONE;
+     if (aWhere == nsCI.nsIBrowserDOMWindow.OPEN_DEFAULTWINDOW) {
+       switch (aContext) {
+         case nsCI.nsIBrowserDOMWindow.OPEN_EXTERNAL :
+           aWhere = gPrefService.getIntPref("browser.link.open_external");
+           break;
+         default : // OPEN_NEW or an illegal value
+@@ -3222,14 +3238,13 @@ nsBrowserAccess.prototype =
+                                  .createInstance(nsCI.nsIURI);
+             referrer.spec = Components.lookupMethod(aOpener,"location")
+                                       .call(aOpener);
+           }
+           newWindow.QueryInterface(nsCI.nsIInterfaceRequestor)
+                    .getInterface(nsCI.nsIWebNavigation)
+-                   .loadURI(url, nsCI.nsIWebNavigation.LOAD_FLAGS_NONE,
+-                            referrer, null, null);
++                   .loadURI(url, loadflags, referrer, null, null);
+         } catch(e) {
+         }
+         break;
+       default : // OPEN_CURRENTWINDOW or an illegal value
+         try {
+           if (aOpener) {
+@@ -3238,19 +3253,19 @@ nsBrowserAccess.prototype =
+             referrer = Components.classes["@mozilla.org/network/standard-url;1"]
+                                  .createInstance(nsCI.nsIURI);
+             referrer.spec = Components.lookupMethod(aOpener,"location")
+                                       .call(aOpener);
+             newWindow.QueryInterface(nsCI.nsIInterfaceRequestor)
+                      .getInterface(nsIWebNavigation)
+-                     .loadURI(url, nsIWebNavigation.LOAD_FLAGS_NONE, referrer,
++                     .loadURI(url, loadflags, referrer,
+                               null, null);
+           } else {
+             newWindow = gBrowser.selectedBrowser.docShell
+                                 .QueryInterface(nsCI.nsIInterfaceRequestor)
+                                 .getInterface(nsCI.nsIDOMWindow);
+-            loadURI(url, null);
++            getWebNavigation().loadURI(url, loadflags, null, null, null);
+           }
+         } catch(e) {
+         }
+     }
+     return newWindow;
+   }
+Index: docshell/base/nsDocShell.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/docshell/base/nsDocShell.cpp,v
+retrieving revision 1.584.6.29.2.6
+diff -u -p -6 -r1.584.6.29.2.6 nsDocShell.cpp
+--- docshell/base/nsDocShell.cpp	10 May 2005 20:13:34 -0000	1.584.6.29.2.6
++++ docshell/base/nsDocShell.cpp	6 Jul 2005 12:07:38 -0000
+@@ -457,12 +457,15 @@ ConvertDocShellLoadInfoToLoadType(nsDocS
+     case nsIDocShellLoadInfo::loadNormal:
+         loadType = LOAD_NORMAL;
+         break;
+     case nsIDocShellLoadInfo::loadNormalReplace:
+         loadType = LOAD_NORMAL_REPLACE;
+         break;
++    case nsIDocShellLoadInfo::loadNormalExternal:
++        loadType = LOAD_NORMAL_EXTERNAL;
++        break;
+     case nsIDocShellLoadInfo::loadHistory:
+         loadType = LOAD_HISTORY;
+         break;
+     case nsIDocShellLoadInfo::loadReloadNormal:
+         loadType = LOAD_RELOAD_NORMAL;
+         break;
+@@ -501,12 +504,15 @@ nsDocShell::ConvertLoadTypeToDocShellLoa
+     case LOAD_NORMAL:
+         docShellLoadType = nsIDocShellLoadInfo::loadNormal;
+         break;
+     case LOAD_NORMAL_REPLACE:
+         docShellLoadType = nsIDocShellLoadInfo::loadNormalReplace;
+         break;
++    case LOAD_NORMAL_EXTERNAL:
++        docShellLoadType = nsIDocShellLoadInfo::loadNormalExternal;
++        break;
+     case LOAD_HISTORY:
+         docShellLoadType = nsIDocShellLoadInfo::loadHistory;
+         break;
+     case LOAD_RELOAD_NORMAL:
+         docShellLoadType = nsIDocShellLoadInfo::loadReloadNormal;
+         break;
+@@ -612,13 +618,15 @@ nsDocShell::LoadURI(nsIURI * aURI,
+                 parent->GetChildSHEntry(mChildOffset, getter_AddRefs(shEntry));
+                 // Make some decisions on the child frame's loadType based on the 
+                 // parent's loadType. 
+                 if (mCurrentURI == nsnull) {
+                     // This is a newly created frame. Check for exception cases first. 
+                     // By default the subframe will inherit the parent's loadType.
+-                    if (shEntry && (parentLoadType == LOAD_NORMAL || parentLoadType == LOAD_LINK)) {
++                    if (shEntry && (parentLoadType == LOAD_NORMAL ||
++                                    parentLoadType == LOAD_LINK   ||
++                                    parentLoadType == LOAD_NORMAL_EXTERNAL)) {
+                         // The parent was loaded normally. In this case, this *brand new* child really shouldn't
+                         // have a SHEntry. If it does, it could be because the parent is replacing an
+                         // existing frame with a new frame, in the onLoadHandler. We don't want this
+                         // url to get into session history. Clear off shEntry, and set laod type to
+                         // LOAD_BYPASS_HISTORY. 
+                         PRBool inOnLoadHandler=PR_FALSE;
+@@ -5516,12 +5524,28 @@ nsDocShell::InternalLoad(nsIURI * aURI,
+     // docshell is in the process of being destroyed.
+     //
+     if (mIsBeingDestroyed) {
+         return NS_ERROR_FAILURE;
+     }
+ 
++    // Before going any further vet loads initiated by external programs.
++    if (aLoadType == LOAD_NORMAL_EXTERNAL) {
++        // clear the decks to prevent context bleed-through (bug 298255)
++        rv = CreateAboutBlankContentViewer();
++
++        // Disallow external chrome: loads targetted at content windows
++        PRBool isChrome = PR_FALSE;
++        if (NS_SUCCEEDED(aURI->SchemeIs("chrome", &isChrome)) && isChrome) {
++            return NS_ERROR_FAILURE;
++        }
++
++        // reset loadType so we don't have to add lots of tests for
++        // LOAD_NORMAL_EXTERNAL after this point
++        aLoadType = LOAD_NORMAL;
++    }
++
+     rv = CheckLoadingPermissions();
+     if (NS_FAILED(rv)) {
+         return rv;
+     }
+ 
+     mURIResultedInDocument = PR_FALSE;  // reset the clock...
+Index: docshell/base/nsDocShell.h
+===================================================================
+RCS file: /cvsroot/mozilla/docshell/base/nsDocShell.h,v
+retrieving revision 1.146.6.6.2.2
+diff -u -p -6 -r1.146.6.6.2.2 nsDocShell.h
+--- docshell/base/nsDocShell.h	15 Feb 2005 16:51:50 -0000	1.146.6.6.2.2
++++ docshell/base/nsDocShell.h	6 Jul 2005 12:07:40 -0000
+@@ -94,12 +94,13 @@
+  *  Remember to update the IsValidLoadType function below if you change this
+  *  enum to ensure bad flag combinations will be rejected.
+  */
+ enum LoadType {
+     LOAD_NORMAL = MAKE_LOAD_TYPE(nsIDocShell::LOAD_CMD_NORMAL, nsIWebNavigation::LOAD_FLAGS_NONE),
+     LOAD_NORMAL_REPLACE = MAKE_LOAD_TYPE(nsIDocShell::LOAD_CMD_NORMAL, nsIWebNavigation::LOAD_FLAGS_REPLACE_HISTORY),
++    LOAD_NORMAL_EXTERNAL = MAKE_LOAD_TYPE(nsIDocShell::LOAD_CMD_NORMAL, nsIWebNavigation::LOAD_FLAGS_FROM_EXTERNAL),
+     LOAD_HISTORY = MAKE_LOAD_TYPE(nsIDocShell::LOAD_CMD_HISTORY, nsIWebNavigation::LOAD_FLAGS_NONE),
+     LOAD_RELOAD_NORMAL = MAKE_LOAD_TYPE(nsIDocShell::LOAD_CMD_RELOAD, nsIWebNavigation::LOAD_FLAGS_NONE),
+     LOAD_RELOAD_BYPASS_CACHE = MAKE_LOAD_TYPE(nsIDocShell::LOAD_CMD_RELOAD, nsIWebNavigation::LOAD_FLAGS_BYPASS_CACHE),
+     LOAD_RELOAD_BYPASS_PROXY = MAKE_LOAD_TYPE(nsIDocShell::LOAD_CMD_RELOAD, nsIWebNavigation::LOAD_FLAGS_BYPASS_PROXY),
+     LOAD_RELOAD_BYPASS_PROXY_AND_CACHE = MAKE_LOAD_TYPE(nsIDocShell::LOAD_CMD_RELOAD, nsIWebNavigation::LOAD_FLAGS_BYPASS_CACHE | nsIWebNavigation::LOAD_FLAGS_BYPASS_PROXY),
+     LOAD_LINK = MAKE_LOAD_TYPE(nsIDocShell::LOAD_CMD_NORMAL, nsIWebNavigation::LOAD_FLAGS_IS_LINK),
+@@ -111,12 +112,13 @@ enum LoadType {
+ static inline PRBool IsValidLoadType(PRUint32 aLoadType)
+ {
+     switch (aLoadType)
+     {
+     case LOAD_NORMAL:
+     case LOAD_NORMAL_REPLACE:
++    case LOAD_NORMAL_EXTERNAL:
+     case LOAD_HISTORY:
+     case LOAD_RELOAD_NORMAL:
+     case LOAD_RELOAD_BYPASS_CACHE:
+     case LOAD_RELOAD_BYPASS_PROXY:
+     case LOAD_RELOAD_BYPASS_PROXY_AND_CACHE:
+     case LOAD_LINK:
+Index: docshell/base/nsIDocShellLoadInfo.idl
+===================================================================
+RCS file: /cvsroot/mozilla/docshell/base/nsIDocShellLoadInfo.idl,v
+retrieving revision 1.16.54.1
+diff -u -p -6 -r1.16.54.1 nsIDocShellLoadInfo.idl
+--- docshell/base/nsIDocShellLoadInfo.idl	3 Nov 2004 01:03:12 -0000	1.16.54.1
++++ docshell/base/nsIDocShellLoadInfo.idl	6 Jul 2005 12:07:40 -0000
+@@ -60,12 +60,14 @@ interface nsIDocShellLoadInfo : nsISuppo
+     const long loadReloadBypassProxyAndCache = 6;
+     const long loadLink = 7;
+     const long loadRefresh = 8;
+     const long loadReloadCharsetChange = 9;
+     const long loadBypassHistory = 10;
+ 
++    const long loadNormalExternal = 13;
++
+     /** Contains a load type as specified by the load* constants */
+     attribute nsDocShellInfoLoadType loadType;
+ 
+     /** SHEntry for this page */
+     attribute nsISHEntry SHEntry;
+ 
+Index: docshell/base/nsIWebNavigation.idl
+===================================================================
+RCS file: /cvsroot/mozilla/docshell/base/nsIWebNavigation.idl,v
+retrieving revision 1.17
+diff -u -p -6 -r1.17 nsIWebNavigation.idl
+--- docshell/base/nsIWebNavigation.idl	12 Feb 2003 23:50:04 -0000	1.17
++++ docshell/base/nsIWebNavigation.idl	6 Jul 2005 12:07:40 -0000
+@@ -124,12 +124,17 @@ interface nsIWebNavigation : nsISupports
+   /* loadURI() & reload() specific flags */
+   const unsigned long LOAD_FLAGS_BYPASS_CACHE    = 0x0100; // Bypass the cache
+   const unsigned long LOAD_FLAGS_BYPASS_PROXY    = 0x0200; // Bypass the proxy
+   const unsigned long LOAD_FLAGS_CHARSET_CHANGE  = 0x0400; // Reload because of charset change, 
+ 
+  /**
++  * A hint this load was prompted by an external program: take care!
++  */
++  const unsigned long LOAD_FLAGS_FROM_EXTERNAL   = 0x1000;
++
++ /**
+   * Loads a given URI.  This will give priority to loading the requested URI
+   * in the object implementing	this interface.  If it can't be loaded here
+   * however, the URL dispatcher will go through its normal process of content
+   * loading.
+   *
+   * @param uri       - The URI string to load.

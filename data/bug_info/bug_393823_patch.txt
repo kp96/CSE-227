@@ -1,0 +1,34 @@
+Index: nsMapiRegistry.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/mailnews/mapi/mapihook/src/nsMapiRegistry.cpp,v
+retrieving revision 1.16
+diff -u -w -r1.16 nsMapiRegistry.cpp
+--- nsMapiRegistry.cpp	8 Mar 2005 01:17:04 -0000	1.16
++++ nsMapiRegistry.cpp	24 Aug 2007 23:01:24 -0000
+@@ -61,6 +61,26 @@
+     // m_ShowDialog should be initialized to false 
+     // if we are the default mail client.
+     m_ShowDialog = !m_registryUtils.HasRestrictedRegistryAccess() && !m_DefaultMailClient;
++
++    // Brute force hack to help fix Bug #389613 - when we start up the client,
++    // for every protocol we are the default for, re-register and re-write the default handler
++    // keys. This ensures that we'll always write out -osint into the registry when we are already the
++    // the default client. 
++    if (!m_registryUtils.HasRestrictedRegistryAccess())
++    {
++      if (m_DefaultMailClient)
++      {
++        m_registryUtils.registerMailApp(PR_TRUE);
++        m_registryUtils.setDefaultMailClient();
++      }
++      if (m_DefaultNewsClient)
++      {
++        m_registryUtils.registerNewsApp(PR_TRUE);
++        m_registryUtils.setDefaultNewsClient();
++      }
++      if (m_registryUtils.IsDefaultFeedClient())
++          m_registryUtils.setDefaultFeedClient();
++    }
+ }
+ 
+ nsMapiRegistry::~nsMapiRegistry() {

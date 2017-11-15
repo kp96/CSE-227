@@ -1,0 +1,335 @@
+Index: uriloader/base/nsDocLoader.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/uriloader/base/nsDocLoader.cpp,v
+retrieving revision 3.268
+diff -p -u -1 -0 -r3.268 nsDocLoader.cpp
+--- uriloader/base/nsDocLoader.cpp	3 Mar 2004 15:46:05 -0000	3.268
++++ uriloader/base/nsDocLoader.cpp	10 Apr 2004 01:22:47 -0000
+@@ -54,20 +54,23 @@
+ #include "nsIDOMWindow.h"
+ 
+ // XXX ick ick ick
+ #include "nsIContentViewerContainer.h"
+ #include "nsIDocument.h"
+ #include "nsIPresShell.h"
+ #include "nsIPresContext.h"
+ #include "nsIStringBundle.h"
+ #include "nsIScriptSecurityManager.h"
+ 
++#include "nsITransport.h"
++#include "nsISocketTransport.h"
++
+ static NS_DEFINE_CID(kStringBundleServiceCID, NS_STRINGBUNDLESERVICE_CID);
+ 
+ #if defined(PR_LOGGING)
+ //
+ // Log module for nsIDocumentLoader logging...
+ //
+ // To enable logging (see prlog.h for full details):
+ //
+ //    set NSPR_LOG_MODULES=DocLoader:5
+ //    set NSPR_LOG_FILE=nspr.log
+@@ -90,27 +93,28 @@ void GetURIStringFromRequest(nsIRequest*
+ #endif /* DEBUG */
+ 
+ /* Define IIDs... */
+ static NS_DEFINE_IID(kIDocumentIID,                NS_IDOCUMENT_IID);
+ static NS_DEFINE_IID(kIContentViewerContainerIID,  NS_ICONTENTVIEWERCONTAINER_IID);
+ 
+ 
+ struct nsRequestInfo : public PLDHashEntryHdr
+ {
+   nsRequestInfo(const void *key)
+-    : mKey(key), mCurrentProgress(0), mMaxProgress(0)
++    : mKey(key), mCurrentProgress(0), mMaxProgress(0), mUploading(PR_FALSE)
+   {
+   }
+ 
+   const void* mKey; // Must be first for the pldhash stubs to work
+   PRInt32 mCurrentProgress;
+   PRInt32 mMaxProgress;
++  PRBool mUploading;
+ };
+ 
+ 
+ PR_STATIC_CALLBACK(PRBool)
+ RequestInfoHashInitEntry(PLDHashTable *table, PLDHashEntryHdr *entry,
+                          const void *key)
+ {
+   // Initialize the entry with placement new
+   new (entry) nsRequestInfo(key);
+   return PR_TRUE;
+@@ -999,21 +1003,22 @@ NS_IMETHODIMP nsDocLoaderImpl::OnProgres
+                                           PRUint32 aProgress, PRUint32 aProgressMax)
+ {
+   nsRequestInfo *info;
+   PRInt32 progressDelta = 0;
+ 
+   //
+   // Update the RequestInfo entry with the new progress data
+   //
+   info = GetRequestInfo(aRequest);
+   if (info) {
+-    if ((0 == info->mCurrentProgress) && (0 == info->mMaxProgress)) {
++    // suppress sending STATE_TRANSFERRING if this is upload progress (see bug 240053)
++    if (!info->mUploading && (0 == info->mCurrentProgress) && (0 == info->mMaxProgress)) {
+       //
+       // This is the first progress notification for the entry.  If
+       // (aMaxProgress > 0) then the content-length of the data is known,
+       // so update mMaxSelfProgress...  Otherwise, set it to -1 to indicate
+       // that the content-length is no longer known.
+       //
+       if (aProgressMax != (PRUint32)-1) {
+         mMaxSelfProgress  += aProgressMax;
+         info->mMaxProgress = aProgressMax;
+       } else {
+@@ -1071,20 +1076,40 @@ NS_IMETHODIMP nsDocLoaderImpl::OnProgres
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP nsDocLoaderImpl::OnStatus(nsIRequest* aRequest, nsISupports* ctxt, 
+                                         nsresult aStatus, const PRUnichar* aStatusArg)
+ {
+   //
+   // Fire progress notifications out to any registered nsIWebProgressListeners
+   //
+   if (aStatus) {
++
++    // Remember the current status for this request
++    nsRequestInfo *info;
++    info = GetRequestInfo(aRequest);
++    if (info) {
++      PRBool uploading = (aStatus == nsITransport::STATUS_WRITING ||
++                          aStatus == nsISocketTransport::STATUS_SENDING_TO);
++      // If switching from uploading to downloading (or vice versa), then we
++      // need to reset our progress counts.  This is designed with HTTP form
++      // submission in mind, where an upload is performed followed by download
++      // of possibly several documents.
++      if (info->mUploading != uploading) {
++        mCurrentSelfProgress  = mMaxSelfProgress  = 0;
++        mCurrentTotalProgress = mMaxTotalProgress = 0;
++        info->mUploading = uploading;
++        info->mCurrentProgress = 0;
++        info->mMaxProgress = 0;
++      }
++    }
++    
+     nsresult rv;
+     nsCOMPtr<nsIStringBundleService> sbs = do_GetService(kStringBundleServiceCID, &rv);
+     if (NS_FAILED(rv)) return rv;
+     nsXPIDLString msg;
+     rv = sbs->FormatStatusMessage(aStatus, aStatusArg, getter_Copies(msg));
+     if (NS_FAILED(rv)) return rv;
+     FireOnStatusChange(this, aRequest, aStatus, msg);
+   }
+   return NS_OK;
+ }
+Index: netwerk/protocol/http/src/nsHttpChannel.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/netwerk/protocol/http/src/nsHttpChannel.cpp,v
+retrieving revision 1.196
+diff -p -u -1 -0 -r1.196 nsHttpChannel.cpp
+--- netwerk/protocol/http/src/nsHttpChannel.cpp	8 Apr 2004 00:24:11 -0000	1.196
++++ netwerk/protocol/http/src/nsHttpChannel.cpp	10 Apr 2004 01:22:47 -0000
+@@ -3461,32 +3461,54 @@ nsHttpChannel::OnDataAvailable(nsIReques
+     NS_ASSERTION(!(mCachedContentIsPartial && (request == mTransactionPump)),
+             "transaction pump not suspended");
+ 
+     if (mAuthRetryPending || (request == mTransactionPump && mTransactionReplaced)) {
+         PRUint32 n;
+         return input->ReadSegments(DiscardSegments, nsnull, count, &n);
+     }
+ 
+     if (mListener) {
+         //
++        // synthesize transport progress event.  we do this here since we want
++        // to delay OnProgress events until we start streaming data.  this is
++        // crucially important since it impacts the lock icon (see bug 240053).
++        //
++        nsresult transportStatus;
++        if (request == mCachePump)
++            transportStatus = nsITransport::STATUS_READING;
++        else
++            transportStatus = nsISocketTransport::STATUS_RECEIVING_FROM;
++
++        // mResponseHead may reference new or cached headers, but either way it
++        // holds our best estimate of the total content length.  Even in the case
++        // of a byte range request, the content length stored in the cached
++        // response headers is what we want to use here.
++
++        PRUint32 progressMax = mResponseHead->ContentLength();
++        PRUint32 progress = mLogicalOffset + count;
++        NS_ASSERTION(progress <= progressMax, "unexpected progress values");
++
++        OnTransportStatus(nsnull, transportStatus, progress, progressMax);
++
++        //
+         // we have to manually keep the logical offset of the stream up-to-date.
+         // we cannot depend soley on the offset provided, since we may have 
+         // already streamed some data from another source (see, for example,
+         // OnDoneReadingPartialCacheEntry).
+         //
+         nsresult rv =  mListener->OnDataAvailable(this,
+                                                   mListenerContext,
+                                                   input,
+                                                   mLogicalOffset,
+                                                   count);
+         if (NS_SUCCEEDED(rv))
+-            mLogicalOffset += count;
++            mLogicalOffset = progress;
+         return rv;
+     }
+ 
+     return NS_ERROR_ABORT;
+ }
+ 
+ //-----------------------------------------------------------------------------
+ // nsHttpChannel::nsITransportEventSink
+ //-----------------------------------------------------------------------------
+ 
+@@ -3495,25 +3517,22 @@ nsHttpChannel::OnTransportStatus(nsITran
+                                  PRUint32 progress, PRUint32 progressMax)
+ {
+     // block socket status event after Cancel or OnStopRequest has been called.
+     if (mProgressSink && NS_SUCCEEDED(mStatus) && mIsPending && !(mLoadFlags & LOAD_BACKGROUND)) {
+         LOG(("sending status notification [this=%x status=%x progress=%u/%u]\n",
+             this, status, progress, progressMax));
+ 
+         NS_ConvertASCIItoUCS2 host(mConnectionInfo->Host());
+         mProgressSink->OnStatus(this, nsnull, status, host.get());
+ 
+-        // suppress "sending to" progress event if not uploading
+-        if (status == nsISocketTransport::STATUS_RECEIVING_FROM ||
+-            (status == nsISocketTransport::STATUS_SENDING_TO && mUploadStream)) {
++        if (progress > 0)
+             mProgressSink->OnProgress(this, nsnull, progress, progressMax);
+-        }
+     }
+ #ifdef DEBUG
+     else
+         LOG(("skipping status notification [this=%x sink=%x pending=%u background=%x]\n",
+             this, mProgressSink.get(), mIsPending, (mLoadFlags & LOAD_BACKGROUND)));
+ #endif
+ 
+     return NS_OK;
+ } 
+ 
+Index: netwerk/protocol/http/src/nsHttpTransaction.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/netwerk/protocol/http/src/nsHttpTransaction.cpp,v
+retrieving revision 1.75
+diff -p -u -1 -0 -r1.75 nsHttpTransaction.cpp
+--- netwerk/protocol/http/src/nsHttpTransaction.cpp	28 Feb 2004 22:34:07 -0000	1.75
++++ netwerk/protocol/http/src/nsHttpTransaction.cpp	10 Apr 2004 01:22:47 -0000
+@@ -115,20 +115,21 @@ nsHttpTransaction::nsHttpTransaction()
+     , mConnected(PR_FALSE)
+     , mHaveStatusLine(PR_FALSE)
+     , mHaveAllHeaders(PR_FALSE)
+     , mTransactionDone(PR_FALSE)
+     , mResponseIsComplete(PR_FALSE)
+     , mDidContentStart(PR_FALSE)
+     , mNoContent(PR_FALSE)
+     , mSentData(PR_FALSE)
+     , mReceivedData(PR_FALSE)
+     , mStatusEventPending(PR_FALSE)
++    , mHasRequestBody(PR_FALSE)
+ {
+     LOG(("Creating nsHttpTransaction @%x\n", this));
+ }
+ 
+ nsHttpTransaction::~nsHttpTransaction()
+ {
+     LOG(("Destroying nsHttpTransaction @%x\n", this));
+ 
+     NS_IF_RELEASE(mConnection);
+     NS_IF_RELEASE(mConnInfo);
+@@ -195,20 +196,22 @@ nsHttpTransaction::Init(PRUint8 caps,
+     // Create a string stream for the request header buf (the stream holds
+     // a non-owning reference to the request header data, so we MUST keep
+     // mReqHeaderBuf around).
+     nsCOMPtr<nsIInputStream> headers;
+     rv = NS_NewByteInputStream(getter_AddRefs(headers),
+                                mReqHeaderBuf.get(),
+                                mReqHeaderBuf.Length());
+     if (NS_FAILED(rv)) return rv;
+ 
+     if (requestBody) {
++        mHasRequestBody = PR_TRUE;
++
+         // wrap the headers and request body in a multiplexed input stream.
+         nsCOMPtr<nsIMultiplexInputStream> multi =
+             do_CreateInstance(kMultiplexInputStream, &rv);
+         if (NS_FAILED(rv)) return rv;
+ 
+         rv = multi->AppendStream(headers);
+         if (NS_FAILED(rv)) return rv;
+ 
+         rv = multi->AppendStream(requestBody);
+         if (NS_FAILED(rv)) return rv;
+@@ -266,31 +269,31 @@ void
+ nsHttpTransaction::OnTransportStatus(nsresult status, PRUint32 progress)
+ {
+     LOG(("nsHttpTransaction::OnSocketStatus [this=%x status=%x progress=%u]\n",
+         this, status, progress));
+ 
+     if (!mTransportSink)
+         return;
+     
+     NS_ASSERTION(PR_GetCurrentThread() == gSocketThread, "wrong thread");
+ 
++    // nsHttpChannel synthesizes progress events in OnDataAvailable
++    if (status == nsISocketTransport::STATUS_RECEIVING_FROM)
++        return;
++
+     PRUint32 progressMax;
+ 
+-    if (status == nsISocketTransport::STATUS_RECEIVING_FROM) {
+-        // ignore the progress argument and use our own.  as a result,
+-        // the progress reported will not include the size of the response
+-        // headers.  this is OK b/c we only want to report the progress
+-        // downloading the body of the response.
+-        progress = mContentRead;
+-        progressMax = mContentLength;
+-    }
+-    else if (status == nsISocketTransport::STATUS_SENDING_TO) {
++    if (status == nsISocketTransport::STATUS_SENDING_TO) {
++        // suppress progress when only writing request headers
++        if (!mHasRequestBody)
++            return;
++
+         // when uploading, we include the request headers in the progress
+         // notifications.
+         progressMax = mRequestSize;
+     }
+     else {
+         progress = 0;
+         progressMax = 0;
+     }
+ 
+     mTransportSink->OnTransportStatus(nsnull, status, progress, progressMax);
+Index: netwerk/protocol/http/src/nsHttpTransaction.h
+===================================================================
+RCS file: /cvsroot/mozilla/netwerk/protocol/http/src/nsHttpTransaction.h,v
+retrieving revision 1.35
+diff -p -u -1 -0 -r1.35 nsHttpTransaction.h
+--- netwerk/protocol/http/src/nsHttpTransaction.h	8 Oct 2003 06:10:47 -0000	1.35
++++ netwerk/protocol/http/src/nsHttpTransaction.h	10 Apr 2004 01:22:47 -0000
+@@ -171,17 +171,18 @@ private:
+     PRUint32                        mConnected          : 1;
+     PRUint32                        mHaveStatusLine     : 1;
+     PRUint32                        mHaveAllHeaders     : 1;
+     PRUint32                        mTransactionDone    : 1;
+     PRUint32                        mResponseIsComplete : 1;
+     PRUint32                        mDidContentStart    : 1;
+     PRUint32                        mNoContent          : 1; // expecting an empty entity body
+     PRUint32                        mSentData           : 1;
+     PRUint32                        mReceivedData       : 1;
+     PRUint32                        mStatusEventPending : 1;
++    PRUint32                        mHasRequestBody     : 1;
+ 
+     // mClosed           := transaction has been explicitly closed
+     // mTransactionDone  := transaction ran to completion or was interrupted
+     // mResponseComplete := transaction ran to completion
+ };
+ 
+ #endif // nsHttpTransaction_h__

@@ -1,0 +1,200 @@
+# HG changeset patch
+# User Blake Kaplan <mrbkap@gmail.com>
+# Date 1304376430 25200
+# Node ID ecdfc864ebf6ca56371f2cb72b9ae48edc1e3b70
+# Parent ef37173ea906248f9f92d5f3448cf86d704da02d
+Bug 650273 - Force a frame here.
+
+diff --git a/dom/base/nsJSEnvironment.cpp b/dom/base/nsJSEnvironment.cpp
+--- a/dom/base/nsJSEnvironment.cpp
++++ b/dom/base/nsJSEnvironment.cpp
+@@ -83,16 +83,17 @@
+ #include "nsNetUtil.h"
+ #include "nsXPCOMCIDInternal.h"
+ #include "nsIXULRuntime.h"
+ 
+ #include "nsDOMClassInfo.h"
+ #include "xpcpublic.h"
+ 
+ #include "jsdbgapi.h"           // for JS_ClearWatchPointsForObject
++#include "jswrapper.h"
+ #include "jsxdrapi.h"
+ #include "nsIArray.h"
+ #include "nsIObjectInputStream.h"
+ #include "nsIObjectOutputStream.h"
+ #include "nsITimelineService.h"
+ #include "nsDOMScriptObjectHolder.h"
+ #include "prmem.h"
+ #include "WrapperFactory.h"
+@@ -1876,17 +1877,19 @@ nsJSContext::CallEventHandler(nsISupport
+     JSStackFrame *currentfp = nsnull;
+     rv = sSecurityManager->PushContextPrincipal(mContext,
+                                                 JS_FrameIterator(mContext, &currentfp),
+                                                 principal);
+     NS_ENSURE_SUCCESS(rv, rv);
+ 
+     jsval funval = OBJECT_TO_JSVAL(funobj);
+     JSAutoEnterCompartment ac;
+-    if (!ac.enter(mContext, funobj) || !JS_WrapObject(mContext, &target)) {
++    js::ForceFrame ff(mContext, funobj);
++    if (!ac.enter(mContext, funobj) || !ff.enter() ||
++        !JS_WrapObject(mContext, &target)) {
+       sSecurityManager->PopContextPrincipal(mContext);
+       return NS_ERROR_FAILURE;
+     }
+ 
+     Maybe<nsAutoPoolRelease> poolRelease;
+     Maybe<js::AutoArrayRooter> tvr;
+ 
+     // Use |target| as the scope for wrapping the arguments, since aScope is
+diff --git a/js/src/jswrapper.cpp b/js/src/jswrapper.cpp
+--- a/js/src/jswrapper.cpp
++++ b/js/src/jswrapper.cpp
+@@ -352,22 +352,44 @@ TransparentObjectWrapper(JSContext *cx, 
+ {
+     // Allow wrapping outer window proxies.
+     JS_ASSERT(!obj->isWrapper() || obj->getClass()->ext.innerObject);
+     return JSWrapper::New(cx, obj, wrappedProto, parent, &JSCrossCompartmentWrapper::singleton);
+ }
+ 
+ }
+ 
++ForceFrame::ForceFrame(JSContext *cx, JSObject *target)
++    : context(cx),
++      target(target)
++{
++}
++
++bool
++ForceFrame::enter()
++{
++    LeaveTrace(context);
++
++    JS_ASSERT(context->compartment == target->compartment());
++    JSObject *scopeChain = target->getGlobal();
++    JS_ASSERT(scopeChain->isNative());
++
++    if (!context->stack.pushDummyFrame(context, *scopeChain, &frame))
++        return false;
++
++    if (context->isExceptionPending())
++        context->wrapPendingException();
++    return true;
++}
++
+ AutoCompartment::AutoCompartment(JSContext *cx, JSObject *target)
+     : context(cx),
+       origin(cx->compartment),
+       target(target),
+       destination(target->getCompartment()),
+-      input(cx),
+       entered(false)
+ {
+ }
+ 
+ AutoCompartment::~AutoCompartment()
+ {
+     if (entered)
+         leave();
+diff --git a/js/src/jswrapper.h b/js/src/jswrapper.h
+--- a/js/src/jswrapper.h
++++ b/js/src/jswrapper.h
+@@ -151,27 +151,40 @@ class JS_FRIEND_API(JSCrossCompartmentWr
+     virtual JSString *obj_toString(JSContext *cx, JSObject *wrapper);
+     virtual JSString *fun_toString(JSContext *cx, JSObject *wrapper, uintN indent);
+ 
+     static JSCrossCompartmentWrapper singleton;
+ };
+ 
+ namespace js {
+ 
++// A hacky class that lets a friend force a fake frame. We must already be
++// in the compartment of |target| when we enter the forced frame.
++class JS_FRIEND_API(ForceFrame)
++{
++  public:
++    JSContext * const context;
++    JSObject * const target;
++  private:
++    DummyFrameGuard frame;
++
++  public:
++    ForceFrame(JSContext *cx, JSObject *target);
++    bool enter();
++};
++
+ class AutoCompartment
+ {
+   public:
+     JSContext * const context;
+     JSCompartment * const origin;
+     JSObject * const target;
+     JSCompartment * const destination;
+   private:
+     Maybe<DummyFrameGuard> frame;
+-    FrameRegs regs;
+-    AutoStringRooter input;
+     bool entered;
+ 
+   public:
+     AutoCompartment(JSContext *cx, JSObject *target);
+     ~AutoCompartment();
+ 
+     bool enter();
+     void leave();
+diff --git a/js/src/xpconnect/tests/mochitest/Makefile.in b/js/src/xpconnect/tests/mochitest/Makefile.in
+--- a/js/src/xpconnect/tests/mochitest/Makefile.in
++++ b/js/src/xpconnect/tests/mochitest/Makefile.in
+@@ -84,14 +84,15 @@ _TEST_FILES =	bug500931_helper.html \
+ 		test_bug629227.html \
+ 		file1_bug629227.html \
+ 		file2_bug629227.html \
+ 		test_bug629331.html \
+ 		test1_bug629331.html \
+ 		test2_bug629331.html \
+ 		test_bug618017.html \
+ 		test_bug636097.html \
++		test_bug650273.html \
+ 		$(NULL)
+ 
+ 		#test_bug484107.html \
+ 
+ libs:: $(_TEST_FILES)
+ 	$(INSTALL) $^ $(DEPTH)/_tests/testing/mochitest/tests/$(relativesrcdir)
+diff --git a/js/src/xpconnect/tests/mochitest/test_bug650273.html b/js/src/xpconnect/tests/mochitest/test_bug650273.html
+new file mode 100644
+--- /dev/null
++++ b/js/src/xpconnect/tests/mochitest/test_bug650273.html
+@@ -0,0 +1,32 @@
++<body onload="a()">
++<script>
++var targetUrl = "http://example.org/";
++
++function a() {
++        var o = {};
++        o.toString = function() {
++                l();
++                return "a";
++        };
++        var f = Components.lookupMethod(document, "title");
++        setTimeout(f, 0, o);
++        ok(true, "test passed");
++}
++
++function l() {
++        var l = false;
++        onunload = function() {
++                l = true;
++        };
++        location = targetUrl;
++        do {
++                var r = new XMLHttpRequest();
++                r.open("GET", location.href, false);
++                r.overrideMimeType("text/plain");
++                try { r.send(null); }
++                catch (e) {}
++        } while (!l);
++}
++</script>
++</body>
++

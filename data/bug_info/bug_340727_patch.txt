@@ -1,0 +1,31 @@
+Index: jsinterp.c
+===================================================================
+RCS file: /cvsroot/mozilla/js/src/jsinterp.c,v
+retrieving revision 3.241.2.10
+diff -p -U10 -r3.241.2.10 jsinterp.c
+--- jsinterp.c	5 Jun 2006 22:04:26 -0000	3.241.2.10
++++ jsinterp.c	7 Jun 2006 22:44:53 -0000
+@@ -5041,22 +5041,21 @@ interrupt:
+              * Step 2 is achieved by making the new object's parent be the
+              * current scope chain, and then making the new object the parent
+              * of the Function object clone.
+              */
+             SAVE_SP_AND_PC(fp);
+             obj2 = js_GetScopeChain(cx, fp);
+             if (!obj2) {
+                 ok = JS_FALSE;
+                 goto out;
+             }
+-            parent = js_ConstructObject(cx, &js_ObjectClass, NULL, obj2,
+-                                        0, NULL);
++            parent = js_NewObject(cx, &js_ObjectClass, NULL, obj2);
+             if (!parent) {
+                 ok = JS_FALSE;
+                 goto out;
+             }
+ 
+             /*
+              * 3. Create a new Function object as specified in section 13.2
+              * with [parameters and body specified by the function expression
+              * that was parsed by the compiler into a Function object, and
+              * saved in the script's atom map].

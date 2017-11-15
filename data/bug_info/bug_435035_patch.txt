@@ -1,0 +1,178 @@
+diff --git a/browser/base/content/browser.js b/browser/base/content/browser.js
+--- a/browser/base/content/browser.js
++++ b/browser/base/content/browser.js
+@@ -6312,35 +6312,35 @@ BookmarkAllTabsHandler.prototype = {
+ /**
+  * Utility object to handle manipulations of the identity indicators in the UI
+  */
+ var gIdentityHandler = {
+   // Mode strings used to control CSS display
+   IDENTITY_MODE_IDENTIFIED       : "verifiedIdentity", // High-quality identity information
+   IDENTITY_MODE_DOMAIN_VERIFIED  : "verifiedDomain",   // Minimal SSL CA-signed domain verification
+   IDENTITY_MODE_UNKNOWN          : "unknownIdentity",  // No trusted identity information
++  IDENTITY_MODE_MIXED_CONTENT    : "unknownIdentity mixedContent",  // SSL with unauthenticated content
+ 
+   // Cache the most recent SSLStatus and Location seen in checkIdentity
+   _lastStatus : null,
+   _lastLocation : null,
+ 
+   // smart getters
+-  get _staticStrings () {
+-    delete this._staticStrings;
+-    this._staticStrings = {};
+-    this._staticStrings[this.IDENTITY_MODE_DOMAIN_VERIFIED] = {
+-      encryption_label: gNavigatorBundle.getString("identity.encrypted")
+-    };
+-    this._staticStrings[this.IDENTITY_MODE_IDENTIFIED] = {
+-      encryption_label: gNavigatorBundle.getString("identity.encrypted")
+-    };
+-    this._staticStrings[this.IDENTITY_MODE_UNKNOWN] = {
+-      encryption_label: gNavigatorBundle.getString("identity.unencrypted")
+-    };
+-    return this._staticStrings;
++  get _encryptionLabel () {
++    delete this._encryptionLabel;
++    this._encryptionLabel = {};
++    this._encryptionLabel[this.IDENTITY_MODE_DOMAIN_VERIFIED] =
++      gNavigatorBundle.getString("identity.encrypted");
++    this._encryptionLabel[this.IDENTITY_MODE_IDENTIFIED] =
++      gNavigatorBundle.getString("identity.encrypted");
++    this._encryptionLabel[this.IDENTITY_MODE_UNKNOWN] =
++      gNavigatorBundle.getString("identity.unencrypted");
++    this._encryptionLabel[this.IDENTITY_MODE_MIXED_CONTENT] =
++      gNavigatorBundle.getString("identity.mixed_content");
++    return this._encryptionLabel;
+   },
+   get _identityPopup () {
+     delete this._identityPopup;
+     return this._identityPopup = document.getElementById("identity-popup");
+   },
+   get _identityBox () {
+     delete this._identityBox;
+     return this._identityBox = document.getElementById("identity-box");
+@@ -6448,21 +6448,24 @@ var gIdentityHandler = {
+    *                           .hostname and .port)
+    */
+   checkIdentity : function(state, location) {
+     var currentStatus = gBrowser.securityUI
+                                 .QueryInterface(Components.interfaces.nsISSLStatusProvider)
+                                 .SSLStatus;
+     this._lastStatus = currentStatus;
+     this._lastLocation = location;
+-    
+-    if (state & Components.interfaces.nsIWebProgressListener.STATE_IDENTITY_EV_TOPLEVEL)
++
++    let nsIWebProgressListener = Ci.nsIWebProgressListener;
++    if (state & nsIWebProgressListener.STATE_IDENTITY_EV_TOPLEVEL)
+       this.setMode(this.IDENTITY_MODE_IDENTIFIED);
+-    else if (state & Components.interfaces.nsIWebProgressListener.STATE_SECURE_HIGH)
++    else if (state & nsIWebProgressListener.STATE_SECURE_HIGH)
+       this.setMode(this.IDENTITY_MODE_DOMAIN_VERIFIED);
++    else if (state & nsIWebProgressListener.STATE_IS_BROKEN)
++      this.setMode(this.IDENTITY_MODE_MIXED_CONTENT);
+     else
+       this.setMode(this.IDENTITY_MODE_UNKNOWN);
+   },
+   
+   /**
+    * Return the eTLD+1 version of the current hostname
+    */
+   getEffectiveHost : function() {
+@@ -6572,17 +6575,17 @@ var gIdentityHandler = {
+    * @param newMode The newly set identity mode.  Should be one of the IDENTITY_MODE_* constants.
+    */
+   setPopupMessages : function(newMode) {
+       
+     this._identityPopup.className = newMode;
+     this._identityPopupContentBox.className = newMode;
+     
+     // Set the static strings up front
+-    this._identityPopupEncLabel.textContent = this._staticStrings[newMode].encryption_label;
++    this._identityPopupEncLabel.textContent = this._encryptionLabel[newMode];
+     
+     // Initialize the optional strings to empty values
+     var supplemental = "";
+     var verifier = "";
+     
+     if (newMode == this.IDENTITY_MODE_DOMAIN_VERIFIED) {
+       var iData = this.getIdentityData();
+       var host = this.getEffectiveHost();
+diff --git a/browser/base/content/test/Makefile.in b/browser/base/content/test/Makefile.in
+--- a/browser/base/content/test/Makefile.in
++++ b/browser/base/content/test/Makefile.in
+@@ -86,26 +86,28 @@ _BROWSER_FILES = \
+                  browser_bug405137.js \
+                  browser_bug409481.js \
+                  browser_bug413915.js \
+                  browser_bug419612.js \
+                  browser_bug420160.js \
+                  browser_bug424101.js \
+                  browser_bug427559.js \
+                  browser_bug432599.js \
++                 browser_bug435035.js \
+                  browser_bug441778.js \
+                  browser_bug455852.js \
+                  browser_bug462673.js \
+                  browser_bug481560.js \
+                  browser_bug477014.js \
+                  browser_bug495058.js \
+                  browser_discovery.js \
+                  browser_tabfocus.js \
+                  discovery.html \
+                  moz.png \
++                 test_bug435035.html \
+                  test_bug462673.html \
+                  browser_getshortcutoruri.js \
+                  browser_page_style_menu.js \
+                  page_style_sample.html \
+                  browser_ctrlTab.js \
+                  browser_selectTabAtIndex.js \
+                  browser_gestureSupport.js \
+                  browser_pageInfo.js \
+diff --git a/browser/base/content/test/browser_bug435035.js b/browser/base/content/test/browser_bug435035.js
+new file mode 100644
+--- /dev/null
++++ b/browser/base/content/test/browser_bug435035.js
+@@ -0,0 +1,15 @@
++function test() {
++  waitForExplicitFinish();
++
++  gBrowser.selectedTab = gBrowser.addTab();
++  gBrowser.selectedBrowser.addEventListener("load", function () {
++    is(document.getElementById("identity-box").className,
++       gIdentityHandler.IDENTITY_MODE_MIXED_CONTENT,
++       "identity box has class name for mixed content");
++
++    gBrowser.removeCurrentTab();
++    finish();
++  }, true);
++
++  content.location = "https://example.com/browser/browser/base/content/test/test_bug435035.html";
++}
+diff --git a/browser/base/content/test/test_bug435035.html b/browser/base/content/test/test_bug435035.html
+new file mode 100644
+--- /dev/null
++++ b/browser/base/content/test/test_bug435035.html
+@@ -0,0 +1,1 @@
++<img src="http://example.com/browser/browser/base/content/test/moz.png">
+diff --git a/browser/locales/en-US/chrome/browser/browser.properties b/browser/locales/en-US/chrome/browser/browser.properties
+--- a/browser/locales/en-US/chrome/browser/browser.properties
++++ b/browser/locales/en-US/chrome/browser/browser.properties
+@@ -145,16 +145,17 @@ offlineApps.manageUsageAccessKey=S
+ 
+ identity.identified.verifier=Verified by: %S
+ identity.identified.verified_by_you=You have added a security exception for this site.
+ identity.identified.state_and_country=%S, %S
+ identity.identified.title_with_country=%S (%S)
+ 
+ identity.encrypted=Your connection to this web site is encrypted to prevent eavesdropping.
+ identity.unencrypted=Your connection to this web site is not encrypted.
++identity.mixed_content=Your connection to this site is only partially encrypted, and does not prevent eavesdropping.
+ 
+ identity.unknown.tooltip=This web site does not supply identity information.
+ 
+ identity.ownerUnknown2=(unknown)
+ 
+ # Downloads Monitor Panel
+ # LOCALIZATION NOTE (activeDownloads, pausedDownloads): Semi-colon list of plural
+ # forms. See: http://developer.mozilla.org/en/docs/Localization_and_Plurals

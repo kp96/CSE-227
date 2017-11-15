@@ -1,0 +1,25 @@
+Index: modules/libpref/src/init/all.js
+===================================================================
+RCS file: /cvsroot/mozilla/modules/libpref/src/init/all.js,v
+retrieving revision 3.604
+diff -u -8 -p -r3.604 all.js
+--- modules/libpref/src/init/all.js	21 Oct 2005 19:07:22 -0000	3.604
++++ modules/libpref/src/init/all.js	29 Oct 2005 15:59:20 -0000
+@@ -287,16 +287,17 @@ pref("capability.policy.default.Window.w
+ 
+ // Restrictions on the DOM for mail/news - see bugs 66938 and 84545
+ pref("capability.policy.mailnews.sites", "mailbox: imap: news:");
+ 
+ pref("capability.policy.mailnews.*.attributes.get", "noAccess");
+ pref("capability.policy.mailnews.*.baseURI.get", "noAccess");
+ pref("capability.policy.mailnews.*.data.get", "noAccess");
+ pref("capability.policy.mailnews.*.getAttribute", "noAccess");
++pref("capability.policy.mailnews.HTMLDivElement.getAttribute", "sameOrigin");
+ pref("capability.policy.mailnews.*.getAttributeNS", "noAccess");
+ pref("capability.policy.mailnews.*.getNamedItem", "noAccess");
+ pref("capability.policy.mailnews.*.getNamedItemNS", "noAccess");
+ pref("capability.policy.mailnews.*.host.get", "noAccess");
+ pref("capability.policy.mailnews.*.hostname.get", "noAccess");
+ pref("capability.policy.mailnews.*.href.get", "noAccess");
+ pref("capability.policy.mailnews.*.innerHTML.get", "noAccess");
+ pref("capability.policy.mailnews.*.lowSrc.get", "noAccess");

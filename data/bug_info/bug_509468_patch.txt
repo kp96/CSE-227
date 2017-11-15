@@ -1,0 +1,125 @@
+Index: resources/localized/English.lproj/Localizable.strings.in
+===================================================================
+RCS file: /cvsroot/mozilla/camino/resources/localized/English.lproj/Localizable.strings.in,v
+retrieving revision 1.41
+diff -u -8 -r1.41 Localizable.strings.in
+--- resources/localized/English.lproj/Localizable.strings.in	12 Aug 2009 18:33:50 -0000	1.41
++++ resources/localized/English.lproj/Localizable.strings.in	13 Aug 2009 18:28:41 -0000
+@@ -533,10 +533,10 @@
+ "MalwareShortDescText" = "This web site at <span id='malware_sitename'/> has been reported as a malware site and has been blocked for your protection.";
+ /* To create paragraphs within the long description text, please wrap each 
+    paragraph in <p></p> tags.  Because these strings appear in an XHTML page, 
+    each LongDescText string must begin with a <p> and end with a </p> or the 
+    safe browsing page will not display. */
+ "PhishingLongDescText" = "<p>Phishing sites are designed to trick you into revealing personal or financial information by creating copies of trusted websites.</p><p>Entering any information on this web page may result in identity theft or other fraud.</p>";
+ "MalwareLongDescText" = "<p>Malware sites try to install programs that steal private information, use your computer to attack others, or damage your system.</p><p>Some malware sites intentionally distribute harmful software, but many are compromised without the knowledge or permission of their owners.</p><p>Your computer can be infected just by proceeding to this site, without any further action on your part.</p>";
+ "MoreInformationFormat" = "For more information about why this site was blocked, see Camino’s <a href='%@'>Safe Browsing Documentation</a>.";
+-"GetMeOutButtonLabel" = "Get me out of here!";
++"GetMeOutButtonLabel" = "Close Page";
+ "IgnoreWarningButtonLabel" = "Ignore this warning";
+Index: src/browser/BrowserWindowController.mm
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/browser/BrowserWindowController.mm,v
+retrieving revision 1.409
+diff -u -8 -r1.409 BrowserWindowController.mm
+--- src/browser/BrowserWindowController.mm	24 Jul 2009 23:50:14 -0000	1.409
++++ src/browser/BrowserWindowController.mm	13 Aug 2009 18:28:47 -0000
+@@ -5269,24 +5269,16 @@
+     [mSearchBar setEditable:NO];
+   }
+   else {
+     [mURLBar setEditable:YES];
+     [mSearchBar setEditable:YES];
+   }
+ }
+ 
+-- (void)runAwayFromSafeBrowsingBlockedSite
+-{
+-  if ([[mBrowserView browserView] canGoBack])
+-    [self back:self];
+-  else
+-    [self home:self];
+-}
+-
+ - (void)showSafeBrowsingInformation
+ {
+   NSString *blockingInformationURL = 
+     [[PreferenceManager sharedInstance] getStringPref:kGeckoPrefSafeBrowsingInformationURL 
+                                           withSuccess:NULL];
+   [self loadURL:blockingInformationURL referrer:nil focusContent:YES allowPopups:NO];  
+ }
+ 
+Index: src/browser/BrowserWrapper.h
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/browser/BrowserWrapper.h,v
+retrieving revision 1.73
+diff -u -8 -r1.73 BrowserWrapper.h
+--- src/browser/BrowserWrapper.h	10 Aug 2009 22:18:17 -0000	1.73
++++ src/browser/BrowserWrapper.h	13 Aug 2009 18:28:47 -0000
+@@ -80,17 +80,16 @@
+ 
+ - (void)addCertificateOverrideForSite:(NSString*)url;
+ 
+ - (BOOL)userChangedLocationField;
+ 
+ - (void)contentViewChangedTo:(NSView*)inView forURL:(NSString*)inURL;
+ 
+ // Called when the user clicks buttons on the about:safebrowsingblocked error page.
+-- (void)runAwayFromSafeBrowsingBlockedSite;
+ - (void)showSafeBrowsingInformation;
+ - (void)showMalwareDiagnosticInformation;
+ - (void)reportIncorrectlyBlockedSite:(NSString*)aBlockedURL reason:(ESafeBrowsingBlockedReason)aBlockedReason;
+ 
+ @end
+ 
+ //
+ // The BrowserWrapper requests UI to be created via this delegate. Unlike the
+Index: src/browser/BrowserWrapper.mm
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/browser/BrowserWrapper.mm,v
+retrieving revision 1.168
+diff -u -8 -r1.168 BrowserWrapper.mm
+--- src/browser/BrowserWrapper.mm	10 Aug 2009 22:18:17 -0000	1.168
++++ src/browser/BrowserWrapper.mm	13 Aug 2009 18:28:49 -0000
+@@ -1004,17 +1004,17 @@
+   else if ([pageURI hasPrefix:@"about:safebrowsingblocked"]) {
+     // pageURI contains an |e| parameter to indicate the type of
+     // blocking error, such as e=malwareBlocked.
+     ESafeBrowsingBlockedReason blockedReason = eSafeBrowsingBlockedAsPhishing;
+     if ([pageURI rangeOfString:kSafeBrowsingErrorOverlayMalwareBlockedIndicator].location != NSNotFound)
+       blockedReason = eSafeBrowsingBlockedAsMalware;
+ 
+     if ([elementIdentifier isEqualToString:@"getMeOutButton"]) {
+-      [mDelegate runAwayFromSafeBrowsingBlockedSite];
++      [self runAwayFromBlockedSite:self];
+     }
+     else if ([elementIdentifier isEqualToString:@"ignoreWarningButton"]) {
+       [self ignoreBlockedSite:[self currentURI] withReason:blockedReason];
+     }
+     else if ([elementIdentifier isEqualToString:@"whyBlockedButton"]) {
+       if (blockedReason == eSafeBrowsingBlockedAsMalware)
+         [mDelegate showMalwareDiagnosticInformation];
+       else
+@@ -1736,20 +1736,20 @@
+ // IBAction from the safe browsing bar, sent from the "Report Incorrect Site" button.
+ - (IBAction)reportIncorrectlyBlockedSite:(id)sender
+ {
+   NSString* blockedURL = [self currentURI];
+   ESafeBrowsingBlockedReason blockedReason = [self reasonForBlockingURL:blockedURL];
+   [mDelegate reportIncorrectlyBlockedSite:blockedURL reason:blockedReason];
+ }
+ 
+-// IBAction from the safe browsing bar, sent from the "Get me out of here" button.
++// Sent when the user chooses to leave a dangerous page via the "Get Me Out" button.
+ - (IBAction)runAwayFromBlockedSite:(id)sender
+ {
+-  [mDelegate runAwayFromSafeBrowsingBlockedSite];
++  [self closeBrowserWindow];
+ }
+ 
+ @end
+ 
+ #pragma mark -
+ 
+ // This value keeps the message text field from wrapping excessively.
+ #define kMessageTextMinWidth 70

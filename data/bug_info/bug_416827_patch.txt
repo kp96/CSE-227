@@ -1,0 +1,32 @@
+Index: mozilla/security/manager/ssl/src/nsIdentityChecking.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsIdentityChecking.cpp,v
+retrieving revision 1.9
+diff -u -u -8 -p -r1.9 nsIdentityChecking.cpp
+--- mozilla/security/manager/ssl/src/nsIdentityChecking.cpp	22 Jan 2008 23:46:49 -0000	1.9
++++ mozilla/security/manager/ssl/src/nsIdentityChecking.cpp	19 Feb 2008 08:32:30 -0000
+@@ -75,16 +75,24 @@ struct nsMyTrustedEVInfo
+   SECOidTag oid_tag;
+   const char *ev_root_subject;
+   const char *ev_root_issuer;
+   const char *ev_root_sha1_fingerprint;
+ };
+ 
+ static struct nsMyTrustedEVInfo myTrustedEVInfos[] = {
+   {
++    "2.16.840.1.114412.2.1",
++    "DigiCert EV OID",
++    SEC_OID_UNKNOWN,
++    "CN=DigiCert High Assurance EV Root CA,OU=www.digicert.com,O=DigiCert Inc,C=US",
++    "CN=DigiCert High Assurance EV Root CA,OU=www.digicert.com,O=DigiCert Inc,C=US",
++    "5F:B7:EE:06:33:E2:59:DB:AD:0C:4C:9A:E6:D3:8F:1A:61:C7:DC:25"
++  },
++  {
+     "2.16.840.1.113733.1.7.23.6",
+     "Verisign EV OID",
+     SEC_OID_UNKNOWN,
+     "OU=Class 3 Public Primary Certification Authority,O=\"VeriSign, Inc.\",C=US",
+     "OU=Class 3 Public Primary Certification Authority,O=\"VeriSign, Inc.\",C=US",
+     "74:2C:31:92:E6:07:E4:24:EB:45:49:54:2B:E1:BB:C5:3E:61:74:E2"
+   },
+   {

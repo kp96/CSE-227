@@ -1,0 +1,261 @@
+# HG changeset patch
+# Parent 36d3dc7532b9f862be5c8cc4458e1911bfb181a1
+# User Brian Smith <brian@briansmith.org>
+Bug 707275, Part 2: Add telemetry for TLS cipher suites and key sizes, r?keeler
+
+diff --git a/security/manager/ssl/src/nsNSSCallbacks.cpp b/security/manager/ssl/src/nsNSSCallbacks.cpp
+--- a/security/manager/ssl/src/nsNSSCallbacks.cpp
++++ b/security/manager/ssl/src/nsNSSCallbacks.cpp
+@@ -1016,16 +1016,49 @@ CanFalseStartCallback(PRFileDesc* fd, vo
+   }
+ 
+   infoObject->NoteTimeUntilReady();
+   *canFalseStart = true;
+   PR_LOG(gPIPNSSLog, PR_LOG_DEBUG, ("CanFalseStartCallback [%p] ok\n", fd));
+   return SECSuccess;
+ }
+ 
++static void
++AccumulateNonECCKeySize(Telemetry::ID probe, uint32_t bits)
++{
++  unsigned int value = bits <   512 ?  1 : bits ==   512 ?  2
++                     : bits <   768 ?  3 : bits ==   768 ?  4
++                     : bits <  1024 ?  5 : bits ==  1024 ?  6
++                     : bits <  1024 ?  7 : bits ==  1024 ?  8
++                     : bits <  1536 ?  9 : bits ==  1536 ? 10
++                     : bits <  2048 ? 11 : bits ==  2048 ? 12
++                     : bits <  3072 ? 13 : bits ==  3072 ? 14
++                     : bits <  4096 ? 15 : bits ==  4096 ? 16
++                     : bits <  8192 ? 17 : bits ==  8192 ? 18
++                     : bits < 16384 ? 19 : bits == 16384 ? 20
++                     : 0;
++  Telemetry::Accumulate(probe, value);
++}
++
++// XXX: This attempts to map a bit count to an ECC named curve identifier. In
++// the vast majority of situations, we only have the Suite B curves available.
++// In that case, this mapping works fine. If we were to have more curves
++// available, the mapping would be ambiguous since there could be multiple
++// named curves for a given size (e.g. secp256k1 vs. secp256r1). We punt on
++// that for now. See also NSS bug 323674.
++static void
++AccummulateECCCurve(Telemetry::ID probe, uint32_t bits)
++{
++  unsigned int value = bits == 256 ? 23 // P-256
++                     : bits == 384 ? 24 // P-384
++                     : bits == 521 ? 25 // P-521
++                     : 0; // Unknown
++  Telemetry::Accumulate(probe, value);
++}
++
+ void HandshakeCallback(PRFileDesc* fd, void* client_data) {
+   nsNSSShutDownPreventionLock locker;
+   SECStatus rv;
+ 
+   nsNSSSocketInfo* infoObject = (nsNSSSocketInfo*) fd->higher->secret;
+ 
+   // certificate validation sets IsFullHandshake, so if that flag
+   // is absent at handshake time we have a resumed session. Check this before
+@@ -1131,29 +1164,121 @@ void HandshakeCallback(PRFileDesc* fd, v
+   MOZ_ASSERT(rv == SECSuccess);
+   if (rv == SECSuccess) {
+     // Get the protocol version for telemetry
+     // 0=ssl3, 1=tls1, 2=tls1.1, 3=tls1.2
+     unsigned int versionEnum = channelInfo.protocolVersion & 0xFF;
+     Telemetry::Accumulate(Telemetry::SSL_HANDSHAKE_VERSION, versionEnum);
+     infoObject->SetNegotiatedTLSVersion(channelInfo.protocolVersion);
+ 
++    unsigned int csEnum;
++    switch (channelInfo.cipherSuite) {
++      // ECDHE key exchange
++      case TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256: csEnum = 1; break;
++      case TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256: csEnum = 2; break;
++      case TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA: csEnum = 3; break;
++      case TLS_ECDHE_ECDSA_WITH_AES_128_CBC_SHA: csEnum = 4; break;
++      case TLS_ECDHE_RSA_WITH_AES_256_CBC_SHA: csEnum = 5; break;
++      case TLS_ECDHE_ECDSA_WITH_AES_256_CBC_SHA: csEnum = 6; break;
++      case TLS_ECDHE_RSA_WITH_3DES_EDE_CBC_SHA: csEnum = 7; break;
++      case TLS_ECDHE_RSA_WITH_RC4_128_SHA: csEnum = 8; break;
++      case TLS_ECDHE_ECDSA_WITH_RC4_128_SHA: csEnum = 9; break;
++      // DHE key exchange
++      case TLS_DHE_RSA_WITH_AES_128_CBC_SHA: csEnum = 21; break;
++      case TLS_DHE_RSA_WITH_CAMELLIA_128_CBC_SHA: csEnum = 22; break;
++      case TLS_DHE_RSA_WITH_AES_256_CBC_SHA: csEnum = 23; break;
++      case TLS_DHE_RSA_WITH_CAMELLIA_256_CBC_SHA: csEnum = 24; break;
++      case SSL_DHE_RSA_WITH_3DES_EDE_CBC_SHA: csEnum = 25; break;
++      case TLS_DHE_DSS_WITH_AES_128_CBC_SHA: csEnum = 26; break;
++      case TLS_DHE_DSS_WITH_CAMELLIA_128_CBC_SHA: csEnum = 27; break;
++      case TLS_DHE_DSS_WITH_AES_256_CBC_SHA: csEnum = 28; break;
++      case TLS_DHE_DSS_WITH_CAMELLIA_256_CBC_SHA: csEnum = 29; break;
++      // ECDH key exchange
++      case TLS_ECDH_ECDSA_WITH_AES_128_CBC_SHA: csEnum = 41; break;
++      case TLS_ECDH_RSA_WITH_AES_128_CBC_SHA: csEnum = 42; break;
++      case TLS_ECDH_ECDSA_WITH_AES_256_CBC_SHA: csEnum = 43; break;
++      case TLS_ECDH_RSA_WITH_AES_256_CBC_SHA: csEnum = 44; break;
++      case TLS_ECDH_ECDSA_WITH_3DES_EDE_CBC_SHA: csEnum = 45; break;
++      case TLS_ECDH_RSA_WITH_3DES_EDE_CBC_SHA: csEnum = 46; break;
++      case TLS_ECDH_ECDSA_WITH_RC4_128_SHA: csEnum = 47; break;
++      case TLS_ECDH_RSA_WITH_RC4_128_SHA: csEnum = 48; break;
++      // RSA key exchange
++      case TLS_RSA_WITH_AES_128_CBC_SHA: csEnum = 61; break;
++      case TLS_RSA_WITH_CAMELLIA_128_CBC_SHA: csEnum = 62; break;
++      case TLS_RSA_WITH_AES_256_CBC_SHA: csEnum = 63; break;
++      case TLS_RSA_WITH_CAMELLIA_256_CBC_SHA: csEnum = 64; break;
++      case SSL_RSA_FIPS_WITH_3DES_EDE_CBC_SHA: csEnum = 65; break;
++      case SSL_RSA_WITH_3DES_EDE_CBC_SHA: csEnum = 66; break;
++      case TLS_RSA_WITH_SEED_CBC_SHA: csEnum = 67; break;
++      case SSL_RSA_WITH_RC4_128_SHA: csEnum = 68; break;
++      case SSL_RSA_WITH_RC4_128_MD5: csEnum = 69; break;
++      // unknown
++      default:
++        MOZ_CRASH("impossible cipher suite");
++        csEnum = 0;
++        break;
++    }
++    Telemetry::Accumulate(Telemetry::SSL_CIPHER_SUITE, csEnum);
++
+     SSLCipherSuiteInfo cipherInfo;
+     rv = SSL_GetCipherSuiteInfo(channelInfo.cipherSuite, &cipherInfo,
+                                 sizeof cipherInfo);
+     MOZ_ASSERT(rv == SECSuccess);
+     if (rv == SECSuccess) {
+       status->mHaveKeyLengthAndCipher = true;
+       status->mKeyLength = cipherInfo.symKeyBits;
+       status->mSecretKeyLength = cipherInfo.effectiveKeyBits;
+       status->mCipherName.Assign(cipherInfo.cipherSuiteName);
+ 
+       // keyExchange null=0, rsa=1, dh=2, fortezza=3, ecdh=4
+       Telemetry::Accumulate(Telemetry::SSL_KEY_EXCHANGE_ALGORITHM,
+                             cipherInfo.keaType);
+       infoObject->SetKEAUsed(cipherInfo.keaType);
++
++      switch (cipherInfo.keaType) {
++        case ssl_kea_rsa:
++          AccumulateNonECCKeySize(Telemetry::SSL_KEA_RSA_KEY_SIZE,
++                                  channelInfo.keaKeyBits);
++          break;
++        case ssl_kea_dh:
++          AccumulateNonECCKeySize(Telemetry::SSL_KEA_DHE_KEY_SIZE,
++                                  channelInfo.keaKeyBits);
++          break;
++        case ssl_kea_ecdh:
++          AccummulateECCCurve(Telemetry::SSL_KEA_ECDHE_CURVE,
++                              channelInfo.keaKeyBits);
++          break;
++        default:
++          MOZ_CRASH("impossible KEA");
++          break;
++      }
++
++      Telemetry::Accumulate(Telemetry::SSL_AUTH_ALGORITHM, cipherInfo.authAlgorithm);
++      // RSA key exchange doesn't use a signature for auth.
++      if (cipherInfo.keaType != ssl_kea_rsa) {
++        switch (cipherInfo.authAlgorithm) {
++          case ssl_auth_rsa:
++            AccumulateNonECCKeySize(Telemetry::SSL_AUTH_RSA_KEY_SIZE,
++                                    channelInfo.authKeyBits);
++            break;
++          case ssl_auth_dsa:
++            AccumulateNonECCKeySize(Telemetry::SSL_AUTH_DSA_KEY_SIZE,
++                                    channelInfo.authKeyBits);
++            break;
++          case ssl_auth_ecdsa:
++            AccummulateECCCurve(Telemetry::SSL_AUTH_ECDSA_CURVE,
++                                channelInfo.authKeyBits);
++            break;
++          default:
++            MOZ_CRASH("impossible auth algorithm");
++            break;
++        }
++      }
++
++      Telemetry::Accumulate(Telemetry::SSL_SYMMETRIC_CIPHER,
++                            cipherInfo.symCipher);
+       infoObject->SetSymmetricCipherUsed(cipherInfo.symCipher);
+     }
+   }
+ 
+   infoObject->NoteTimeUntilReady();
+   infoObject->SetHandshakeCompleted(isResumedSession);
+ }
+diff --git a/security/manager/ssl/src/nsNSSComponent.cpp b/security/manager/ssl/src/nsNSSComponent.cpp
+--- a/security/manager/ssl/src/nsNSSComponent.cpp
++++ b/security/manager/ssl/src/nsNSSComponent.cpp
+@@ -826,16 +826,18 @@ nsNSSComponent::InitializePIPNSSBundle()
+ 
+ /* Table of pref names and SSL cipher ID */
+ typedef struct {
+   const char* pref;
+   long id;
+   bool enabledByDefault;
+ } CipherPref;
+ 
++// Update the switch statement in HandshakeCallback in nsNSSCallBacks when you
++// add/remove cipher suites here.
+ static const CipherPref sCipherPrefs[] = {
+  { "security.ssl3.ecdhe_rsa_aes_128_gcm_sha256",
+    TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, true },
+  { "security.ssl3.ecdhe_ecdsa_aes_128_gcm_sha256",
+    TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256, true },
+  { "security.ssl3.ecdhe_rsa_aes_128_sha",
+    TLS_ECDHE_RSA_WITH_AES_128_CBC_SHA, true },
+  { "security.ssl3.ecdhe_ecdsa_aes_128_sha",
+diff --git a/toolkit/components/telemetry/Histograms.json b/toolkit/components/telemetry/Histograms.json
+--- a/toolkit/components/telemetry/Histograms.json
++++ b/toolkit/components/telemetry/Histograms.json
+@@ -4407,10 +4407,55 @@
+     "kind": "enumerated",
+     "n_values": 64,
+     "description": "detected symptom of SSL 3.0 intolerance, before considering historical info"
+   },
+   "SSL_SSL30_INTOLERANCE_REASON_POST": {
+     "kind": "enumerated",
+     "n_values": 64,
+     "description": "detected symptom of SSL 3.0 intolerance, after considering historical info"
++  },
++  "SSL_CIPHER_SUITE": {
++    "kind": "enumerated",
++    "n_values": 128,
++    "description": "Negotiated cipher suite (see key in HandshakeCallback in nsNSSCallbacks.cpp)"
++  },
++  "SSL_KEA_RSA_KEY_SIZE": {
++    "kind": "enumerated",
++    "n_values": 24,
++    "description": "RSA KEA (TLS_RSA_*) key size"
++  },
++  "SSL_KEA_DHE_KEY_SIZE": {
++    "kind": "enumerated",
++    "n_values": 24,
++    "description": "DHE KEA (TLS_DHE_*) key size"
++  },
++  "SSL_KEA_ECDHE_CURVE": {
++    "kind": "enumerated",
++    "n_values": "36",
++    "description": "ECDHE KEA (TLS_ECDHE_*) curve (1=P-256, 2=P-384, 3=P-521)"
++  },
++  "SSL_AUTH_ALGORITHM": {
++    "kind": "enumerated",
++    "n_values": 16,
++    "description": "SSL Authentication Algorithm (null=0, rsa=1, dsa=2, ecdsa=4)"
++  },
++  "SSL_AUTH_RSA_KEY_SIZE": {
++    "kind": "enumerated",
++    "n_values": 24,
++    "description": "RSA signature key size for TLS_*_RSA_*"
++  },
++  "SSL_AUTH_DSA_KEY_SIZE": {
++    "kind": "enumerated",
++    "n_values": 24,
++    "description": "DSA signature key size for TLS_*_DSS_*"
++  },
++  "SSL_AUTH_ECDSA_CURVE": {
++    "kind": "enumerated",
++    "n_values": "36",
++    "description": "ECDSA signature curve for TLS_*_ECDSA_* (1=P-256, 2=P-384, 3=P-521)"
++  },
++  "SSL_SYMMETRIC_CIPHER": {
++    "kind": "enumerated",
++    "n_values": 32,
++    "description": "Symmetric cipher used (null=0, rc4=1, 3des=4, aes-cbc=7, camellia=8, seed=9, aes-gcm=10)"
+   }
+ }

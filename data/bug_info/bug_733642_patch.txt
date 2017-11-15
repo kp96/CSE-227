@@ -1,0 +1,182 @@
+# HG changeset patch
+# Parent 0c11b8f64b64aa846cdcac8b7f5e5c1063eb0611
+# User Brian Smith <bsmith@mozilla.com>
+Bug 733642: Allow the user to enable any version of TLS that libssl supports, maintaining our current defaults, r?kaie
+
+diff -r 0c11b8f64b64 browser/app/profile/firefox.js
+--- a/browser/app/profile/firefox.js	Fri Mar 22 16:35:31 2013 -0700
++++ b/browser/app/profile/firefox.js	Fri Mar 22 18:45:35 2013 -0700
+@@ -1012,18 +1012,18 @@ pref("services.sync.prefs.sync.privacy.c
+ pref("services.sync.prefs.sync.privacy.clearOnShutdown.siteSettings", true);
+ pref("services.sync.prefs.sync.privacy.donottrackheader.enabled", true);
+ pref("services.sync.prefs.sync.privacy.donottrackheader.value", true);
+ pref("services.sync.prefs.sync.privacy.sanitize.sanitizeOnShutdown", true);
+ pref("services.sync.prefs.sync.security.OCSP.disable_button.managecrl", true);
+ pref("services.sync.prefs.sync.security.OCSP.enabled", true);
+ pref("services.sync.prefs.sync.security.OCSP.require", true);
+ pref("services.sync.prefs.sync.security.default_personal_cert", true);
+-pref("services.sync.prefs.sync.security.enable_ssl3", true);
+-pref("services.sync.prefs.sync.security.enable_tls", true);
++pref("services.sync.prefs.sync.security.security.tls.version.min", 0);
++pref("services.sync.prefs.sync.security.security.tls.version.max", 1);
+ pref("services.sync.prefs.sync.signon.rememberSignons", true);
+ pref("services.sync.prefs.sync.spellchecker.dictionary", true);
+ pref("services.sync.prefs.sync.xpinstall.whitelist.required", true);
+ #endif
+ 
+ // Disable the error console
+ pref("devtools.errorconsole.enabled", false);
+ 
+diff -r 0c11b8f64b64 netwerk/base/public/security-prefs.js
+--- a/netwerk/base/public/security-prefs.js	Fri Mar 22 16:35:31 2013 -0700
++++ b/netwerk/base/public/security-prefs.js	Fri Mar 22 18:45:35 2013 -0700
+@@ -1,14 +1,14 @@
+ /* This Source Code Form is subject to the terms of the Mozilla Public
+  * License, v. 2.0. If a copy of the MPL was not distributed with this
+  * file, You can obtain one at http://mozilla.org/MPL/2.0/. */
+ 
+-pref("security.enable_ssl3",             true);
+-pref("security.enable_tls",		 true);
++pref("security.tls.version.min", 0);
++pref("security.tls.version.max", 1);
+ pref("security.enable_tls_session_tickets", true);
+ pref("security.enable_md5_signatures", false);
+ 
+ pref("security.ssl.allow_unrestricted_renego_everywhere__temporarily_available_pref", false);
+ pref("security.ssl.renego_unrestricted_hosts", "");
+ pref("security.ssl.treat_unsafe_negotiation_as_broken", false);
+ pref("security.ssl.require_safe_negotiation",  false);
+ pref("security.ssl.warn_missing_rfc5746",  1);
+diff -r 0c11b8f64b64 security/manager/ssl/src/nsNSSComponent.cpp
+--- a/security/manager/ssl/src/nsNSSComponent.cpp	Fri Mar 22 16:35:31 2013 -0700
++++ b/security/manager/ssl/src/nsNSSComponent.cpp	Fri Mar 22 18:45:35 2013 -0700
+@@ -1118,16 +1118,50 @@ void nsNSSComponent::setValidationOption
+ 
+   /*
+     * The new defaults might change the validity of already established SSL sessions,
+     * let's not reuse them.
+     */
+   SSL_ClearSessionCache();
+ }
+ 
++// Enable the TLS versions given in the prefs, defaulting to SSL 3.0 and
++// TLS 1.0 when the prefs aren't set or when they are set to invalid values.
++nsresult
++nsNSSComponent::setEnabledTLSVersions(nsIPrefBranch * prefBranch)
++{
++  // keep these values in sync with security-prefs.js and firefox.js
++  static const PRInt32 PSM_DEFAULT_MIN_TLS_VERSION = 0;
++  static const PRInt32 PSM_DEFAULT_MAX_TLS_VERSION = 1;
++
++  PRInt32 minVersion = PSM_DEFAULT_MIN_TLS_VERSION;
++  PRInt32 maxVersion = PSM_DEFAULT_MAX_TLS_VERSION;
++  mPrefBranch->GetIntPref("security.tls.version.min", &minVersion);
++  mPrefBranch->GetIntPref("security.tls.version.max", &maxVersion);
++
++  // 0 means SSL 3.0, 1 means TLS 1.0, 2 means TLS 1.1, etc.
++  minVersion += SSL_LIBRARY_VERSION_3_0;
++  maxVersion += SSL_LIBRARY_VERSION_3_0;
++
++  SSLVersionRange range = { (PRUint16) minVersion, (PRUint16) maxVersion };
++
++  if (minVersion != (PRInt32) range.min || // prevent truncation
++      maxVersion != (PRInt32) range.max || // prevent truncation
++      SSL_VersionRangeSetDefault(ssl_variant_stream, &range) != SECSuccess) {
++    range.min = SSL_LIBRARY_VERSION_3_0 + PSM_DEFAULT_MIN_TLS_VERSION;
++    range.max = SSL_LIBRARY_VERSION_3_0 + PSM_DEFAULT_MAX_TLS_VERSION;
++    if (SSL_VersionRangeSetDefault(ssl_variant_stream, &range)
++          != SECSuccess) {
++      return NS_ERROR_UNEXPECTED;
++    }
++  }
++
++  return NS_OK;
++}
++
+ NS_IMETHODIMP
+ nsNSSComponent::SkipOcsp()
+ {
+   nsNSSShutDownPreventionLock locker;
+   CERTCertDBHandle *certdb = CERT_GetDefaultCertDB();
+ 
+   SECStatus rv = CERT_DisableOCSPChecking(certdb);
+   return (rv == SECSuccess) ? NS_OK : NS_ERROR_FAILURE;
+@@ -1728,21 +1762,25 @@ nsNSSComponent::InitializeNSS(bool showW
+ 
+       PK11_SetPasswordFunc(PK11PasswordPrompt);
+ 
+       // Register an observer so we can inform NSS when these prefs change
+       mPrefBranch->AddObserver("security.", this, false);
+ 
+       SSL_OptionSetDefault(SSL_ENABLE_SSL2, false);
+       SSL_OptionSetDefault(SSL_V2_COMPATIBLE_HELLO, false);
+-      bool enabled;
+-      mPrefBranch->GetBoolPref("security.enable_ssl3", &enabled);
+-      SSL_OptionSetDefault(SSL_ENABLE_SSL3, enabled);
+-      mPrefBranch->GetBoolPref("security.enable_tls", &enabled);
+-      SSL_OptionSetDefault(SSL_ENABLE_TLS, enabled);
++
++      rv = setEnabledTLSVersions(mPrefBranch);
++      if (NS_FAILED(rv)) {
++        nsPSMInitPanic::SetPanic();
++        return NS_ERROR_UNEXPECTED;
++      }
++
++      bool enabled = true; // XXX: see bug 733644
++
+       mPrefBranch->GetBoolPref("security.enable_md5_signatures", &enabled);
+       configureMD5(enabled);
+ 
+       // Configure TLS session tickets
+       mPrefBranch->GetBoolPref("security.enable_tls_session_tickets", &enabled);
+       SSL_OptionSetDefault(SSL_ENABLE_SESSION_TICKETS, enabled);
+ 
+       mPrefBranch->GetBoolPref("security.ssl.require_safe_negotiation", &enabled);
+@@ -2213,23 +2251,19 @@ nsNSSComponent::Observe(nsISupports *aSu
+     }
+   }
+   else if (nsCRT::strcmp(aTopic, NS_PREFBRANCH_PREFCHANGE_TOPIC_ID) == 0) { 
+     nsNSSShutDownPreventionLock locker;
+     bool clearSessionCache = false;
+     bool enabled;
+     NS_ConvertUTF16toUTF8  prefName(someData);
+ 
+-    if (prefName.Equals("security.enable_ssl3")) {
+-      mPrefBranch->GetBoolPref("security.enable_ssl3", &enabled);
+-      SSL_OptionSetDefault(SSL_ENABLE_SSL3, enabled);
+-      clearSessionCache = true;
+-    } else if (prefName.Equals("security.enable_tls")) {
+-      mPrefBranch->GetBoolPref("security.enable_tls", &enabled);
+-      SSL_OptionSetDefault(SSL_ENABLE_TLS, enabled);
++    if (prefName.Equals("security.tls.version.min") ||
++        prefName.Equals("security.tls.version.max")) {
++      (void) setEnabledTLSVersions(mPrefBranch);
+       clearSessionCache = true;
+     } else if (prefName.Equals("security.enable_md5_signatures")) {
+       mPrefBranch->GetBoolPref("security.enable_md5_signatures", &enabled);
+       configureMD5(enabled);
+       clearSessionCache = true;
+     } else if (prefName.Equals("security.enable_tls_session_tickets")) {
+       mPrefBranch->GetBoolPref("security.enable_tls_session_tickets", &enabled);
+       SSL_OptionSetDefault(SSL_ENABLE_SESSION_TICKETS, enabled);
+diff -r 0c11b8f64b64 security/manager/ssl/src/nsNSSComponent.h
+--- a/security/manager/ssl/src/nsNSSComponent.h	Fri Mar 22 16:35:31 2013 -0700
++++ b/security/manager/ssl/src/nsNSSComponent.h	Fri Mar 22 18:45:35 2013 -0700
+@@ -276,16 +276,17 @@ private:
+ #ifdef XP_MACOSX
+   void TryCFM2MachOMigration(nsIFile *cfmPath, nsIFile *machoPath);
+ #endif
+   
+   void InstallLoadableRoots();
+   void UnloadLoadableRoots();
+   void CleanupIdentityInfo();
+   void setValidationOptions(nsIPrefBranch * pref);
++  nsresult setEnabledTLSVersions(nsIPrefBranch * pref);
+   nsresult InitializePIPNSSBundle();
+   nsresult ConfigureInternalPKCS11Token();
+   nsresult RegisterPSMContentListener();
+   nsresult RegisterObservers();
+   nsresult DeregisterObservers();
+   nsresult DownloadCrlSilently();
+   nsresult PostCRLImportEvent(const nsCSubstring &urlString, nsIStreamListener *psmDownloader);
+   nsresult getParamsForNextCrlToDownload(nsAutoString *url, PRTime *time, nsAutoString *key);

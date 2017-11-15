@@ -1,0 +1,510 @@
+Index: caps/src/nsPrincipal.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/caps/src/nsPrincipal.cpp,v
+retrieving revision 1.50
+diff -u -p -d -8 -r1.50 nsPrincipal.cpp
+--- caps/src/nsPrincipal.cpp	17 Sep 2007 22:18:28 -0000	1.50
++++ caps/src/nsPrincipal.cpp	27 Sep 2007 05:31:14 -0000
+@@ -98,17 +98,17 @@ nsPrincipal::Release()
+   if (count == 0) {
+     NS_DELETEXPCOM(this);
+   }
+ 
+   return count;
+ }
+ 
+ nsPrincipal::nsPrincipal()
+-  : mCapabilities(7),
++  : mCapabilities(nsnull),
+     mSecurityPolicy(nsnull),
+     mTrusted(PR_FALSE),
+     mInitialized(PR_FALSE),
+     mCodebaseImmutable(PR_FALSE),
+     mDomainImmutable(PR_FALSE)
+ {
+ }
+ 
+@@ -129,35 +129,36 @@ nsPrincipal::Init(const nsACString& aCer
+ 
+   // Invalidate our cached origin
+   mOrigin = nsnull;
+ 
+   nsresult rv;
+   if (!aCertFingerprint.IsEmpty()) {
+     rv = SetCertificate(aCertFingerprint, aSubjectName, aPrettyName, aCert);
+     if (NS_SUCCEEDED(rv)) {
+-      rv = mJSPrincipals.Init(this, mCert->fingerprint.get());
++      rv = mJSPrincipals.Init(this, mCert->fingerprint);
+     }
+   }
+   else {
+     nsCAutoString spec;
+     rv = mCodebase->GetSpec(spec);
+     if (NS_SUCCEEDED(rv)) {
+-      rv = mJSPrincipals.Init(this, spec.get());
++      rv = mJSPrincipals.Init(this, spec);
+     }
+   }
+ 
+   NS_ASSERTION(NS_SUCCEEDED(rv), "nsPrincipal::Init() failed");
+ 
+   return rv;
+ }
+ 
+ nsPrincipal::~nsPrincipal(void)
+ {
+   SetSecurityPolicy(nsnull); 
++  delete mCapabilities;
+ }
+ 
+ NS_IMETHODIMP
+ nsPrincipal::GetJSPrincipals(JSContext *cx, JSPrincipals **jsprin)
+ {
+   NS_PRECONDITION(mJSPrincipals.nsIPrincipalPtr, "mJSPrincipals is uninitialized!");
+ 
+   JSPRINCIPALS_HOLD(cx, &mJSPrincipals);
+@@ -304,21 +305,23 @@ nsPrincipal::Subsumes(nsIPrincipal *aOth
+ {
+   return Equals(aOther, aResult);
+ }
+ 
+ NS_IMETHODIMP
+ nsPrincipal::CanEnableCapability(const char *capability, PRInt16 *result)
+ {
+   // If this principal is marked invalid, can't enable any capabilities
+-  nsCStringKey invalidKey(sInvalid);
+-  if (mCapabilities.Exists(&invalidKey)) {
+-    *result = nsIPrincipal::ENABLE_DENIED;
++  if (mCapabilities) {
++    nsCStringKey invalidKey(sInvalid);
++    if (mCapabilities->Exists(&invalidKey)) {
++      *result = nsIPrincipal::ENABLE_DENIED;
+ 
+-    return NS_OK;
++      return NS_OK;
++    }
+   }
+ 
+   if (!mCert && !mTrusted) {
+     NS_ASSERTION(mInitialized, "Trying to enable a capability on an "
+                                "uninitialized principal");
+ 
+     // If we are a non-trusted codebase principal, capabilities can not
+     // be enabled if the user has not set the pref allowing scripts to
+@@ -348,17 +351,18 @@ nsPrincipal::CanEnableCapability(const c
+ 
+   const char *start = capability;
+   *result = nsIPrincipal::ENABLE_GRANTED;
+   for(;;) {
+     const char *space = PL_strchr(start, ' ');
+     PRInt32 len = space ? space - start : strlen(start);
+     nsCAutoString capString(start, len);
+     nsCStringKey key(capString);
+-    PRInt16 value = (PRInt16)NS_PTR_TO_INT32(mCapabilities.Get(&key));
++    PRInt16 value =
++      mCapabilities ? (PRInt16)NS_PTR_TO_INT32(mCapabilities->Get(&key)) : 0;
+     if (value == 0 || value == nsIPrincipal::ENABLE_UNKNOWN) {
+       // We don't know whether we can enable this capability,
+       // so we should ask the user.
+       value = nsIPrincipal::ENABLE_WITH_USER_PERMISSION;
+     }
+ 
+     if (value < *result) {
+       *result = value;
+@@ -374,33 +378,37 @@ nsPrincipal::CanEnableCapability(const c
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ nsPrincipal::SetCanEnableCapability(const char *capability,
+                                     PRInt16 canEnable)
+ {
+   // If this principal is marked invalid, can't enable any capabilities
++  if (!mCapabilities) {
++    mCapabilities = new nsHashtable(7);  // XXXbz gets bumped up to 16 anyway
++    NS_ENSURE_TRUE(mCapabilities, NS_ERROR_OUT_OF_MEMORY);
++  }
+ 
+   nsCStringKey invalidKey(sInvalid);
+-  if (mCapabilities.Exists(&invalidKey)) {
++  if (mCapabilities->Exists(&invalidKey)) {
+     return NS_OK;
+   }
+ 
+   if (PL_strcmp(capability, sInvalid) == 0) {
+-    mCapabilities.Reset();
++    mCapabilities->Reset();
+   }
+ 
+   const char *start = capability;
+   for(;;) {
+     const char *space = PL_strchr(start, ' ');
+     int len = space ? space - start : strlen(start);
+     nsCAutoString capString(start, len);
+     nsCStringKey key(capString);
+-    mCapabilities.Put(&key, NS_INT32_TO_PTR(canEnable));
++    mCapabilities->Put(&key, NS_INT32_TO_PTR(canEnable));
+     if (!space) {
+       break;
+     }
+ 
+     start = space + 1;
+   }
+ 
+   return NS_OK;
+@@ -662,17 +670,17 @@ nsPrincipal::InitFromPersistent(const ch
+                                 const nsCString& aSubjectName,
+                                 const nsACString& aPrettyName,
+                                 const char* aGrantedList,
+                                 const char* aDeniedList,
+                                 nsISupports* aCert,
+                                 PRBool aIsCert,
+                                 PRBool aTrusted)
+ {
+-  NS_PRECONDITION(mCapabilities.Count() == 0,
++  NS_PRECONDITION(!mCapabilities || mCapabilities->Count() == 0,
+                   "mCapabilities was already initialized?");
+   NS_PRECONDITION(mAnnotations.Length() == 0,
+                   "mAnnotations was already initialized?");
+   NS_PRECONDITION(!mInitialized, "We were already initialized?");
+ 
+   mInitialized = PR_TRUE;
+ 
+   nsresult rv;
+@@ -694,17 +702,17 @@ nsPrincipal::InitFromPersistent(const ch
+     mCodebaseImmutable = URIIsImmutable(mCodebase);
+ 
+     mTrusted = aTrusted;
+ 
+     // Invalidate our cached origin
+     mOrigin = nsnull;
+   }
+ 
+-  rv = mJSPrincipals.Init(this, aToken.get());
++  rv = mJSPrincipals.Init(this, aToken);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   //-- Save the preference name
+   mPrefName = aPrefName;
+ 
+   const char* ordinalBegin = PL_strpbrk(aPrefName, "1234567890");
+   if (ordinalBegin) {
+     PRIntn n = atoi(ordinalBegin);
+@@ -831,20 +839,22 @@ nsPrincipal::GetPreferences(char** aPref
+   if (!subjectName) {
+     nsMemory::Free(prefName);
+     nsMemory::Free(id);
+     return NS_ERROR_OUT_OF_MEMORY;
+   }
+ 
+   //-- Capabilities
+   nsCAutoString grantedListStr, deniedListStr;
+-  CapabilityList capList = CapabilityList();
+-  capList.granted = &grantedListStr;
+-  capList.denied = &deniedListStr;
+-  mCapabilities.Enumerate(AppendCapability, (void*)&capList);
++  if (mCapabilities) {
++    CapabilityList capList = CapabilityList();
++    capList.granted = &grantedListStr;
++    capList.denied = &deniedListStr;
++    mCapabilities->Enumerate(AppendCapability, (void*)&capList);
++  }
+ 
+   if (!grantedListStr.IsEmpty()) {
+     grantedListStr.Truncate(grantedListStr.Length() - 1);
+     granted = ToNewCString(grantedListStr);
+     if (!granted) {
+       nsMemory::Free(prefName);
+       nsMemory::Free(id);
+       nsMemory::Free(subjectName);
+@@ -905,22 +915,19 @@ FreeAnnotationEntry(nsIObjectInputStream
+ }
+ 
+ NS_IMETHODIMP
+ nsPrincipal::Read(nsIObjectInputStream* aStream)
+ {
+   PRBool hasCapabilities;
+   nsresult rv = aStream->ReadBoolean(&hasCapabilities);
+   if (NS_SUCCEEDED(rv) && hasCapabilities) {
+-    // We want to use one of the nsHashtable constructors, but don't want to
+-    // generally have mCapabilities be a pointer... and nsHashtable has no
+-    // reasonable copy-constructor.  Placement-new to the rescue!
+-    mCapabilities.~nsHashtable();
+-    new (&mCapabilities) nsHashtable(aStream, ReadAnnotationEntry,
+-                                     FreeAnnotationEntry, &rv);
++    mCapabilities = new nsHashtable(aStream, ReadAnnotationEntry,
++                                    FreeAnnotationEntry, &rv);
++    NS_ENSURE_TRUE(mCapabilities, NS_ERROR_OUT_OF_MEMORY);
+   }
+ 
+   if (NS_FAILED(rv)) {
+     return rv;
+   }
+ 
+   rv = NS_ReadOptionalCString(aStream, mPrefName);
+   if (NS_FAILED(rv)) {
+@@ -1003,20 +1010,20 @@ WriteScalarValue(nsIObjectOutputStream* 
+ NS_IMETHODIMP
+ nsPrincipal::Write(nsIObjectOutputStream* aStream)
+ {
+   NS_ENSURE_STATE(mCert || mCodebase);
+   
+   // mAnnotations is transient data associated to specific JS stack frames.  We
+   // don't want to serialize that.
+   
+-  PRBool hasCapabilities = (mCapabilities.Count() > 0);
++  PRBool hasCapabilities = (mCapabilities && mCapabilities->Count() > 0);
+   nsresult rv = aStream->WriteBoolean(hasCapabilities);
+   if (NS_SUCCEEDED(rv) && hasCapabilities) {
+-    rv = mCapabilities.Write(aStream, WriteScalarValue);
++    rv = mCapabilities->Write(aStream, WriteScalarValue);
+   }
+ 
+   if (NS_FAILED(rv)) {
+     return rv;
+   }
+ 
+   rv = NS_WriteOptionalStringZ(aStream, mPrefName.get());
+   if (NS_FAILED(rv)) {
+Index: caps/src/nsJSPrincipals.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/caps/src/nsJSPrincipals.cpp,v
+retrieving revision 1.25
+diff -u -p -d -8 -r1.25 nsJSPrincipals.cpp
+--- caps/src/nsJSPrincipals.cpp	8 Jul 2007 07:08:06 -0000	1.25
++++ caps/src/nsJSPrincipals.cpp	27 Sep 2007 05:46:00 -0000
+@@ -42,16 +42,17 @@
+ #include "plstr.h"
+ #include "nsXPIDLString.h"
+ #include "nsCOMPtr.h"
+ #include "jsapi.h"
+ #include "jsxdrapi.h"
+ #include "nsIJSRuntimeService.h"
+ #include "nsIServiceManager.h"
+ #include "nsMemory.h"
++#include "nsStringBuffer.h"
+ 
+ JS_STATIC_DLL_CALLBACK(void *)
+ nsGetPrincipalArray(JSContext *cx, JSPrincipals *prin)
+ {
+     return nsnull;
+ }
+ 
+ JS_STATIC_DLL_CALLBACK(JSBool)
+@@ -193,28 +194,43 @@ nsJSPrincipals::nsJSPrincipals()
+     globalPrivilegesEnabled = nsGlobalPrivilegesEnabled;
+     refcount = 0;
+     destroy = nsDestroyJSPrincipals;
+     subsume = nsJSPrincipalsSubsume;
+     nsIPrincipalPtr = nsnull;
+ }
+ 
+ nsresult
+-nsJSPrincipals::Init(nsIPrincipal *aPrincipal, const char *aCodebase)
++nsJSPrincipals::Init(nsIPrincipal *aPrincipal, const nsCString& aCodebase)
+ {
+     if (nsIPrincipalPtr) {
+         NS_ERROR("Init called twice!");
+         return NS_ERROR_UNEXPECTED;
+     }
+ 
+     nsIPrincipalPtr = aPrincipal;
+-    codebase = PL_strdup(aCodebase);
+-    if (!codebase)
+-        return NS_ERROR_OUT_OF_MEMORY;
++    nsStringBuffer* buf = nsStringBuffer::FromString(aCodebase);
++    char* data;
++    if (buf) {
++        buf->AddRef();
++        data = static_cast<char*>(buf->Data());
++    } else {
++        PRUint32 len = aCodebase.Length();
++        buf = nsStringBuffer::Alloc(len + 1); // addrefs
++        if (!buf) {
++            return NS_ERROR_OUT_OF_MEMORY;
++        }
++        data = static_cast<char*>(buf->Data());
++        memcpy(data, aCodebase.get(), len);
++        data[len] = '\0';
++    }
++    
++    codebase = data;
+ 
+     return NS_OK;
+ }
+ 
+ nsJSPrincipals::~nsJSPrincipals()
+ {
+-    if (codebase)
+-        PL_strfree(codebase);
++    if (codebase) {
++        nsStringBuffer::FromData(codebase)->Release();
++    }
+ }
+Index: caps/src/nsSystemPrincipal.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/caps/src/nsSystemPrincipal.cpp,v
+retrieving revision 1.34
+diff -u -p -d -8 -r1.34 nsSystemPrincipal.cpp
+--- caps/src/nsSystemPrincipal.cpp	9 Feb 2007 04:52:44 -0000	1.34
++++ caps/src/nsSystemPrincipal.cpp	27 Sep 2007 04:39:30 -0000
+@@ -275,17 +275,27 @@ nsSystemPrincipal::Write(nsIObjectOutput
+ /////////////////////////////////////////////
+ // Constructor, Destructor, initialization //
+ /////////////////////////////////////////////
+ 
+ nsSystemPrincipal::nsSystemPrincipal()
+ {
+ }
+ 
++#define SYSTEM_PRINCIPAL_SPEC "[System Principal]"
++
+ nsresult
+ nsSystemPrincipal::Init()
+ {
+-    return mJSPrincipals.Init(this, "[System Principal]"); 
++    // Use an nsCString so we only do the allocation once here and then
++    // share with nsJSPrincipals
++    nsCString str(SYSTEM_PRINCIPAL_SPEC);
++    if (!str.EqualsLiteral(SYSTEM_PRINCIPAL_SPEC)) {
++        NS_WARNING("Out of memory initializing system principal");
++        return NS_ERROR_OUT_OF_MEMORY;
++    }
++    
++    return mJSPrincipals.Init(this, str);
+ }
+ 
+ nsSystemPrincipal::~nsSystemPrincipal(void)
+ {
+ }
+Index: caps/src/nsNullPrincipal.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/caps/src/nsNullPrincipal.cpp,v
+retrieving revision 1.4
+diff -u -p -d -8 -r1.4 nsNullPrincipal.cpp
+--- caps/src/nsNullPrincipal.cpp	9 Feb 2007 04:52:44 -0000	1.4
++++ caps/src/nsNullPrincipal.cpp	27 Sep 2007 04:57:32 -0000
+@@ -85,56 +85,64 @@ nsNullPrincipal::Release()
+ nsNullPrincipal::nsNullPrincipal()
+ {
+ }
+ 
+ nsNullPrincipal::~nsNullPrincipal()
+ {
+ }
+ 
++#define NS_NULLPRINCIPAL_PREFIX NS_NULLPRINCIPAL_SCHEME ":"
++
+ nsresult
+ nsNullPrincipal::Init()
+ {
+   // FIXME: bug 327161 -- make sure the uuid generator is reseeding-resistant.
+   nsresult rv;
+   nsCOMPtr<nsIUUIDGenerator> uuidgen =
+     do_GetService("@mozilla.org/uuid-generator;1", &rv);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   nsID id;
+   rv = uuidgen->GenerateUUIDInPlace(&id);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   char* chars = id.ToString();
+   NS_ENSURE_TRUE(chars, NS_ERROR_OUT_OF_MEMORY);
+ 
+-  nsCAutoString str(NS_NULLPRINCIPAL_SCHEME ":");
+-  PRUint32 prefixLen = str.Length();
+   PRUint32 suffixLen = strlen(chars);
++  PRUint32 prefixLen = NS_ARRAY_LENGTH(NS_NULLPRINCIPAL_PREFIX) - 1;
++
++  // Use an nsCString so we only do the allocation once here and then share
++  // with nsJSPrincipals
++  nsCString str;
++  str.SetCapacity(prefixLen + suffixLen);
+ 
++  str.Append(NS_NULLPRINCIPAL_PREFIX);
+   str.Append(chars);
+ 
+   PR_Free(chars);
+   
+   if (str.Length() != prefixLen + suffixLen) {
++    NS_WARNING("Out of memory allocating null-principal URI");
+     return NS_ERROR_OUT_OF_MEMORY;
+   }
+ 
+   // Use CID so we're sure we get the impl we want.  Note that creating the URI
+   // directly is ok because we have our own private URI scheme.  In effect,
+   // we're being a protocol handler.
+   mURI = do_CreateInstance(kSimpleURICID, &rv);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   rv = mURI->SetSpec(str);
+   NS_ENSURE_SUCCESS(rv, rv);
+ 
+   NS_TryToSetImmutable(mURI);
+ 
+-  return mJSPrincipals.Init(this, str.get());
++  return mJSPrincipals.Init(this, str);
+ }
+ 
+ /**
+  * nsIPrincipal implementation
+  */
+ 
+ NS_IMETHODIMP
+ nsNullPrincipal::GetPreferences(char** aPrefName, char** aID,
+Index: caps/include/nsJSPrincipals.h
+===================================================================
+RCS file: /cvsroot/mozilla/caps/include/nsJSPrincipals.h,v
+retrieving revision 1.12
+diff -u -p -d -8 -r1.12 nsJSPrincipals.h
+--- caps/include/nsJSPrincipals.h	17 Apr 2004 21:50:35 -0000	1.12
++++ caps/include/nsJSPrincipals.h	27 Sep 2007 04:37:43 -0000
+@@ -36,19 +36,21 @@
+  * ***** END LICENSE BLOCK ***** */
+ /* describes principals by their orginating uris*/
+ 
+ #ifndef nsJSPrincipals_h__
+ #define nsJSPrincipals_h__
+ #include "jsapi.h"
+ #include "nsIPrincipal.h"
+ 
++class nsCString;
++
+ struct nsJSPrincipals : JSPrincipals
+ {
+   static nsresult Startup();
+   nsJSPrincipals();
+-  nsresult Init(nsIPrincipal* aPrincipal, const char *aCodebase);
++  nsresult Init(nsIPrincipal* aPrincipal, const nsCString& aCodebase);
+   ~nsJSPrincipals(void);
+ 
+   nsIPrincipal *nsIPrincipalPtr; // [WEAK] it owns us.
+ };
+ 
+ #endif /* nsJSPrincipals_h__ */
+Index: caps/include/nsPrincipal.h
+===================================================================
+RCS file: /cvsroot/mozilla/caps/include/nsPrincipal.h,v
+retrieving revision 1.21
+diff -u -p -d -8 -r1.21 nsPrincipal.h
+--- caps/include/nsPrincipal.h	17 Sep 2007 22:18:28 -0000	1.21
++++ caps/include/nsPrincipal.h	27 Sep 2007 05:30:35 -0000
+@@ -98,17 +98,17 @@ public:
+   nsresult SetCapability(const char *capability, void **annotation, 
+                          AnnotationValue value);
+ 
+   static const char sInvalid[];
+ 
+ protected:
+   nsJSPrincipals mJSPrincipals;
+   nsTArray< nsAutoPtr<nsHashtable> > mAnnotations;
+-  nsHashtable mCapabilities;
++  nsHashtable* mCapabilities;
+   nsCString mPrefName;
+   static PRInt32 sCapabilitiesOrdinal;
+ 
+   // XXXcaa This is a semi-hack.  The best solution here is to keep
+   // a reference to an interface here, except there is no interface
+   // that we can use yet.
+   struct Certificate
+   {

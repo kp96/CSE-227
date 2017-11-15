@@ -1,0 +1,539 @@
+Index: Camino.xcodeproj/project.pbxproj
+===================================================================
+RCS file: /cvsroot/mozilla/camino/Camino.xcodeproj/project.pbxproj,v
+retrieving revision 1.94
+diff -u -8 -r1.94 project.pbxproj
+--- Camino.xcodeproj/project.pbxproj	2 Feb 2009 18:32:00 -0000	1.94
++++ Camino.xcodeproj/project.pbxproj	5 Mar 2009 14:45:44 -0000
+@@ -251,16 +251,18 @@
+ 		33FBAAFD0C84D0CA00DD459E /* NSString+Utils.m in Sources */ = {isa = PBXBuildFile; fileRef = 33FBAAFB0C84D0CA00DD459E /* NSString+Utils.m */; };
+ 		33FBAAFE0C84D0CA00DD459E /* NSString+Gecko.mm in Sources */ = {isa = PBXBuildFile; fileRef = 33FBAAFA0C84D0CA00DD459E /* NSString+Gecko.mm */; };
+ 		33FBAAFF0C84D0CA00DD459E /* NSString+Utils.m in Sources */ = {isa = PBXBuildFile; fileRef = 33FBAAFB0C84D0CA00DD459E /* NSString+Utils.m */; };
+ 		34884A36074F7C5D000EA76B /* AddressBook.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 34884A35074F7C5D000EA76B /* AddressBook.framework */; };
+ 		34884A37074F7C5D000EA76B /* AddressBook.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 34884A35074F7C5D000EA76B /* AddressBook.framework */; };
+ 		3489ADCC0753B717005ADF6C /* ABAddressBook+Utils.mm in Sources */ = {isa = PBXBuildFile; fileRef = 3489ADCA0753B717005ADF6C /* ABAddressBook+Utils.mm */; };
+ 		3489ADCE0753B717005ADF6C /* ABAddressBook+Utils.mm in Sources */ = {isa = PBXBuildFile; fileRef = 3489ADCA0753B717005ADF6C /* ABAddressBook+Utils.mm */; };
+ 		34D112DE08E9B17400989FD5 /* dl_trash.tiff in Resources */ = {isa = PBXBuildFile; fileRef = 34D112DD08E9B17400989FD5 /* dl_trash.tiff */; };
++		3D9419800F559B2F00227277 /* blockedSite.xhtml in Resources */ = {isa = PBXBuildFile; fileRef = 3D94197F0F559B2F00227277 /* blockedSite.xhtml */; };
++		3D9419810F559B2F00227277 /* blockedSite.xhtml in Resources */ = {isa = PBXBuildFile; fileRef = 3D94197F0F559B2F00227277 /* blockedSite.xhtml */; };
+ 		3F12FC57072E8ECB00995ED9 /* libxpcom_core.dylib in Copy Libraries */ = {isa = PBXBuildFile; fileRef = 3F12FC56072E8ECB00995ED9 /* libxpcom_core.dylib */; };
+ 		3F12FD3107312CCD00995ED9 /* libxpcom_core.dylib in Copy Libraries */ = {isa = PBXBuildFile; fileRef = 3F12FC56072E8ECB00995ED9 /* libxpcom_core.dylib */; };
+ 		3F27D94D05DB2600007B543D /* NSSplitView+Utils.mm in Sources */ = {isa = PBXBuildFile; fileRef = 3F27D94B05DB2600007B543D /* NSSplitView+Utils.mm */; };
+ 		3F27D94F05DB2600007B543D /* NSSplitView+Utils.mm in Sources */ = {isa = PBXBuildFile; fileRef = 3F27D94B05DB2600007B543D /* NSSplitView+Utils.mm */; };
+ 		3F383A47087C6D3C00A2594D /* AddressBookManager.m in Sources */ = {isa = PBXBuildFile; fileRef = 3FB2BAE00545EB30002B9691 /* AddressBookManager.m */; };
+ 		3F383A49087C6D4600A2594D /* AddressBookManager.m in Sources */ = {isa = PBXBuildFile; fileRef = 3FB2BAE00545EB30002B9691 /* AddressBookManager.m */; };
+ 		3F42E91D05EAD4580045A30C /* bm_folder.tiff in Resources */ = {isa = PBXBuildFile; fileRef = 3F42E91A05EAD4580045A30C /* bm_folder.tiff */; };
+ 		3F42E92005EAD4580045A30C /* bm_folder.tiff in Resources */ = {isa = PBXBuildFile; fileRef = 3F42E91A05EAD4580045A30C /* bm_folder.tiff */; };
+@@ -2594,16 +2596,17 @@
+ 		33F3B70A0C63F5F7007DFBD0 /* ScriptingSupport.mm */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.objcpp; name = ScriptingSupport.mm; path = src/appleevents/ScriptingSupport.mm; sourceTree = "<group>"; };
+ 		33FBAAF30C84D0A500DD459E /* NSString+Gecko.h */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.h; name = "NSString+Gecko.h"; path = "src/extensions/NSString+Gecko.h"; sourceTree = "<group>"; };
+ 		33FBAAFA0C84D0CA00DD459E /* NSString+Gecko.mm */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.objcpp; name = "NSString+Gecko.mm"; path = "src/extensions/NSString+Gecko.mm"; sourceTree = "<group>"; };
+ 		33FBAAFB0C84D0CA00DD459E /* NSString+Utils.m */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.objc; name = "NSString+Utils.m"; path = "src/extensions/NSString+Utils.m"; sourceTree = "<group>"; };
+ 		34884A35074F7C5D000EA76B /* AddressBook.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AddressBook.framework; path = /System/Library/Frameworks/AddressBook.framework; sourceTree = "<absolute>"; };
+ 		3489ADC90753B717005ADF6C /* ABAddressBook+Utils.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = "ABAddressBook+Utils.h"; path = "src/extensions/ABAddressBook+Utils.h"; sourceTree = "<group>"; };
+ 		3489ADCA0753B717005ADF6C /* ABAddressBook+Utils.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = "ABAddressBook+Utils.mm"; path = "src/extensions/ABAddressBook+Utils.mm"; sourceTree = "<group>"; };
+ 		34D112DD08E9B17400989FD5 /* dl_trash.tiff */ = {isa = PBXFileReference; lastKnownFileType = image.tiff; name = dl_trash.tiff; path = resources/images/toolbar/dl_trash.tiff; sourceTree = SOURCE_ROOT; };
++		3D94197F0F559B2F00227277 /* blockedSite.xhtml */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.xml; name = blockedSite.xhtml; path = resources/application/blockedSite.xhtml; sourceTree = "<group>"; };
+ 		3F12FC56072E8ECB00995ED9 /* libxpcom_core.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libxpcom_core.dylib; path = ../dist/Embed/libxpcom_core.dylib; sourceTree = SOURCE_ROOT; };
+ 		3F22CC1303DF42A200026DCE /* Charset.dict */ = {isa = PBXFileReference; lastKnownFileType = text.xml; name = Charset.dict; path = resources/application/Charset.dict; sourceTree = "<group>"; };
+ 		3F27D94A05DB2600007B543D /* NSSplitView+Utils.h */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.h; name = "NSSplitView+Utils.h"; path = "src/extensions/NSSplitView+Utils.h"; sourceTree = "<group>"; };
+ 		3F27D94B05DB2600007B543D /* NSSplitView+Utils.mm */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.objcpp; name = "NSSplitView+Utils.mm"; path = "src/extensions/NSSplitView+Utils.mm"; sourceTree = "<group>"; };
+ 		3F2CF8CB042A88B7005FD42F /* ImageAndTextCell.h */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.h; name = ImageAndTextCell.h; path = src/extensions/ImageAndTextCell.h; sourceTree = "<group>"; };
+ 		3F2CF8CC042A88B7005FD42F /* ImageAndTextCell.m */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.objc; name = ImageAndTextCell.m; path = src/extensions/ImageAndTextCell.m; sourceTree = "<group>"; };
+ 		3F42E91A05EAD4580045A30C /* bm_folder.tiff */ = {isa = PBXFileReference; lastKnownFileType = image.tiff; name = bm_folder.tiff; path = resources/images/chrome/bm_folder.tiff; sourceTree = SOURCE_ROOT; };
+ 		3F42EFA705EC13F90045A30C /* throbber-01.tiff */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = "throbber-01.tiff"; path = "resources/images/throbber/throbber-01.tiff"; sourceTree = SOURCE_ROOT; };
+@@ -3741,16 +3744,17 @@
+ 				F5F190BE02D217C201026D5D /* WebsiteDefaults.strings */,
+ 				3F22CC1303DF42A200026DCE /* Charset.dict */,
+ 				C7FF53740D35286800194776 /* WebSearchEngines.plist */,
+ 				3FFE23520847CB0D00D6CAFC /* ad_blocking.css */,
+ 				1B825D020C5D268600CB4343 /* Camino.sdef */,
+ 				33E1EA970D358DE200910BBD /* caminosearch.xpt */,
+ 				DE4044910ED0A96F00057E17 /* Gecko Strings */,
+ 				DEE8101D0EFB7D2E006ACC7D /* aquaSelect.css */,
++				3D94197F0F559B2F00227277 /* blockedSite.xhtml */,
+ 			);
+ 			name = Resources;
+ 			sourceTree = "<group>";
+ 		};
+ 		29B97323FDCFA39411CA2CEA /* Frameworks */ = {
+ 			isa = PBXGroup;
+ 			children = (
+ 				1058C7A0FEA54F0111CA2CBB /* Linked Frameworks */,
+@@ -5647,16 +5651,17 @@
+ 				DE40448A0ED09D1E00057E17 /* global_locale_printdialog_properties.strings in Resources */,
+ 				DE40448B0ED09D1E00057E17 /* global_locale_nsHelperAppDlg_properties.strings in Resources */,
+ 				DE40448C0ED09D1E00057E17 /* global_locale_security_caps_properties.strings in Resources */,
+ 				DE40448D0ED09D1E00057E17 /* global_locale_xslt_xslt_properties.strings in Resources */,
+ 				DE40448E0ED09D1E00057E17 /* global_locale_nsTreeSorting_properties.strings in Resources */,
+ 				DE40448F0ED09D1E00057E17 /* global_locale_languageNames_properties.strings in Resources */,
+ 				000D0A9C0ED9BD8100A6C2F0 /* tabOverview.tiff in Resources */,
+ 				DEE8101E0EFB7D2E006ACC7D /* aquaSelect.css in Resources */,
++				3D9419800F559B2F00227277 /* blockedSite.xhtml in Resources */,
+ 			);
+ 			runOnlyForDeploymentPostprocessing = 0;
+ 		};
+ 		3F44AD8E05BDFB9F00CB4B08 /* Resources */ = {
+ 			isa = PBXResourcesBuildPhase;
+ 			buildActionMask = 2147483647;
+ 			files = (
+ 				3F44AD8F05BDFB9F00CB4B08 /* Appearance.nib in Resources */,
+@@ -5877,16 +5882,17 @@
+ 				DE4044660ED09D1E00057E17 /* global_locale_printdialog_properties.strings in Resources */,
+ 				DE4044670ED09D1E00057E17 /* global_locale_nsHelperAppDlg_properties.strings in Resources */,
+ 				DE4044680ED09D1E00057E17 /* global_locale_security_caps_properties.strings in Resources */,
+ 				DE4044690ED09D1E00057E17 /* global_locale_xslt_xslt_properties.strings in Resources */,
+ 				DE40446A0ED09D1E00057E17 /* global_locale_nsTreeSorting_properties.strings in Resources */,
+ 				DE40446B0ED09D1E00057E17 /* global_locale_languageNames_properties.strings in Resources */,
+ 				000D0A9D0ED9BD8100A6C2F0 /* tabOverview.tiff in Resources */,
+ 				DEE8101F0EFB7D2E006ACC7D /* aquaSelect.css in Resources */,
++				3D9419810F559B2F00227277 /* blockedSite.xhtml in Resources */,
+ 			);
+ 			runOnlyForDeploymentPostprocessing = 0;
+ 		};
+ /* End PBXResourcesBuildPhase section */
+ 
+ /* Begin PBXShellScriptBuildPhase section */
+ 		0080C7DE0E2E4CD9006AFD32 /* Change Sparkle Load ID */ = {
+ 			isa = PBXShellScriptBuildPhase;
+Index: resources/application/blockedSite.xhtml
+===================================================================
+RCS file: resources/application/blockedSite.xhtml
+diff -N resources/application/blockedSite.xhtml
+--- /dev/null	1 Jan 1970 00:00:00 -0000
++++ resources/application/blockedSite.xhtml	5 Mar 2009 14:45:45 -0000
+@@ -0,0 +1,220 @@
++<?xml version="1.0" encoding="UTF-8"?>
++
++<!DOCTYPE html [
++  <!ENTITY % htmlDTD PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "DTD/xhtml1-strict.dtd">
++  %blockedSiteDTD;
++]>
++
++<!-- ***** BEGIN LICENSE BLOCK *****
++   - Version: MPL 1.1/GPL 2.0/LGPL 2.1
++   -
++   - The contents of this file are subject to the Mozilla Public License Version
++   - 1.1 (the "License"); you may not use this file except in compliance with
++   - the License. You may obtain a copy of the License at
++   - http://www.mozilla.org/MPL/
++   -
++   - Software distributed under the License is distributed on an "AS IS" basis,
++   - WITHOUT WARRANTY OF ANY KIND, either express or implied. See the License
++   - for the specific language governing rights and limitations under the
++   - License.
++   -
++   - The Original Code is mozilla.org code.
++   -
++   - The Initial Developer of the Original Code is
++   - Netscape Communications Corporation.
++   - Portions created by the Initial Developer are Copyright (C) 1998
++   - the Initial Developer. All Rights Reserved.
++   -
++   - Contributor(s):
++   -   Adam Lock <adamlock@netscape.com>
++   -   William R. Price <wrprice@alumni.rice.edu>
++   -   Henrik Skupin <mozilla@hskupin.info>
++   -   Jeff Walden <jwalden+code@mit.edu>
++   -   Johnathan Nightingale <johnath@mozilla.com>
++   -   Sean Murphy <murph@seanmurph.com>
++   -
++   - Alternatively, the contents of this file may be used under the terms of
++   - either the GNU General Public License Version 2 or later (the "GPL"), or
++   - the GNU Lesser General Public License Version 2.1 or later (the "LGPL"),
++   - in which case the provisions of the GPL or the LGPL are applicable instead
++   - of those above. If you wish to allow use of your version of this file only
++   - under the terms of either the GPL or the LGPL, and not to allow others to
++   - use your version of this file under the terms of the MPL, indicate your
++   - decision by deleting the provisions above and replace them with the notice
++   - and other provisions required by the LGPL or the GPL. If you do not delete
++   - the provisions above, a recipient may use your version of this file under
++   - the terms of any one of the MPL, the GPL or the LGPL.
++   -
++   - ***** END LICENSE BLOCK ***** -->
++
++<html xmlns="http://www.w3.org/1999/xhtml" class="blacklist">
++  <head>
++    <link rel="stylesheet" href="chrome://global/skin/netError.css" type="text/css" media="all" />
++
++    <script type="application/javascript" src="chrome://global/content/strres.js"/>
++    <script type="application/javascript"><![CDATA[
++      // Error url MUST be formatted like this:
++      //   about:blocked?e=error_code&u=url
++      
++      // Note that this file uses document.documentURI to get
++      // the URL (with the format from above). This is because
++      // document.location.href gets the current URI off the docshell,
++      // which is the URL displayed in the location bar, i.e.
++      // the URI that the user attempted to load.
++
++      function getErrorCode()
++      {
++        var url = document.documentURI;
++        var error = url.search(/e\=/);
++        var duffUrl = url.search(/\&u\=/);
++        return decodeURIComponent(url.slice(error + 2, duffUrl));
++      }
++
++      function getURL()
++      {
++        var url = document.documentURI;
++        var index = url.search(/u\=/);
++
++        // index == -1 if not found; if so, return an empty string
++        // instead of what would turn out to be portions of the URI
++        if (index == -1)
++          return "";
++
++        return decodeURIComponent(url.slice(index + 2));
++      }
++      
++      /**
++       * Attempt to parse the result of getURL and extract a hostname.  Fail back
++       * to getURL so that we always return something meaningful.
++       */
++      function getHostString()
++      {
++        return document.location.hostname;
++      }
++      
++      function initPage()
++      {
++        // Handoff to the appropriate initializer, based on error code
++        switch(getErrorCode()) {
++          case "malwareBlocked" :
++            initPage_malware();
++            break;
++          case "phishingBlocked" :
++            initPage_phishing();
++            break;
++        }
++      }        
++      
++      /**
++       * Initialize custom strings and functionality for blocked malware case
++       */
++      function initPage_malware()
++      {
++        // Remove phishing strings
++        var el = document.getElementById("errorTitleText_phishing");
++        el.parentNode.removeChild(el);
++
++        el = document.getElementById("errorShortDescText_phishing");
++        el.parentNode.removeChild(el);
++
++        el = document.getElementById("errorLongDescText_phishing");
++        el.parentNode.removeChild(el);
++
++        // Set sitename
++        document.getElementById("malware_sitename").textContent = getHostString();
++        document.title = document.getElementById("errorTitleText_malware")
++                                 .innerHTML;
++      }
++      
++      /**
++       * Initialize custom strings and functionality for blocked phishing case
++       */
++      function initPage_phishing()
++      {
++        // Remove malware strings
++        var el = document.getElementById("errorTitleText_malware");
++        el.parentNode.removeChild(el);
++
++        el = document.getElementById("errorShortDescText_malware");
++        el.parentNode.removeChild(el);
++
++        el = document.getElementById("errorLongDescText_malware");
++        el.parentNode.removeChild(el);
++
++        // Set sitename
++        document.getElementById("phishing_sitename").textContent = getHostString();
++        document.title = document.getElementById("errorTitleText_phishing")
++                                 .innerHTML;
++      }
++    ]]></script>
++    <style type="text/css">
++      /* Style warning button to look like a small text link in the
++         bottom right. This is preferable to just using a text link
++         since there is already a mechanism in browser.js for trapping
++         oncommand events from unprivileged chrome pages (BrowserOnCommand).*/
++      #ignoreWarningButton {
++        -moz-appearance: none;
++        background: transparent;
++        border: none;
++        color: white;  /* Hard coded because netError.css forces this page's background to dark red */
++        text-decoration: underline;
++        margin: 0;
++        padding: 0;
++        position: relative;
++        top: 23px;
++        left: 20px;
++        font-size: smaller;
++        cursor: pointer;
++      }
++      
++      #ignoreWarning {
++        text-align: right;
++      }
++    </style>
++  </head>
++
++  <body>
++    <div id="errorPageContainer">
++    
++      <!-- Error Title -->
++      <div id="errorTitle">
++        <h1 id="errorTitleText_phishing">PhishingTitleText</h1>
++        <h1 id="errorTitleText_malware">MalwareTitleText</h1>
++      </div>
++      
++      <div id="errorLongContent">
++      
++        <!-- Short Description -->
++        <div id="errorShortDesc">
++          <p id="errorShortDescText_phishing">PhishingShortDescText</p>
++          <p id="errorShortDescText_malware">MalwareShortDescText</p>
++        </div>
++
++        <!-- Long Description -->
++        <div id="errorLongDesc">
++          <p id="errorLongDescText_phishing">PhishingLongDescText</p>
++          <p id="errorLongDescText_malware">MalwareLongDescText</p>
++        </div>
++        
++        <!-- Action buttons -->
++        <div id="buttons">
++          <!-- Commands handled in browser.js -->
++          <xul:button xmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
++                      id="getMeOutButton" label="GetMeOutButtonLabel"/>
++          <xul:button xmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
++                      id="whyBlockedButton" label="MoreInformationButtonLabel"/>
++        </div>
++      </div>
++      <div id="ignoreWarning">
++        <xul:button xmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
++                    id="ignoreWarningButton" label="IgnoreWarningButtonLabel"/>
++      </div>
++    </div>
++    <!--
++    - Note: It is important to run the script this way, instead of using
++    - an onload handler. This is because error pages are loaded as
++    - LOAD_BACKGROUND, which means that onload handlers will not be executed.
++    -->
++    <script type="application/javascript">initPage();</script>
++  </body>
++</html>
+Index: resources/localized/English.lproj/Localizable.strings.in
+===================================================================
+RCS file: /cvsroot/mozilla/camino/resources/localized/English.lproj/Localizable.strings.in,v
+retrieving revision 1.35
+diff -u -8 -r1.35 Localizable.strings.in
+--- resources/localized/English.lproj/Localizable.strings.in	27 Jan 2009 04:33:13 -0000	1.35
++++ resources/localized/English.lproj/Localizable.strings.in	5 Mar 2009 14:45:45 -0000
+@@ -513,8 +513,22 @@
+ "NoExternalHandlerTitle" = "Unknown link type";
+ "NoExternalHandlerText" = "Camino cannot open “%@” links, and there are no other applications installed that can open these links.";
+ 
+ /* Growl */
+ "GrowlDownloadStarted" = "Download Started";
+ "GrowlDownloadFailed" = "Download Failed";
+ "GrowlDownloadComplete" = "Download Complete";
+ "GrowlShortDownloadComplete" = "Short Download Complete";
++
++/* Safe Browsing */
++"PhishingTitleText" = "Reported Web Forgery!";
++"MalwareTitleText" = "Reported Attack Site!";
++/* For the short descriptions, please don't translate the contents of the <span> tags. 
++   They will be replaced at runtime with a domain name */
++"PhishingShortDescText" = "This web site at <span id='phishing_sitename'/> has been reported as a web forgery and has been blocked based on your security preferences.";
++"MalwareShortDescText" = "This web site at <span id='malware_sitename'/> has been reported as an attack site and has been blocked based on your security preferences.";
++/* To create paragraphs within the long description text, please wrap each in <p></p> tags */
++"PhishingLongDescText" = "<p>Web forgeries are designed to trick you into revealing personal or financial information by imitating sources you may trust.</p><p>Entering any information on this web page may result in identity theft or other fraud.</p>";
++"MalwareLongDescText" = "<p>Attack sites try to install programs that steal private information, use your computer to attack others, or damage your system.</p><p>Some attack sites intentionally distribute harmful software, but many are compromised without the knowledge or permission of their owners.</p>";
++"GetMeOutButtonLabel" = "Get me out of here!";
++"MoreInformationButtonLabel" = "Why was this site blocked?";
++"IgnoreWarningButtonLabel" = "Ignore this warning";
+Index: src/safebrowsing/SafeBrowsingAboutModule.h
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/safebrowsing/SafeBrowsingAboutModule.h,v
+retrieving revision 1.1
+diff -u -8 -r1.1 SafeBrowsingAboutModule.h
+--- src/safebrowsing/SafeBrowsingAboutModule.h	29 Jan 2009 04:05:46 -0000	1.1
++++ src/safebrowsing/SafeBrowsingAboutModule.h	5 Mar 2009 14:45:47 -0000
+@@ -49,17 +49,20 @@
+ {
+  public:
+   NS_DECL_ISUPPORTS
+   NS_DECL_NSIABOUTMODULE
+ 
+   CHSafeBrowsingAboutModule() {}
+   virtual ~CHSafeBrowsingAboutModule() {}
+ 
+-  static NS_METHOD CreateSafeBrowsingAboutModule(nsISupports *aOuter, REFNSIID aIID, void **aResult);    
++  static NS_METHOD CreateSafeBrowsingAboutModule(nsISupports *aOuter, REFNSIID aIID, void **aResult);
++
++ private:
++  nsresult GetBlockedPageSource(nsACString &result);
+ };
+ 
+ /* EDF643A9-8B38-472C-92A0-B6 3B EF B3 07 69 */
+ #define CH_SAFEBROWSING_ABOUT_MODULE_CID \
+ { 0xEDF643A9, 0xB38, 0x472C, \
+ { 0x92, 0xA0, 0xB6, 0x3B, 0xEF, 0xB3, 0x07, 0x69}}
+ 
+ #endif // CHSafeBrowsingAboutModule_h__
+Index: src/safebrowsing/SafeBrowsingAboutModule.mm
+===================================================================
+RCS file: /cvsroot/mozilla/camino/src/safebrowsing/SafeBrowsingAboutModule.mm,v
+retrieving revision 1.1
+diff -u -8 -r1.1 SafeBrowsingAboutModule.mm
+--- src/safebrowsing/SafeBrowsingAboutModule.mm	29 Jan 2009 04:05:46 -0000	1.1
++++ src/safebrowsing/SafeBrowsingAboutModule.mm	5 Mar 2009 14:45:47 -0000
+@@ -31,68 +31,78 @@
+  * decision by deleting the provisions above and replace them with the notice
+  * and other provisions required by the GPL or the LGPL. If you do not delete
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ 
+ #import <Cocoa/Cocoa.h>
++#import "NSString+Gecko.h"
+ #include "SafeBrowsingAboutModule.h"
+ 
+ #include "nsCOMPtr.h"
+ #include "nsIChannel.h"
+-#include "nsIIOService.h"
+ #include "nsIServiceManager.h"
+ #include "nsNetCID.h"
+ #include "nsString.h"
+ #include "nsIScriptSecurityManager.h"
+ #include "nsIPrincipal.h"
++#include "nsStringStream.h"
++#include "nsNetUtil.h"
+ 
+-#define BLOCKED_PAGE_CHROME_URL "chrome://global/locale/safebrowsing/blockedSite.xhtml"
++// Placeholders in the blocked site HTML page to replace with localized strings.
++static NSString *const kPhishingTitleText = @"PhishingTitleText";
++static NSString *const kMalwareTitleText = @"MalwareTitleText";
++static NSString *const kPhishingShortDescText = @"PhishingShortDescText";
++static NSString *const kMalwareShortDescText = @"MalwareShortDescText";
++static NSString *const kPhishingLongDescText = @"PhishingLongDescText";
++static NSString *const kMalwareLongDescText = @"MalwareLongDescText";
++static NSString *const kMoreInformationButtonLabel = @"MoreInformationButtonLabel";
++static NSString *const kGetMeOutButtonLabel = @"GetMeOutButtonLabel";
++static NSString *const kIgnoreWarningButtonLabel = @"IgnoreWarningButtonLabel";
+ 
+ NS_IMPL_ISUPPORTS1(CHSafeBrowsingAboutModule, nsIAboutModule)
+ 
+ NS_IMETHODIMP
+ CHSafeBrowsingAboutModule::NewChannel(nsIURI *aURI, nsIChannel **result)
+ {
+   NS_ENSURE_ARG_POINTER(aURI);
+   NS_ASSERTION(result, "must not be null");
+ 
+   nsresult rv;
+ 
+-  nsCOMPtr<nsIIOService> ioService = do_GetService(NS_IOSERVICE_CONTRACTID, &rv);
+-  if (NS_FAILED(rv))
+-    return rv;
+-
+-  nsCAutoString blockedSitePageURL;
+-  blockedSitePageURL.AssignLiteral(BLOCKED_PAGE_CHROME_URL);
+-
+-  nsCOMPtr<nsIChannel> blockedSiteChannel;
+-  rv = ioService->NewChannel(blockedSitePageURL, "UTF8", aURI, getter_AddRefs(blockedSiteChannel));
+-  if (NS_FAILED(rv))
+-    return rv;
++  nsCAutoString pageSource;
++  rv = GetBlockedPageSource(pageSource);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  nsCOMPtr<nsIInputStream> inputStream;
++  rv = NS_NewCStringInputStream(getter_AddRefs(inputStream), pageSource);
++  NS_ENSURE_SUCCESS(rv, rv);
++
++  nsIChannel* channel = NULL;
++  rv = NS_NewInputStreamChannel(&channel, aURI, inputStream,
++                                NS_LITERAL_CSTRING("application/xhtml+xml"),
++                                NS_LITERAL_CSTRING("UTF8"));
++  NS_ENSURE_SUCCESS(rv, rv);
+ 
+-  blockedSiteChannel->SetOriginalURI(aURI);
++  channel->SetOriginalURI(aURI);
+ 
+   nsCOMPtr<nsIScriptSecurityManager> securityManager = 
+     do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID, &rv);
+-  if (NS_FAILED(rv))
+-    return rv;
++  NS_ENSURE_SUCCESS(rv, rv);
+ 
+   nsCOMPtr<nsIPrincipal> principal;
+   rv = securityManager->GetCodebasePrincipal(aURI, getter_AddRefs(principal));
+-  if (NS_FAILED(rv))
+-    return rv;
++  NS_ENSURE_SUCCESS(rv, rv);
+ 
+-  rv = blockedSiteChannel->SetOwner(principal);
+-  if (NS_FAILED(rv))
+-    return rv;
++  rv = channel->SetOwner(principal);
++  NS_ENSURE_SUCCESS(rv, rv);
+ 
+-  *result = blockedSiteChannel;
++  *result = channel;
+   NS_ADDREF(*result);
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+ CHSafeBrowsingAboutModule::GetURIFlags(nsIURI *aURI, PRUint32 *result)
+ {
+   // Since bad sites can cause this page to appear (e.g. by having an iframe pointing to 
+@@ -108,8 +118,46 @@
+   CHSafeBrowsingAboutModule *aboutModule = new CHSafeBrowsingAboutModule();
+   if (aboutModule == nsnull)
+     return NS_ERROR_OUT_OF_MEMORY;
+   NS_ADDREF(aboutModule);
+   nsresult rv = aboutModule->QueryInterface(aIID, aResult);
+   NS_RELEASE(aboutModule);
+   return rv;
+ }
++
++nsresult CHSafeBrowsingAboutModule::GetBlockedPageSource(nsACString &result) {
++
++  NSString *pathToBlockedSitePageSource = [[NSBundle mainBundle] pathForResource:@"blockedSite"
++                                                                          ofType:@"xhtml"];
++
++  NSMutableString *blockedSitePageSource = [NSMutableString stringWithContentsOfFile:pathToBlockedSitePageSource
++                                                                            encoding:NSUTF8StringEncoding
++                                                                               error:NULL];
++
++  if (![blockedSitePageSource length] > 0)
++    return NS_ERROR_FILE_NOT_FOUND;
++
++  // Localize the blocked page by swapping out placeholder strings.
++  NSArray *stringPlaceholdersInPage = [NSArray arrayWithObjects:kPhishingTitleText,
++                                                                kMalwareTitleText,
++                                                                kPhishingShortDescText,
++                                                                kMalwareShortDescText,
++                                                                kPhishingLongDescText,
++                                                                kMalwareLongDescText,
++                                                                kMoreInformationButtonLabel,
++                                                                kGetMeOutButtonLabel,
++                                                                kIgnoreWarningButtonLabel,
++                                                                nil];
++
++  NSEnumerator *placeholderEnum = [stringPlaceholdersInPage objectEnumerator];
++  NSString *currentPlaceholder = nil;
++  while ((currentPlaceholder = [placeholderEnum nextObject])) {
++    [blockedSitePageSource replaceOccurrencesOfString:currentPlaceholder
++                                           withString:NSLocalizedString(currentPlaceholder, nil)
++                                              options:NULL
++                                                range:NSMakeRange(0, [blockedSitePageSource length])];    
++  }
++
++  result.Assign([blockedSitePageSource UTF8String]);
++
++  return NS_OK;
++}

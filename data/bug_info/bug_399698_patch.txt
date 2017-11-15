@@ -1,0 +1,16 @@
+Index: security/manager/pki/resources/content/certManager.js
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/pki/resources/content/certManager.js,v
+retrieving revision 1.51
+diff -u -r1.51 certManager.js
+--- security/manager/pki/resources/content/certManager.js	3 Oct 2007 11:56:33 -0000	1.51
++++ security/manager/pki/resources/content/certManager.js	13 Oct 2007 09:44:26 -0000
+@@ -318,7 +318,7 @@
+   var enableEditButton=document.getElementById('websites_editButton');
+   enableEditButton.setAttribute("disabled", !enable_edit);
+   var enableExportButton=document.getElementById('websites_exportButton');
+-  enableExportButton.setAttribute("disabled", !enable_edit);
++  enableExportButton.setAttribute("disabled", !enable_view);
+   var enableDeleteButton=document.getElementById('websites_deleteButton');
+   enableDeleteButton.setAttribute("disabled", !enable_delete);
+ }

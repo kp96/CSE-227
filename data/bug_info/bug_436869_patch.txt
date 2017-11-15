@@ -1,0 +1,185 @@
+Index: mail/base/content/msgHdrViewOverlay.js
+===================================================================
+RCS file: /cvsroot/mozilla/mail/base/content/msgHdrViewOverlay.js,v
+retrieving revision 1.107
+diff -u -p -9 -r1.107 msgHdrViewOverlay.js
+--- mail/base/content/msgHdrViewOverlay.js	1 Jul 2008 00:36:40 -0000	1.107
++++ mail/base/content/msgHdrViewOverlay.js	1 Jul 2008 18:10:11 -0000
+@@ -1089,26 +1089,31 @@ function detachAttachment(aAttachment, a
+                            encodeURIComponent(aAttachment.displayName),
+                            aAttachment.uri, aSaveFirst);
+ }
+ 
+ function CanDetachAttachments()
+ {
+   var uri = GetLoadedMessage();
+   var canDetach = !IsNewsMessage(uri) && (!IsImapMessage(uri) || MailOfflineMgr.isOnline());
+   if (canDetach && ("content-type" in currentHeaderData))
+-  {
+-    var contentType = currentHeaderData["content-type"].headerValue;
+-    canDetach = contentType.indexOf("application/x-pkcs7-mime") < 0 &&
+-        contentType.indexOf("application/x-pkcs7-signature") < 0;
+-  }
++    canDetach = !ContentTypeIsSMIME(currentHeaderData["content-type"].headerValue);
+   return canDetach;
+ }
+ 
++/** Return true if the content type is an S/MIME one. */
++function ContentTypeIsSMIME(contentType)
++{
++  return contentType.indexOf("application/pkcs7-mime") >= 0 ||
++         contentType.indexOf("application/pkcs7-signature") >= 0 ||
++         contentType.indexOf("application/x-pkcs7-mime") >= 0 ||
++         contentType.indexOf("application/x-pkcs7-signature") >= 0;
++}
++
+ function onShowAttachmentContextMenu()
+ {
+   // if no attachments are selected, disable the Open and Save...
+   var attachmentList = document.getElementById('attachmentList');
+   var selectedAttachments = attachmentList.selectedItems;
+   var openMenu = document.getElementById('context-openAttachment');
+   var saveMenu = document.getElementById('context-saveAttachment');
+   var detachMenu = document.getElementById('context-detachAttachment');
+   var deleteMenu = document.getElementById('context-deleteAttachment');
+@@ -1368,23 +1373,19 @@ function addAttachmentToPopup(popup, att
+         return gMessengerBundle.getString(aName);
+       }
+ 
+       // we should also check if an attachment has been detached...
+       // but that uses X-Mozilla-External-Attachment-URL, which
+       // we'd need to check for somehow.
+ 
+       var signedOrEncrypted = false;
+       if ("content-type" in currentHeaderData)
+-      {
+-        var contentType = currentHeaderData["content-type"].headerValue;
+-        signedOrEncrypted = contentType.indexOf("application/x-pkcs7-mime") >= 0 ||
+-            contentType.indexOf("application/x-pkcs7-signature") >= 0;
+-      }
++        signedOrEncrypted = ContentTypeIsSMIME(currentHeaderData["content-type"].headerValue);
+       var canDetach = !(/news-message:/.test(attachment.uri)) &&
+           !signedOrEncrypted &&
+           (!(/imap-message/.test(attachment.uri)) || MailOfflineMgr.isOnline());
+       menuitementry.setAttribute('label', getString("openLabel"));
+       menuitementry.setAttribute('accesskey', getString("openLabelAccesskey"));
+       menuitementry = openpopup.appendChild(menuitementry);
+       if (attachment.contentType == 'text/x-moz-deleted')
+         menuitementry.setAttribute('disabled', true);
+ 
+Index: mailnews/extensions/smime/src/nsMsgComposeSecure.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/mailnews/extensions/smime/src/nsMsgComposeSecure.cpp,v
+retrieving revision 1.43
+diff -u -p -9 -r1.43 nsMsgComposeSecure.cpp
+--- mailnews/extensions/smime/src/nsMsgComposeSecure.cpp	7 Jun 2007 23:19:13 -0000	1.43
++++ mailnews/extensions/smime/src/nsMsgComposeSecure.cpp	1 Jul 2008 18:10:14 -0000
+@@ -601,19 +601,19 @@ nsresult nsMsgComposeSecure::MimeInitMul
+ 
+ nsresult nsMsgComposeSecure::MimeInitEncryption(PRBool aSign, nsIMsgSendReport *sendReport)
+ {
+   nsresult rv;
+ 
+   /* First, construct and write out the opaque-crypto-blob MIME header data.
+    */
+ 
+   char *s =
+-  PR_smprintf("Content-Type: " APPLICATION_XPKCS7_MIME
++  PR_smprintf("Content-Type: " APPLICATION_PKCS7_MIME
+           "; name=\"smime.p7m\"" CRLF
+         "Content-Transfer-Encoding: " ENCODING_BASE64 CRLF
+         "Content-Disposition: attachment"
+           "; filename=\"smime.p7m\"" CRLF
+         "Content-Description: %s" CRLF
+         CRLF,
+         MIME_SMIME_ENCRYPTED_CONTENT_DESCRIPTION);
+   PRUint32 L;
+   if (!s) return NS_ERROR_OUT_OF_MEMORY;
+@@ -704,19 +704,19 @@ nsresult nsMsgComposeSecure::MimeFinishM
+   status = PR_GetError();
+   if (status < 0) goto FAIL;
+ 
+   /* Write out the headers for the signature.
+    */
+   PRUint32 L;
+   header =
+     PR_smprintf(CRLF
+           "--%s" CRLF
+-          "Content-Type: " APPLICATION_XPKCS7_SIGNATURE
++          "Content-Type: " APPLICATION_PKCS7_SIGNATURE
+             "; name=\"smime.p7s\"" CRLF
+           "Content-Transfer-Encoding: " ENCODING_BASE64 CRLF
+           "Content-Disposition: attachment; "
+             "filename=\"smime.p7s\"" CRLF
+           "Content-Description: %s" CRLF
+           CRLF,
+           mMultipartSignedBoundary,
+           MIME_SMIME_SIGNATURE_CONTENT_DESCRIPTION);
+   if (!header) {
+@@ -1093,21 +1093,21 @@ make_multipart_signed_header_string(PRBo
+   const char * crypto_multipart_blurb = nsnull;
+ 
+   if (!*boundary_return)
+ 	return NS_ERROR_OUT_OF_MEMORY;
+ 
+   if (outer_p) {
+ 	  crypto_multipart_blurb = MIME_MULTIPART_SIGNED_BLURB;
+   }
+ 
+-  *header_return =
+-	PR_smprintf("Content-Type: " MULTIPART_SIGNED "; "
+-				"protocol=\"" APPLICATION_XPKCS7_SIGNATURE "\"; "
++  *header_return = PR_smprintf(
++        "Content-Type: " MULTIPART_SIGNED "; "
++        "protocol=\"" APPLICATION_PKCS7_SIGNATURE "\"; "
+ 				"micalg=" PARAM_MICALG_SHA1 "; "
+ 				"boundary=\"%s\"" CRLF
+ 				CRLF
+ 				"%s%s"
+ 				"--%s" CRLF,
+ 
+ 				*boundary_return,
+ 				(crypto_multipart_blurb ? crypto_multipart_blurb : ""),
+ 				(crypto_multipart_blurb ? CRLF CRLF : ""),
+Index: mailnews/mime/cthandlers/smimestub/nsSMIMEStub.h
+===================================================================
+RCS file: /cvsroot/mozilla/mailnews/mime/cthandlers/smimestub/nsSMIMEStub.h,v
+retrieving revision 1.3
+diff -u -p -9 -r1.3 nsSMIMEStub.h
+--- mailnews/mime/cthandlers/smimestub/nsSMIMEStub.h	17 Apr 2004 18:33:11 -0000	1.3
++++ mailnews/mime/cthandlers/smimestub/nsSMIMEStub.h	1 Jul 2008 18:10:15 -0000
+@@ -33,29 +33,29 @@
+  * the provisions above, a recipient may use your version of this file under
+  * the terms of any one of the MPL, the GPL or the LGPL.
+  *
+  * ***** END LICENSE BLOCK ***** */
+ #ifndef _MIMECENC_H_
+ #define _MIMECENC_H_
+ 
+ #include "mimetext.h"
+ 
++#define SMIME_CONTENT_TYPE "application/pkcs7-mime"
++
+ /*
+  * These functions are the public interface for this content type
+  * handler and will be called in by the mime component.
+  */
+-#define      SMIME_CONTENT_TYPE  "application/x-pkcs7-mime"
+-
+ 
+-/* The MimeInlineTextSMIMEStub class implements the "application/x-pkcs7-mime"2
+-   MIME content types.
++/**
++ * The MimeInlineTextSMIMEStub class implements the SMIME 2
++ * MIME content types.
+  */
+-
+ typedef struct MimeInlineTextSMIMEStubClass MimeInlineTextSMIMEStubClass;
+ typedef struct MimeInlineTextSMIMEStub      MimeInlineTextSMIMEStub;
+ 
+ struct MimeInlineTextSMIMEStubClass {
+     MimeInlineTextClass text;
+     char* buffer;
+     PRInt32 bufferlen;
+     PRInt32 buffermax;
+ };

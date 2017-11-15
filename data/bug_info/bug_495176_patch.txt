@@ -1,0 +1,309 @@
+From: Boris Zbarsky <bzbarsky@mit.edu>
+Bug 495176.  Improve security error reporting when document.domain is involved.  r=jst,pike sr=jst
+
+diff --git a/caps/src/nsScriptSecurityManager.cpp b/caps/src/nsScriptSecurityManager.cpp
+--- a/caps/src/nsScriptSecurityManager.cpp
++++ b/caps/src/nsScriptSecurityManager.cpp
+@@ -135,57 +135,64 @@ public:
+         --sInPrincipalDomainOrigin;
+     }
+     static PRUint32 sInPrincipalDomainOrigin;
+ };
+ PRUint32 nsAutoInPrincipalDomainOriginSetter::sInPrincipalDomainOrigin;
+ 
+ static
+ nsresult
+-GetPrincipalDomainOrigin(nsIPrincipal* aPrincipal,
+-                         nsACString& aOrigin)
++GetOriginFromURI(nsIURI* aURI, nsACString& aOrigin)
+ {
+   if (nsAutoInPrincipalDomainOriginSetter::sInPrincipalDomainOrigin > 1) {
+       // Allow a single recursive call to GetPrincipalDomainOrigin, since that
+       // might be happening on a different principal from the first call.  But
+       // after that, cut off the recursion; it just indicates that something
+       // we're doing in this method causes us to reenter a security check here.
+       return NS_ERROR_NOT_AVAILABLE;
+   }
+ 
+   nsAutoInPrincipalDomainOriginSetter autoSetter;
+-  aOrigin.Truncate();
++
++  nsCOMPtr<nsIURI> uri = NS_GetInnermostURI(aURI);
++  NS_ENSURE_TRUE(uri, NS_ERROR_UNEXPECTED);
++
++  nsCAutoString hostPort;
++
++  nsresult rv = uri->GetHostPort(hostPort);
++  if (NS_SUCCEEDED(rv)) {
++    nsCAutoString scheme;
++    rv = uri->GetScheme(scheme);
++    NS_ENSURE_SUCCESS(rv, rv);
++    aOrigin = scheme + NS_LITERAL_CSTRING("://") + hostPort;
++  }
++  else {
++    // Some URIs (e.g., nsSimpleURI) don't support host. Just
++    // get the full spec.
++    rv = uri->GetSpec(aOrigin);
++    NS_ENSURE_SUCCESS(rv, rv);
++  }
++
++  return NS_OK;
++}
++
++static
++nsresult
++GetPrincipalDomainOrigin(nsIPrincipal* aPrincipal,
++                         nsACString& aOrigin)
++{
+ 
+   nsCOMPtr<nsIURI> uri;
+   aPrincipal->GetDomain(getter_AddRefs(uri));
+   if (!uri) {
+     aPrincipal->GetURI(getter_AddRefs(uri));
+   }
+   NS_ENSURE_TRUE(uri, NS_ERROR_UNEXPECTED);
+ 
+-  uri = NS_GetInnermostURI(uri);
+-  NS_ENSURE_TRUE(uri, NS_ERROR_UNEXPECTED);
+-
+-  nsCAutoString hostPort;
+-
+-  nsresult rv = uri->GetHostPort(hostPort);
+-  if (NS_SUCCEEDED(rv)) {
+-    nsCAutoString scheme;
+-    rv = uri->GetScheme(scheme);
+-    NS_ENSURE_SUCCESS(rv, rv);
+-    aOrigin = scheme + NS_LITERAL_CSTRING("://") + hostPort;
+-  }
+-  else {
+-    // Some URIs (e.g., nsSimpleURI) don't support host. Just
+-    // get the full spec.
+-    rv = uri->GetSpec(aOrigin);
+-    NS_ENSURE_SUCCESS(rv, rv);
+-  }
+-
+-  return NS_OK;
++  return GetOriginFromURI(uri, aOrigin);
+ }
+ 
+ // Inline copy of JS_GetPrivate() for better inlining and optimization
+ // possibilities. Also doesn't take a cx argument as it's not
+ // needed. We access the private data only on objects whose private
+ // data is not expected to change during the lifetime of the object,
+ // so thus we won't worry about locking and holding on to slot values
+ // etc while referencing private data.
+@@ -827,45 +834,86 @@ nsScriptSecurityManager::CheckPropertyAc
+             stringName.AssignLiteral("SetPropertyDeniedOrigins");
+             break;
+         case nsIXPCSecurityManager::ACCESS_CALL_METHOD:
+             stringName.AssignLiteral("CallMethodDeniedOrigins");
+         }
+ 
+         NS_ConvertUTF8toUTF16 className(classInfoData.GetName());
+         nsCAutoString subjectOrigin;
++        nsCAutoString subjectDomain;
+         if (!nsAutoInPrincipalDomainOriginSetter::sInPrincipalDomainOrigin) {
+-            GetPrincipalDomainOrigin(subjectPrincipal, subjectOrigin);
++            nsCOMPtr<nsIURI> uri, domain;
++            subjectPrincipal->GetURI(getter_AddRefs(uri));
++            GetOriginFromURI(uri, subjectOrigin);
++            subjectPrincipal->GetDomain(getter_AddRefs(domain));
++            if (domain) {
++                GetOriginFromURI(domain, subjectDomain);
++            }
+         } else {
+             subjectOrigin.AssignLiteral("the security manager");
+         }
+         NS_ConvertUTF8toUTF16 subjectOriginUnicode(subjectOrigin);
++        NS_ConvertUTF8toUTF16 subjectDomainUnicode(subjectDomain);
+ 
+         nsCAutoString objectOrigin;
++        nsCAutoString objectDomain;
+         if (!nsAutoInPrincipalDomainOriginSetter::sInPrincipalDomainOrigin &&
+             objectPrincipal) {
+-            GetPrincipalDomainOrigin(objectPrincipal, objectOrigin);
++            nsCOMPtr<nsIURI> uri, domain;
++            objectPrincipal->GetURI(getter_AddRefs(uri));
++            GetOriginFromURI(uri, objectOrigin);
++            objectPrincipal->GetDomain(getter_AddRefs(domain));
++            if (domain) {
++                GetOriginFromURI(domain, objectDomain);
++            }
+         }
+         NS_ConvertUTF8toUTF16 objectOriginUnicode(objectOrigin);
+-            
++        NS_ConvertUTF8toUTF16 objectDomainUnicode(objectDomain);
++
+         nsXPIDLString errorMsg;
+         const PRUnichar *formatStrings[] =
+         {
+             subjectOriginUnicode.get(),
+             className.get(),
+             JSValIDToString(cx, aProperty),
+-            objectOriginUnicode.get()
++            objectOriginUnicode.get(),
++            subjectDomainUnicode.get(),
++            objectDomainUnicode.get()
+         };
+ 
+         PRUint32 length = NS_ARRAY_LENGTH(formatStrings);
+ 
++        // XXXbz Our localization system is stupid and can't handle not showing
++        // some strings that get passed in.  Which means that we have to get
++        // our length precisely right: it has to be exactly the number of
++        // strings our format string wants.  This means we'll have to move
++        // strings in the array as needed, sadly...
+         if (nsAutoInPrincipalDomainOriginSetter::sInPrincipalDomainOrigin ||
+             !objectPrincipal) {
+             stringName.AppendLiteral("OnlySubject");
+-            --length;
++            length -= 3;
++        } else {
++            // default to a length that doesn't include the domains, then
++            // increase it as needed.
++            length -= 2;
++            if (!subjectDomainUnicode.IsEmpty()) {
++                stringName.AppendLiteral("SubjectDomain");
++                length += 1;
++            }
++            if (!objectDomainUnicode.IsEmpty()) {
++                stringName.AppendLiteral("ObjectDomain");
++                length += 1;
++                if (length != NS_ARRAY_LENGTH(formatStrings)) {
++                    // We have an object domain but not a subject domain.
++                    // Scoot our string over one slot.  See the XXX comment
++                    // above for why we need to do this.
++                    formatStrings[length-1] = formatStrings[length];
++                }
++            }
+         }
+         
+         // We need to keep our existing failure rv and not override it
+         // with a likely success code from the following string bundle
+         // call in order to throw the correct security exception later.
+         nsresult rv2 = sStrBundle->FormatStringFromName(stringName.get(),
+                                                         formatStrings,
+                                                         length,
+diff --git a/dom/locales/en-US/chrome/security/caps.properties b/dom/locales/en-US/chrome/security/caps.properties
+--- a/dom/locales/en-US/chrome/security/caps.properties
++++ b/dom/locales/en-US/chrome/security/caps.properties
+@@ -38,19 +38,116 @@
+ Yes = Allow
+ No = Deny
+ Titleline = Internet Security
+ CheckMessage = Remember this decision
+ EnableCapabilityQuery = A script from "%S" is requesting enhanced abilities that are UNSAFE and could be used to compromise your machine or data:\n\n%S\n\nAllow these abilities only if you trust this source to be free of viruses or malicious programs.
+ EnableCapabilityDenied = A script from "%S" was denied %S privileges.
+ CheckLoadURIError = Security Error: Content at %S may not load or link to %S.
+ CheckSameOriginError = Security Error: Content at %S may not load data from %S.
+-GetPropertyDeniedOrigins = Permission denied for <%S> to get property %S.%S from <%S>.
+-SetPropertyDeniedOrigins = Permission denied for <%S> to set property %S.%S on <%S>.
+-CallMethodDeniedOrigins = Permission denied for <%S> to call method %S.%S on <%S>.
++
++# LOCALIZATION NOTE (GetPropertyDeniedOrigins):
++# %1$S is the origin of the script which was denied access.
++# %2$S is the origin of the object access was denied to.
++# %3$S is the type of object it was.
++# %4$S is the property of that object that access was denied for.
++GetPropertyDeniedOrigins = Permission denied for <%1$S> to get property %2$S.%3$S from <%4$S>.
++# LOCALIZATION NOTE (GetPropertyDeniedOriginsSubjectDomain):
++# %1$S is the origin of the script which was denied access.
++# %2$S is the origin of the object access was denied to.
++# %3$S is the type of object it was.
++# %4$S is the property of that object that access was denied for.
++# %5$S is the value of document.domain for the script which was denied access;
++#      don't translate "document.domain".
++GetPropertyDeniedOriginsSubjectDomain = Permission denied for <%1$S> (document.domain=<%5$S>) to get property %2$S.%3$S from <%4$S> (document.domain has not been set).
++# LOCALIZATION NOTE (GetPropertyDeniedOriginsObjectDomain):
++# %1$S is the origin of the script which was denied access.
++# %2$S is the origin of the object access was denied to.
++# %3$S is the type of object it was.
++# %4$S is the property of that object that access was denied for.
++# %5$S is the value of document.domain for the object being accessed;
++#      don't translate "document.domain".
++GetPropertyDeniedOriginsObjectDomain = Permission denied for <%1$S> (document.domain has not been set) to get property %2$S.%3$S from <%4$S> (document.domain=<%5$S>).
++# LOCALIZATION NOTE (GetPropertyDeniedOriginsSubjectDomainObjectDomain):
++# %1$S is the origin of the script which was denied access.
++# %2$S is the origin of the object access was denied to.
++# %3$S is the type of object it was.
++# %4$S is the property of that object that access was denied for.
++# %5$S is the value of document.domain for the script which was denied access;
++#      don't translate "document.domain"
++# %6$S is the value of document.domain for the object being accessed;
++#      don't translate "document.domain".
++GetPropertyDeniedOriginsSubjectDomainObjectDomain = Permission denied for <%1$S> (document.domain=<%5$S>) to get property %2$S.%3$S from <%4$S> (document.domain=<%6$S>).
++
++# LOCALIZATION NOTE (SetPropertyDeniedOrigins):
++# %1$S is the origin of the script which was denied access.
++# %2$S is the origin of the object access was denied to.
++# %3$S is the type of object it was.
++# %4$S is the property of that object that access was denied for.
++SetPropertyDeniedOrigins = Permission denied for <%1$S> to set property %2$S.%3$S on <%4$S>.
++# LOCALIZATION NOTE (SetPropertyDeniedOriginsSubjectDomain):
++# %1$S is the origin of the script which was denied access.
++# %2$S is the origin of the object access was denied to.
++# %3$S is the type of object it was.
++# %4$S is the property of that object that access was denied for.
++# %5$S is the value of document.domain for the script which was denied access;
++#      don't translate "document.domain".
++SetPropertyDeniedOriginsSubjectDomain = Permission denied for <%1$S> (document.domain=<%5$S>) to set property %2$S.%3$S on <%4$S> (document.domain has not been set).
++# LOCALIZATION NOTE (SetPropertyDeniedOriginsObjectDomain):
++# %1$S is the origin of the script which was denied access.
++# %2$S is the origin of the object access was denied to.
++# %3$S is the type of object it was.
++# %4$S is the property of that object that access was denied for.
++# %5$S is the value of document.domain for the object being accessed;
++#      don't translate "document.domain".
++SetPropertyDeniedOriginsObjectDomain = Permission denied for <%1$S> (document.domain has not been set) to set property %2$S.%3$S on <%4$S> (document.domain=<%5$S>).
++# LOCALIZATION NOTE (SetPropertyDeniedOriginsSubjectDomainObjectDomain):
++# %1$S is the origin of the script which was denied access.
++# %2$S is the origin of the object access was denied to.
++# %3$S is the type of object it was.
++# %4$S is the property of that object that access was denied for.
++# %5$S is the value of document.domain for the script which was denied access;
++#      don't translate "document.domain"
++# %6$S is the value of document.domain for the object being accessed;
++#      don't translate "document.domain".
++SetPropertyDeniedOriginsSubjectDomainObjectDomain = Permission denied for <%1$S> (document.domain=<%5$S>) to set property %2$S.%3$S on <%4$S> (document.domain=<%6$S>).
++
++# LOCALIZATION NOTE (CallMethodDeniedOrigins):
++# %1$S is the origin of the script which was denied access.
++# %2$S is the origin of the object access was denied to.
++# %3$S is the type of object it was.
++# %4$S is the method of that object that access was denied for.
++CallMethodDeniedOrigins = Permission denied for <%1$S> to call method %2$S.%3$S on <%4$S>.
++# LOCALIZATION NOTE (CallMethodDeniedOriginsSubjectDomain):
++# %1$S is the origin of the script which was denied access.
++# %2$S is the origin of the object access was denied to.
++# %3$S is the type of object it was.
++# %4$S is the method of that object that access was denied for.
++# %5$S is the value of document.domain for the script which was denied access;
++#      don't translate "document.domain".
++CallMethodDeniedOriginsSubjectDomain = Permission denied for <%1$S> (document.domain=<%5$S>) to call method %2$S.%3$S on <%4$S> (document.domain has not been set).
++# LOCALIZATION NOTE (CallMethodDeniedOriginsObjectDomain):
++# %1$S is the origin of the script which was denied access.
++# %2$S is the origin of the object access was denied to.
++# %3$S is the type of object it was.
++# %4$S is the method of that object that access was denied for.
++# %5$S is the value of document.domain for the object being accessed;
++#      don't translate "document.domain".
++CallMethodDeniedOriginsObjectDomain = Permission denied for <%1$S> (document.domain has not been set) to call method %2$S.%3$S on <%4$S> (document.domain=<%5$S>).
++# LOCALIZATION NOTE (CallMethodDeniedOriginsSubjectDomainObjectDomain):
++# %1$S is the origin of the script which was denied access.
++# %2$S is the origin of the object access was denied to.
++# %3$S is the type of object it was.
++# %4$S is the method of that object that access was denied for.
++# %5$S is the value of document.domain for the script which was denied access;
++#      don't translate "document.domain"
++# %6$S is the value of document.domain for the object being accessed;
++#      don't translate "document.domain".
++CallMethodDeniedOriginsSubjectDomainObjectDomain = Permission denied for <%1$S> (document.domain=<%5$S>) to call method %2$S.%3$S on <%4$S> (document.domain=<%6$S>).
++
+ GetPropertyDeniedOriginsOnlySubject = Permission denied for <%S> to get property %S.%S
+ SetPropertyDeniedOriginsOnlySubject = Permission denied for <%S> to set property %S.%S
+ CallMethodDeniedOriginsOnlySubject = Permission denied for <%S> to call method %S.%S
+ CreateWrapperDenied = Permission denied to create wrapper for object of class %S
+ CreateWrapperDeniedForOrigin = Permission denied for <%2$S> to create wrapper for object of class %1$S
+ ExtensionCapability = Unknown: %S
+ ProtocolFlagError = Warning: Protocol handler for '%S' doesn't advertise a security policy.  While loading of such protocols is allowed for now, this is deprecated.  Please see the documentation in nsIProtocolHandler.idl.
+ #

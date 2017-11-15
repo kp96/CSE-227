@@ -1,0 +1,83 @@
+? src/dependentLibs.h
+Index: resources/locale/en-US/pipnss.properties
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/resources/locale/en-US/pipnss.properties,v
+retrieving revision 1.37
+diff -u -r1.37 pipnss.properties
+--- resources/locale/en-US/pipnss.properties	31 Jan 2004 07:10:34 -0000	1.37
++++ resources/locale/en-US/pipnss.properties	26 Feb 2004 06:27:40 -0000
+@@ -266,3 +266,5 @@
+ VerifyIssuerUnknown=<Issuer Unknown>
+ VerifyInvalidCA=<Invalid CA>
+ VerifyUnknown=<Unknown>
++CertNoNickname=(no nickname)
++CertNoEmailAddress=(no email address)
+Index: src/nsNSSCertificate.cpp
+===================================================================
+RCS file: /cvsroot/mozilla/security/manager/ssl/src/nsNSSCertificate.cpp,v
+retrieving revision 1.104
+diff -u -r1.104 nsNSSCertificate.cpp
+--- src/nsNSSCertificate.cpp	26 Feb 2004 04:07:23 -0000	1.104
++++ src/nsNSSCertificate.cpp	26 Feb 2004 06:27:41 -0000
+@@ -215,8 +215,7 @@
+     return NS_ERROR_FAILURE;
+   }
+   
+-  NS_DEFINE_CID(nssComponentCID, NS_NSSCOMPONENT_CID);
+-  nsCOMPtr<nsINSSComponent> nssComponent(do_GetService(nssComponentCID, &rv));
++  nsCOMPtr<nsINSSComponent> nssComponent(do_GetService(kNSSComponentCID, &rv));
+ 
+   if (NS_FAILED(rv) || !nssComponent) {
+     return NS_ERROR_FAILURE;
+@@ -408,29 +407,42 @@
+ }
+ 
+ NS_IMETHODIMP
+-nsNSSCertificate::GetNickname(nsAString &_nickname)
++nsNSSCertificate::GetNickname(nsAString &aNickname)
+ {
+   nsNSSShutDownPreventionLock locker;
+   if (isAlreadyShutDown())
+     return NS_ERROR_NOT_AVAILABLE;
+ 
+-// XXX kaie: this is bad. We return a non localizable hardcoded string.
+-  const char *nickname = (mCert->nickname) ? mCert->nickname : "(no nickname)";
+-  _nickname = NS_ConvertUTF8toUCS2(nickname);
++  if (mCert->nickname) {
++    CopyUTF8toUTF16(mCert->nickname, aNickname);
++  } else {
++    nsresult rv;
++    nsCOMPtr<nsINSSComponent> nssComponent(do_GetService(kNSSComponentCID, &rv));
++    if (NS_FAILED(rv) || !nssComponent) {
++      return NS_ERROR_FAILURE;
++    }
++    nssComponent->GetPIPNSSBundleString("CertNoNickname", aNickname);
++  }
+   return NS_OK;
+ }
+ 
+ NS_IMETHODIMP
+-nsNSSCertificate::GetEmailAddress(nsAString &_emailAddress)
++nsNSSCertificate::GetEmailAddress(nsAString &aEmailAddress)
+ {
+   nsNSSShutDownPreventionLock locker;
+   if (isAlreadyShutDown())
+     return NS_ERROR_NOT_AVAILABLE;
+ 
+-// XXX kaie: this is bad. We return a non localizable hardcoded string.
+-//           And agents could be confused, assuming the email address == "(no nickname)"
+-  const char *email = (mCert->emailAddr) ? mCert->emailAddr : "(no email address)";
+-  _emailAddress = NS_ConvertUTF8toUCS2(email);
++  if (mCert->emailAddr) {
++    CopyUTF8toUTF16(mCert->emailAddr, aEmailAddress);
++  } else {
++    nsresult rv;
++    nsCOMPtr<nsINSSComponent> nssComponent(do_GetService(kNSSComponentCID, &rv));
++    if (NS_FAILED(rv) || !nssComponent) {
++      return NS_ERROR_FAILURE;
++    }
++    nssComponent->GetPIPNSSBundleString("CertNoEmailAddress", aEmailAddress);
++  }
+   return NS_OK;
+ }
+ 

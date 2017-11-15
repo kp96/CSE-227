@@ -1,0 +1,142 @@
+diff --git a/security/manager/ssl/src/nsNSSComponent.cpp b/security/manager/ssl/src/nsNSSComponent.cpp
+--- a/security/manager/ssl/src/nsNSSComponent.cpp
++++ b/security/manager/ssl/src/nsNSSComponent.cpp
+@@ -310,29 +310,31 @@ PRBool EnsureNSSInitialized(EnsureNSSOpe
+ 
+     // In this case we are called from a component to ensure nss initilization.
+     // If the component has not yet been loaded and is not currently loading
+     // call do_GetService for nss component to ensure it.
+   case nssEnsure:
+     // We are reentered during nss component creation or nss component is already up
+     if (haveLoaded || loading)
+       return PR_TRUE;
+ 
+     {
+-    nsCOMPtr<nsISupports> nssComponent
++    nsCOMPtr<nsINSSComponent> nssComponent
+       = do_GetService(PSM_COMPONENT_CONTRACTID);
+ 
+     // Nss component failed to initialize, inform the caller of that fact.
+     // Flags are appropriately set by component constructor itself.
+     if (!nssComponent)
+       return PR_FALSE;
+ 
+-    return PR_TRUE;
++    PRBool isInitialized;
++    nsresult rv = nssComponent->IsNSSInitialized(&isInitialized);
++    return NS_SUCCEEDED(rv) && isInitialized;
+     }
+ 
+   default:
+     NS_ASSERTION(PR_FALSE, "Bad operator to EnsureNSSInitialized");
+     return PR_FALSE;
+   }
+ }
+ 
+ nsNSSComponent::nsNSSComponent()
+   :mNSSInitialized(PR_FALSE), mThreadList(nsnull),
+@@ -2527,20 +2529,28 @@ nsNSSComponent::DoProfileChangeNetRestor
+ }
+ 
+ NS_IMETHODIMP
+ nsNSSComponent::GetClientAuthRememberService(nsClientAuthRememberService **cars)
+ {
+   NS_ENSURE_ARG_POINTER(cars);
+   NS_IF_ADDREF(*cars = mClientAuthRememberService);
+   return NS_OK;
+ }
+ 
++NS_IMETHODIMP
++nsNSSComponent::IsNSSInitialized(PRBool *initialized)
++{
++  nsAutoLock lock(mutex);
++  *initialized = mNSSInitialized;
++  return NS_OK;
++}
++
+ //---------------------------------------------
+ // Implementing nsICryptoHash
+ //---------------------------------------------
+ 
+ nsCryptoHash::nsCryptoHash()
+   : mHashContext(nsnull)
+ {
+ }
+ 
+ nsCryptoHash::~nsCryptoHash()
+diff --git a/security/manager/ssl/src/nsNSSComponent.h b/security/manager/ssl/src/nsNSSComponent.h
+--- a/security/manager/ssl/src/nsNSSComponent.h
++++ b/security/manager/ssl/src/nsNSSComponent.h
+@@ -73,24 +73,24 @@
+ 
+ #define NS_NSSCOMPONENT_CID \
+ {0xa277189c, 0x1dd1, 0x11b2, {0xa8, 0xc9, 0xe4, 0xe8, 0xbf, 0xb1, 0x33, 0x8e}}
+ 
+ #define PSM_COMPONENT_CONTRACTID "@mozilla.org/psm;1"
+ #define PSM_COMPONENT_CLASSNAME "Mozilla PSM Component"
+ 
+ //Define an interface that we can use to look up from the
+ //callbacks passed to NSS.
+ 
+-#define NS_INSSCOMPONENT_IID_STR "d4b49dd6-1dd1-11b2-b6fe-b14cfaf69cbd"
++#define NS_INSSCOMPONENT_IID_STR "6ffbb526-205b-49c5-ae3f-5959c084075e"
+ #define NS_INSSCOMPONENT_IID \
+-  {0xd4b49dd6, 0x1dd1, 0x11b2, \
+-    { 0xb6, 0xfe, 0xb1, 0x4c, 0xfa, 0xf6, 0x9c, 0xbd }}
++  { 0x6ffbb526, 0x205b, 0x49c5, \
++    { 0xae, 0x3f, 0x59, 0x59, 0xc0, 0x84, 0x7, 0x5e } };
+ 
+ #define NS_PSMCONTENTLISTEN_CID {0xc94f4a30, 0x64d7, 0x11d4, {0x99, 0x60, 0x00, 0xb0, 0xd0, 0x23, 0x54, 0xa0}}
+ #define NS_PSMCONTENTLISTEN_CONTRACTID "@mozilla.org/security/psmdownload;1"
+ 
+ #define NS_CRYPTO_HASH_CLASSNAME "Mozilla Crypto Hash Function Component"
+ #define NS_CRYPTO_HASH_CID {0x36a1d3b3, 0xd886, 0x4317, {0x96, 0xff, 0x87, 0xb0, 0x00, 0x5c, 0xfe, 0xf7}}
+ 
+ #define NS_CRYPTO_HMAC_CLASSNAME "Mozilla Crypto HMAC Function Component"
+ #define NS_CRYPTO_HMAC_CID {0xa496d0a2, 0xdff7, 0x4e23, {0xbd, 0x65, 0x1c, 0xa7, 0x42, 0xfa, 0x17, 0x8a}}
+ 
+@@ -179,20 +179,22 @@ class NS_NO_VTABLE nsINSSComponent : pub
+ 
+   NS_IMETHOD ShutdownSmartCardThread(SECMODModule *module) = 0;
+ 
+   NS_IMETHOD PostEvent(const nsAString &eventType, const nsAString &token) = 0;
+ 
+   NS_IMETHOD DispatchEvent(const nsAString &eventType, const nsAString &token) = 0;
+   
+   NS_IMETHOD GetClientAuthRememberService(nsClientAuthRememberService **cars) = 0;
+ 
+   NS_IMETHOD EnsureIdentityInfoLoaded() = 0;
++
++  NS_IMETHOD IsNSSInitialized(PRBool *initialized) = 0;
+ };
+ 
+ NS_DEFINE_STATIC_IID_ACCESSOR(nsINSSComponent, NS_INSSCOMPONENT_IID)
+ 
+ class nsCryptoHash : public nsICryptoHash
+ {
+ public:
+   NS_DECL_ISUPPORTS
+   NS_DECL_NSICRYPTOHASH
+ 
+@@ -268,20 +270,21 @@ public:
+   NS_IMETHOD DownloadCRLDirectly(nsAutoString, nsAutoString);
+   NS_IMETHOD RememberCert(CERTCertificate *cert);
+   static nsresult GetNSSCipherIDFromPrefString(const nsACString &aPrefString, PRUint16 &aCipherId);
+ 
+   NS_IMETHOD LaunchSmartCardThread(SECMODModule *module);
+   NS_IMETHOD ShutdownSmartCardThread(SECMODModule *module);
+   NS_IMETHOD PostEvent(const nsAString &eventType, const nsAString &token);
+   NS_IMETHOD DispatchEvent(const nsAString &eventType, const nsAString &token);
+   NS_IMETHOD GetClientAuthRememberService(nsClientAuthRememberService **cars);
+   NS_IMETHOD EnsureIdentityInfoLoaded();
++  NS_IMETHOD IsNSSInitialized(PRBool *initialized);
+ 
+ private:
+ 
+   nsresult InitializeNSS(PRBool showWarningBox);
+   nsresult ShutdownNSS();
+ 
+ #ifdef XP_MACOSX
+   void TryCFM2MachOMigration(nsIFile *cfmPath, nsIFile *machoPath);
+ #endif
+   
