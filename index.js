@@ -1,17 +1,15 @@
-var bugapi = require('./lib/bugapi'),
-    async = require('async'),
+var gitapi = require('./lib/gitapi'),
     bugs = JSON.parse(require('fs').readFileSync('./data/security_buglist_large.json')).bugs,
     _ = require('lodash'),
-    bugIds = _.map(bugs, function(bug) {
-        return bug.id;
-    });
+    async = require('async'),
+    bugIds = _.slice(_.map(bugs, 'id'), 0, 200);
 
-var delay = function(ms, fn) {
-    setTimeout(fn, ms);
-}
-async.mapSeries(bugIds, bugapi.processBug, function(err) {
-    if (err) {
-        console.error(err);
-    }
-    console.info('all done successfully');
+async.mapLimit(bugIds, 5, function(bugId, cb) {
+    gitapi.searchAndProcessBug(bugId, function(err) {
+        if (err) {
+            console.warn(err);
+            return cb(null, false);
+        }
+        return cb(null, true);
+    });
 });

@@ -31,6 +31,7 @@
     "mkdirp": "0.5.1",
     "mocha": "3.4.1",
     "ora": "1.2.0",
+    "parse-diff": "0.4.0",
     "request": "2.81.0"
   },
   "devDependencies": {
