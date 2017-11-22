@@ -5,16 +5,12 @@ var gitapi = require('./lib/gitapi'),
 
     buggys = _.map(bugs, 'id');
 
-var bugIds = _.slice(buggys, _.indexOf(buggys, 202198), 2000);
+var allCommits = (require('fs').readFileSync('./data/commits.txt')).toString().split('\n');
 
-console.log(_.indexOf(buggys, 315871));
+var allHashes = _.map(allCommits, function(commit) {
+    return commit.split(' ')[0];
+});
 
-async.mapLimit(bugIds, 3, function(bugId, cb) {
-    gitapi.searchAndProcessBug(bugId, function(err) {
-        if (err) {
-            console.warn(err);
-            return cb(null, false);
-        }
-        return cb(null, true);
-    });
+async.mapLimit(allHashes, 3, gitapi.emulateAPIForCommitHash, function(err) {
+    console.log(err);
 });
